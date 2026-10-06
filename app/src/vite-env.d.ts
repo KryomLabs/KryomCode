@@ -1,11 +1,11 @@
-interface IngeniaFileEntry {
+interface FileEntry {
   name: string;
   type: "file" | "directory";
   path: string;
 }
 
 interface Window {
-  ingenia: {
+  kryomcode: {
     version: string;
     selectProject: () => Promise<string | null>;
     readDirectory: (directoryPath: string) => Promise<IngeniaFileEntry[]>;

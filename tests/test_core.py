@@ -1,4 +1,4 @@
-from ingenia import __version__
+from kryomcode import __version__
 
 
 def test_version():

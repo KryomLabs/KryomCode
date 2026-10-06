@@ -62,6 +62,6 @@ coverage/
 out/
 release/
 
-# Ingenia local data
-.ingenia/
+# KryomCode local data
+.kryomcode/
 "@ | Set-Content .gitignore

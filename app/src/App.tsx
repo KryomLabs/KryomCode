@@ -17,14 +17,15 @@ function App() {
     setLoading(true);
 
     try {
-      const selectedPath = await window.ingenia.selectProject();
+      const selectedPath =
+        await window.kryomcode.selectProject();
 
       if (!selectedPath) {
         return;
       }
 
       const directoryEntries =
-        await window.ingenia.readDirectory(selectedPath);
+        await window.kryomcode.readDirectory(selectedPath);
 
       setProjectPath(selectedPath);
       setEntries(directoryEntries);
@@ -34,10 +35,10 @@ function App() {
   }
 
   return (
-    <div className="ingenia">
+    <div className="kryomcode">
       {/* TOP BAR */}
       <header className="topbar">
-        <div className="brand">INGENIA</div>
+        <div className="brand">KRYOMCODE</div>
 
         <nav className="menu">
           <span>File</span>
@@ -72,7 +73,7 @@ function App() {
 
           <div className="editor-content">
             <div className="welcome">
-              <h1>Ingenia</h1>
+              <h1>KryomCode</h1>
 
               <p>
                 AI-Native Software Engineering Environment
@@ -83,7 +84,9 @@ function App() {
                   onClick={openProject}
                   disabled={loading}
                 >
-                  {loading ? "Opening..." : "Open Project"}
+                  {loading
+                    ? "Opening..."
+                    : "Open Project"}
                 </button>
 
                 <button>

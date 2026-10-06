@@ -1,4 +1,4 @@
-contextBridge.exposeInMainWorld("ingenia", {
+contextBridge.exposeInMainWorld("kryomcode", {
   version: "0.1.0",
 
   selectProject: () =>

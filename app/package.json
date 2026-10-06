@@ -1,8 +1,8 @@
 {
-  "name": "ingenia-desktop",
+  "name": "kryomcode-desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "Ingenia - AI-native software engineering environment",
+  "description": "KryomCode - AI-native software engineering environment",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {

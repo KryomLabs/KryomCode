@@ -39,7 +39,7 @@ function FileTree({ entries }: FileTreeProps) {
 
       try {
         const children =
-          await window.ingenia.readDirectory(path);
+          await window.kryomcode.readDirectory(path);
 
         setDirectoryEntries((current) => ({
           ...current,
