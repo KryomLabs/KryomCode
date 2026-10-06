@@ -26,6 +26,9 @@ function createWindow() {
   }
 }
 
+/**
+ * Open a project directory.
+ */
 ipcMain.handle("project:select", async () => {
   const result = await dialog.showOpenDialog({
     properties: ["openDirectory"],
@@ -38,6 +41,9 @@ ipcMain.handle("project:select", async () => {
   return result.filePaths[0];
 });
 
+/**
+ * Read directory contents.
+ */
 ipcMain.handle(
   "project:read-directory",
   async (_event, directoryPath) => {
@@ -61,6 +67,19 @@ ipcMain.handle(
   },
 );
 
+/**
+ * Read a text file.
+ */
+ipcMain.handle(
+  "project:read-file",
+  async (_event, filePath) => {
+    return fs.readFile(filePath, "utf-8");
+  },
+);
+
+/**
+ * Start Electron application.
+ */
 app.whenReady().then(() => {
   createWindow();
 
@@ -71,6 +90,9 @@ app.whenReady().then(() => {
   });
 });
 
+/**
+ * Quit application when all windows are closed.
+ */
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
