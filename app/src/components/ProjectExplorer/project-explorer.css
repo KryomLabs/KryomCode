@@ -1,0 +1,50 @@
+.project-explorer {
+  background: #13161e;
+  border-right: 1px solid #292d36;
+  min-width: 0;
+}
+
+.file-tree {
+  padding: 4px 10px 12px;
+}
+
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #aeb4c0;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tree-item:hover {
+  color: #ffffff;
+  background: #1b1f29;
+}
+
+.tree-arrow {
+  width: 12px;
+  color: #7f8795;
+  text-align: center;
+}
+
+.tree-icon {
+  width: 18px;
+  flex-shrink: 0;
+}
+
+.tree-children {
+  margin-left: 18px;
+  border-left: 1px solid #292d36;
+  padding-left: 5px;
+}
+
+.tree-placeholder {
+  padding: 6px 8px;
+  color: #666e7c;
+  font-size: 11px;
+}
