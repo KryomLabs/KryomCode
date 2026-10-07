@@ -14,6 +14,7 @@
     "desktop:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && npm run electron\""
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

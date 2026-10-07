@@ -1,0 +1,102 @@
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #0d0f14;
+  color: #c9ced8;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 0 10px;
+  border-bottom: 1px solid #292d36;
+  background: #13161e;
+}
+
+.terminal-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #9da5b3;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.terminal-icon {
+  color: #aeb6c4;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.terminal-actions {
+  display: flex;
+  align-items: center;
+}
+
+.terminal-action-button {
+  padding: 4px 8px;
+  border: 1px solid #343a46;
+  border-radius: 4px;
+  background: #1a1e27;
+  color: #9da5b3;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.terminal-action-button:hover {
+  background: #252b36;
+  color: #ffffff;
+}
+
+.terminal-output {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  cursor: text;
+}
+
+.terminal-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.terminal-input-row {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.terminal-prompt {
+  flex-shrink: 0;
+  color: #aeb6c4;
+  white-space: pre-wrap;
+}
+
+.terminal-input {
+  flex: 1;
+  min-width: 0;
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.terminal-input::selection {
+  background: #394150;
+}

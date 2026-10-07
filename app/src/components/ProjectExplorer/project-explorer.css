@@ -2,10 +2,67 @@
   background: #13161e;
   border-right: 1px solid #292d36;
   min-width: 0;
+  overflow: hidden;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 0 10px;
+  border-bottom: 1px solid #292d36;
+  color: #8f97a6;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.project-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.project-action-button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #8f97a6;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.project-action-button:hover {
+  background: #1f2430;
+  color: #ffffff;
+}
+
+.project-action-button:active {
+  background: #292f3b;
+}
+
+.folder-action {
+  font-size: 13px;
+}
+
+.project-name {
+  padding: 10px 12px 6px;
+  color: #d7dbe3;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .file-tree {
   padding: 4px 10px 12px;
+  overflow: auto;
 }
 
 .tree-item {
@@ -30,11 +87,19 @@
   width: 12px;
   color: #7f8795;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .tree-icon {
   width: 18px;
   flex-shrink: 0;
+}
+
+.tree-item > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tree-children {
@@ -47,4 +112,148 @@
   padding: 6px 8px;
   color: #666e7c;
   font-size: 11px;
+}
+
+.empty-tree {
+  padding: 12px;
+  color: #666e7c;
+  font-size: 12px;
+}
+
+/* =========================================================
+ * Create File / Folder
+ * ======================================================= */
+
+.create-item {
+  margin: 4px 8px 8px;
+  padding: 8px;
+  border: 1px solid #343a46;
+  border-radius: 5px;
+  background: #181c25;
+}
+
+.create-item-label {
+  margin-bottom: 6px;
+  color: #c8cdd6;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.create-item input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #3a404c;
+  border-radius: 4px;
+  outline: none;
+  background: #10131a;
+  color: #e5e7eb;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.create-item input::placeholder {
+  color: #5f6673;
+}
+
+.create-item input:focus {
+  border-color: #596273;
+}
+
+.create-item-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.create-item-actions button {
+  flex: 1;
+  min-height: 26px;
+  border: 1px solid #343a46;
+  border-radius: 4px;
+  background: #20252f;
+  color: #cfd4dd;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.create-item-actions button:first-child {
+  background: #2a303b;
+  color: #ffffff;
+}
+
+.create-item-actions button:hover {
+  background: #303642;
+  color: #ffffff;
+}
+
+.create-item-error {
+  margin-top: 7px;
+  color: #e47777;
+  font-size: 10px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.tree-rename-input {
+  min-width: 0;
+  width: 100%;
+  padding: 3px 5px;
+  border: 1px solid #596273;
+  border-radius: 3px;
+  outline: none;
+  background: #10131a;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.tree-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 130px;
+  padding: 4px;
+  border: 1px solid #343a46;
+  border-radius: 5px;
+  background: #181c25;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.tree-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #cfd4dd;
+  text-align: left;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tree-context-menu button:hover {
+  background: #252b36;
+  color: #ffffff;
+}
+
+.tree-context-menu .danger-action {
+  color: #e47777;
+}
+
+.tree-context-menu .danger-action:hover {
+  background: #3a2024;
+  color: #ff9999;
+}
+
+.tree-operation-error {
+  margin: 6px 8px;
+  padding: 7px;
+  border: 1px solid #4b292d;
+  border-radius: 4px;
+  background: #24171a;
+  color: #e47777;
+  font-size: 10px;
+  line-height: 1.4;
 }

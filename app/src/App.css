@@ -1,3 +1,12 @@
+/* =========================================================
+   KRYOMCODE
+   v0.1.0 APPLICATION STYLES
+   ========================================================= */
+
+/* =========================================================
+   GLOBAL
+   ========================================================= */
+
 * {
   box-sizing: border-box;
 }
@@ -8,6 +17,7 @@ body,
   width: 100%;
   height: 100%;
   margin: 0;
+  padding: 0;
 }
 
 body {
@@ -19,106 +29,256 @@ body {
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
+
+  background: #0f1117;
+  color: #e6e9ef;
+
+  overflow: hidden;
 }
 
 button {
   font: inherit;
 }
 
+button:focus-visible {
+  outline: 1px solid #7aa2f7;
+  outline-offset: 2px;
+}
+
+/* =========================================================
+   ROOT APPLICATION
+   ========================================================= */
+
 .kryomcode {
   display: grid;
-  grid-template-rows: 48px 1fr 34px;
+
+  /*
+   * Topbar
+   * Workspace
+   * Bottom bar
+   */
+  grid-template-rows:
+    48px
+    minmax(0, 1fr)
+    34px;
+
   width: 100%;
   height: 100%;
+
   overflow: hidden;
+
   background: #0f1117;
   color: #e6e9ef;
 }
 
+/* =========================================================
+   TOP BAR
+   ========================================================= */
+
 .topbar {
   display: flex;
   align-items: center;
+
+  min-width: 0;
+
   border-bottom: 1px solid #292d36;
+
   background: #151821;
 }
 
+/* ---------------------------------------------------------
+   Brand
+   --------------------------------------------------------- */
+
 .brand {
+  display: flex;
+  align-items: center;
+
   width: 180px;
+  min-width: 180px;
+
   padding-left: 18px;
+
   font-size: 14px;
   font-weight: 700;
+
   letter-spacing: 1.5px;
+
+  color: #ffffff;
 }
+
+/* ---------------------------------------------------------
+   Menu
+   --------------------------------------------------------- */
 
 .menu {
   display: flex;
-  gap: 24px;
+  align-items: center;
+
+  gap: 4px;
+
+  height: 100%;
+
   font-size: 13px;
-  color: #aeb4c0;
 }
 
-.menu span {
+.menu button {
+  height: 100%;
+
+  padding: 0 10px;
+
+  border: none;
+
+  background: transparent;
+
+  color: #aeb4c0;
+
   cursor: pointer;
 }
 
-.menu span:hover {
+.menu button:hover {
+  background: #1d212b;
   color: #ffffff;
 }
+
+.menu button:active {
+  background: #242936;
+}
+
+/* ---------------------------------------------------------
+   Topbar status
+   --------------------------------------------------------- */
 
 .topbar-status {
   display: flex;
   align-items: center;
+
   gap: 7px;
+
   margin-left: auto;
   margin-right: 18px;
+
   font-size: 12px;
+
   color: #9ca3af;
+
+  white-space: nowrap;
 }
 
 .status-dot {
   width: 7px;
   height: 7px;
+
   border-radius: 50%;
+
   background: #4ade80;
+
+  box-shadow:
+    0 0 5px rgba(74, 222, 128, 0.35);
 }
+
+.status-dot.saving {
+  background: #facc15;
+
+  box-shadow:
+    0 0 5px rgba(250, 204, 21, 0.35);
+}
+
+.status-dot.error {
+  background: #f87171;
+
+  box-shadow:
+    0 0 5px rgba(248, 113, 113, 0.35);
+}
+
+/* =========================================================
+   MAIN WORKSPACE
+   ========================================================= */
 
 .workspace {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 300px;
+
+  grid-template-columns:
+    220px
+    minmax(0, 1fr)
+    300px;
+
+  min-width: 0;
   min-height: 0;
+
+  overflow: hidden;
 }
 
-.sidebar,
-.planner {
-  background: #13161e;
-}
+/* =========================================================
+   SIDEBAR / PROJECT EXPLORER
+   ========================================================= */
 
 .sidebar {
+  min-width: 0;
+  min-height: 0;
+
+  background: #13161e;
+
   border-right: 1px solid #292d36;
+
+  overflow: auto;
 }
 
-.planner {
-  border-left: 1px solid #292d36;
+/*
+ * ProjectExplorer may use its own root container.
+ * These styles provide compatible defaults.
+ */
+
+.project-explorer {
+  min-width: 0;
+  min-height: 0;
+
+  height: 100%;
+
+  background: #13161e;
+
+  border-right: 1px solid #292d36;
+
+  overflow: auto;
 }
 
 .panel-title {
   padding: 14px 16px 10px;
+
   font-size: 11px;
   font-weight: 700;
+
   letter-spacing: 1px;
+
   color: #7f8795;
 }
 
 .project-name {
   padding: 8px 16px;
+
   font-size: 13px;
   font-weight: 600;
+
+  color: #d7dae0;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+
+  white-space: nowrap;
 }
 
+/* =========================================================
+   FILE TREE
+   ========================================================= */
+
 .tree {
-  padding: 4px 16px;
+  padding: 4px 12px;
+
   color: #aeb4c0;
+
   font-size: 13px;
+
   line-height: 30px;
 }
 
@@ -130,164 +290,816 @@ button {
   color: #ffffff;
 }
 
-.editor {
-  min-width: 0;
-  background: #0d0f14;
-}
-
-.editor-tabs {
-  height: 38px;
-  border-bottom: 1px solid #292d36;
-  background: #11141b;
-}
-
-.editor-tab {
-  display: inline-flex;
+.tree-item {
+  display: flex;
   align-items: center;
-  height: 38px;
-  padding: 0 18px;
-  border-right: 1px solid #292d36;
+
+  gap: 7px;
+
+  min-width: 0;
+
+  padding: 5px 4px;
+
+  border-radius: 4px;
+
+  color: #aeb4c0;
+
+  font-size: 13px;
+
+  cursor: pointer;
+
+  user-select: none;
+}
+
+.tree-item:hover {
+  background: #1d212b;
+
+  color: #ffffff;
+}
+
+.tree-item.active {
+  background: #242936;
+
+  color: #ffffff;
+}
+
+.tree-icon {
+  display: inline-flex;
+
+  align-items: center;
+  justify-content: center;
+
+  width: 18px;
+  min-width: 18px;
+
+  color: #7f8795;
+}
+
+.tree-item-name {
+  min-width: 0;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+
+  white-space: nowrap;
+}
+
+.empty-tree {
+  padding: 12px 16px;
+
+  color: #6f7785;
+
   font-size: 12px;
 }
 
-.editor-tab.active {
-  color: #ffffff;
-  background: #0d0f14;
-}
+/* =========================================================
+   PLANNER / PROJECT INTELLIGENCE
+   ========================================================= */
 
-.editor-content {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: calc(100% - 38px);
-}
+.planner {
+  min-width: 0;
+  min-height: 0;
 
-.welcome {
-  text-align: center;
-}
+  background: #13161e;
 
-.welcome h1 {
-  margin: 0 0 8px;
-  font-size: 38px;
-  letter-spacing: -1px;
-}
+  border-left: 1px solid #292d36;
 
-.welcome p {
-  margin: 0 0 24px;
-  color: #8e96a5;
-}
-
-.welcome-actions {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-}
-
-.welcome-actions button,
-.ai-button {
-  border: 1px solid #343946;
-  border-radius: 6px;
-  padding: 9px 14px;
-  background: #1b1f29;
-  color: #e6e9ef;
-  cursor: pointer;
-}
-
-.welcome-actions button:hover,
-.ai-button:hover {
-  background: #242936;
+  overflow: auto;
 }
 
 .planner-section {
   padding: 8px 16px 18px;
+
   border-bottom: 1px solid #292d36;
 }
 
 .planner-section h3 {
   margin: 4px 0 12px;
+
   font-size: 13px;
+  font-weight: 600;
+
+  color: #d7dae0;
 }
 
+/* =========================================================
+   PROJECT PLAN ITEMS
+   ========================================================= */
+
 .plan-item {
-  padding: 7px 0;
+  display: block;
+
+  width: 100%;
+
+  padding: 7px 8px;
+
+  border: none;
+  border-radius: 4px;
+
+  background: transparent;
+
   color: #9ca3af;
+
   font-size: 12px;
+
+  text-align: left;
+
+  cursor: pointer;
 }
+
+.plan-item:hover {
+  background: #1d212b;
+
+  color: #ffffff;
+}
+
+.plan-item.active {
+  background: #242936;
+
+  color: #ffffff;
+}
+
+/* =========================================================
+   AI BUTTONS
+   ========================================================= */
 
 .ai-button {
   display: block;
+
   width: 100%;
+
   margin-bottom: 8px;
+
+  padding: 9px 14px;
+
+  border: 1px solid #343946;
+
+  border-radius: 6px;
+
+  background: #1b1f29;
+
+  color: #e6e9ef;
+
+  cursor: pointer;
+
   text-align: left;
+
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.ai-button:hover {
+  background: #242936;
+
+  border-color: #414756;
+}
+
+.ai-button:active {
+  background: #2b303c;
 }
 
 .ai-button.secondary {
   color: #aeb4c0;
 }
 
-.bottom-panel {
+/* =========================================================
+   INTELLIGENCE STATE
+   ========================================================= */
+
+.intelligence-state {
+  padding: 9px 10px;
+
+  border: 1px solid #292d36;
+
+  border-radius: 5px;
+
+  background: #10131a;
+
+  color: #8e96a5;
+
+  font-size: 12px;
+
+  text-transform: capitalize;
+}
+
+/* =========================================================
+   EDITOR
+   ========================================================= */
+
+.editor {
   display: flex;
+
+  flex-direction: column;
+
+  min-width: 0;
+  min-height: 0;
+
+  background: #0d0f14;
+
+  overflow: hidden;
+}
+
+/* =========================================================
+   EDITOR TABS
+   ========================================================= */
+
+.editor-tabs {
+  display: flex;
+
+  align-items: stretch;
+
+  flex: 0 0 38px;
+
+  min-width: 0;
+
+  height: 38px;
+
+  border-bottom: 1px solid #292d36;
+
+  background: #11141b;
+
+  overflow-x: auto;
+  overflow-y: hidden;
+
+  scrollbar-width: thin;
+}
+
+/*
+ * Individual editor tab
+ */
+
+.editor-tab {
+  display: inline-flex;
+
   align-items: center;
-  gap: 24px;
-  padding: 0 14px;
-  border-top: 1px solid #292d36;
+
+  justify-content: space-between;
+
+  gap: 8px;
+
+  min-width: 130px;
+  max-width: 240px;
+
+  height: 38px;
+
+  padding: 0 8px 0 14px;
+
+  border: none;
+
+  border-right: 1px solid #292d36;
+
   background: #151821;
-  color: #8f97a5;
-  font-size: 11px;
-}
 
-.bottom-panel div {
+  color: #8e96a5;
+
+  font-size: 12px;
+
+  text-align: left;
+
   cursor: pointer;
+
+  user-select: none;
+
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
-.bottom-panel div:hover {
+.editor-tab:hover {
+  background: #1b1f29;
+
+  color: #d7dae0;
+}
+
+.editor-tab.active {
+  background: #0d0f14;
+
+  color: #ffffff;
+
+  box-shadow:
+    inset 0 2px 0 #7aa2f7;
+}
+
+/*
+ * Tab name
+ */
+
+.editor-tab-name {
+  min-width: 0;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+
+  white-space: nowrap;
+}
+
+/*
+ * Dirty indicator
+ */
+
+.editor-dirty-indicator {
+  color: #facc15;
+}
+
+/*
+ * Tab close button
+ */
+
+.editor-tab-close {
+  display: inline-flex;
+
+  align-items: center;
+  justify-content: center;
+
+  flex: 0 0 20px;
+
+  width: 20px;
+  height: 20px;
+
+  padding: 0;
+
+  border: none;
+  border-radius: 4px;
+
+  background: transparent;
+
+  color: #737b89;
+
+  font-size: 16px;
+
+  line-height: 1;
+
+  cursor: pointer;
+
+  opacity: 0;
+
+  transition:
+    opacity 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.editor-tab:hover .editor-tab-close,
+.editor-tab.active .editor-tab-close {
+  opacity: 1;
+}
+
+.editor-tab-close:hover {
+  background: #2a2f3a;
+
   color: #ffffff;
 }
 
-.bottom-panel strong {
-  margin-left: 4px;
-  color: #4ade80;
+/* =========================================================
+   EDITOR CONTENT
+   ========================================================= */
+
+.editor-content {
+  position: relative;
+
+  flex: 1 1 auto;
+
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+
+  background: #0d0f14;
 }
 
-.empty-tree {
-  padding: 12px 0;
+/*
+ * Monaco itself should occupy full editor area.
+ */
+
+.editor-content > div {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* =========================================================
+   WELCOME SCREEN
+   ========================================================= */
+
+.welcome {
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+  justify-content: center;
+
+  width: 100%;
+  height: 100%;
+
+  padding: 32px;
+
+  text-align: center;
+}
+
+.welcome h1 {
+  margin: 0 0 8px;
+
+  font-size: 38px;
+  font-weight: 700;
+
+  letter-spacing: -1px;
+
+  color: #ffffff;
+}
+
+.welcome h2 {
+  margin: 0 0 8px;
+
+  font-size: 20px;
+  font-weight: 600;
+
+  color: #d7dae0;
+}
+
+.welcome p {
+  max-width: 560px;
+
+  margin: 0 0 24px;
+
+  color: #8e96a5;
+
+  line-height: 1.6;
+}
+
+/* =========================================================
+   WELCOME ACTIONS
+   ========================================================= */
+
+.welcome-actions {
+  display: flex;
+
+  justify-content: center;
+
+  gap: 10px;
+}
+
+.welcome-actions button {
+  border: 1px solid #343946;
+
+  border-radius: 6px;
+
+  padding: 9px 14px;
+
+  background: #1b1f29;
+
+  color: #e6e9ef;
+
+  cursor: pointer;
+
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.welcome-actions button:hover:not(:disabled) {
+  background: #242936;
+
+  border-color: #414756;
+}
+
+.welcome-actions button:disabled {
+  cursor: not-allowed;
+
+  opacity: 0.45;
+}
+
+/* =========================================================
+   WELCOME SHORTCUTS
+   ========================================================= */
+
+.welcome-shortcuts {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 8px;
+
+  margin-top: 28px;
+
   color: #6f7785;
+
   font-size: 12px;
 }
 
-.tree-item {
+.welcome-shortcuts div {
   display: flex;
+
   align-items: center;
-  gap: 7px;
-  padding: 5px 0;
+
+  justify-content: space-between;
+
+  gap: 30px;
+}
+
+.welcome-shortcuts kbd {
+  min-width: 90px;
+
+  padding: 3px 7px;
+
+  border: 1px solid #343946;
+
+  border-radius: 4px;
+
+  background: #151821;
+
   color: #aeb4c0;
-  font-size: 13px;
+
+  font-family:
+    "Cascadia Code",
+    "Consolas",
+    monospace;
+
+  font-size: 11px;
+}
+
+/* =========================================================
+   EDITOR ERROR
+   ========================================================= */
+
+.editor-error h2 {
+  color: #f87171;
+}
+
+.editor-error p {
+  color: #9ca3af;
+}
+
+/* =========================================================
+   BOTTOM PANEL
+   ========================================================= */
+
+/*
+ * Expanded panel shown above the bottom bar.
+ */
+
+.bottom-panel-content {
+  display: flex;
+
+  flex-direction: column;
+
+  min-height: 180px;
+  max-height: 320px;
+
+  border-top: 1px solid #292d36;
+
+  background: #11141b;
+
+  color: #aeb4c0;
+}
+
+.bottom-panel-header {
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  height: 36px;
+
+  padding: 0 12px;
+
+  border-bottom: 1px solid #292d36;
+
+  color: #8e96a5;
+
+  font-size: 11px;
+
+  letter-spacing: 0.5px;
+}
+
+.bottom-panel-header button {
+  width: 24px;
+  height: 24px;
+
+  padding: 0;
+
+  border: none;
+  border-radius: 4px;
+
+  background: transparent;
+
+  color: #737b89;
+
+  font-size: 17px;
+
   cursor: pointer;
 }
 
-.tree-item:hover {
+.bottom-panel-header button:hover {
+  background: #242936;
+
   color: #ffffff;
 }
 
-.tree-icon {
-  width: 18px;
+.bottom-panel-body {
+  flex: 1;
+
+  padding: 14px;
+
+  overflow: auto;
+
+  font-size: 12px;
+
+  color: #8e96a5;
 }
+
+/* =========================================================
+   BOTTOM STATUS BAR
+   ========================================================= */
+
+.kryomcode > .bottom-panel {
+  display: flex;
+
+  align-items: center;
+
+  gap: 4px;
+
+  min-width: 0;
+
+  padding: 0 10px;
+
+  border-top: 1px solid #292d36;
+
+  background: #151821;
+
+  color: #8f97a5;
+
+  font-size: 11px;
+
+  overflow: hidden;
+}
+
+.kryomcode > .bottom-panel button {
+  height: 100%;
+
+  padding: 0 8px;
+
+  border: none;
+
+  background: transparent;
+
+  color: #8f97a5;
+
+  font-size: 11px;
+
+  cursor: pointer;
+}
+
+.kryomcode > .bottom-panel button:hover {
+  background: #1d212b;
+
+  color: #ffffff;
+}
+
+.kryomcode > .bottom-panel button.active {
+  background: #242936;
+
+  color: #ffffff;
+}
+
+.kryomcode > .bottom-panel strong {
+  margin-left: 4px;
+
+  color: #4ade80;
+}
+
+/* =========================================================
+   CODE PREVIEW
+   ========================================================= */
 
 .code-preview {
   width: 100%;
   height: 100%;
+
   margin: 0;
+
   padding: 20px 24px;
+
   overflow: auto;
+
   background: #0d0f14;
+
   color: #d7dae0;
+
   font-family:
     "Cascadia Code",
     "Consolas",
     "Courier New",
     monospace;
+
   font-size: 13px;
+
   line-height: 1.6;
+
   text-align: left;
+
   white-space: pre;
+}
+
+/* =========================================================
+   SCROLLBARS
+   ========================================================= */
+
+.editor-tabs::-webkit-scrollbar,
+.sidebar::-webkit-scrollbar,
+.project-explorer::-webkit-scrollbar,
+.planner::-webkit-scrollbar,
+.bottom-panel-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.editor-tabs::-webkit-scrollbar-track,
+.sidebar::-webkit-scrollbar-track,
+.project-explorer::-webkit-scrollbar-track,
+.planner::-webkit-scrollbar-track,
+.bottom-panel-body::-webkit-scrollbar-track {
+  background: #10131a;
+}
+
+.editor-tabs::-webkit-scrollbar-thumb,
+.sidebar::-webkit-scrollbar-thumb,
+.project-explorer::-webkit-scrollbar-thumb,
+.planner::-webkit-scrollbar-thumb,
+.bottom-panel-body::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+
+  background: #292d36;
+}
+
+.editor-tabs::-webkit-scrollbar-thumb:hover,
+.sidebar::-webkit-scrollbar-thumb:hover,
+.project-explorer::-webkit-scrollbar-thumb:hover,
+.planner::-webkit-scrollbar-thumb:hover,
+.bottom-panel-body::-webkit-scrollbar-thumb:hover {
+  background: #3a404c;
+}
+
+/* =========================================================
+   RESPONSIVE WORKSPACE
+   ========================================================= */
+
+@media (max-width: 1200px) {
+  .workspace {
+    grid-template-columns:
+      200px
+      minmax(0, 1fr)
+      260px;
+  }
+
+  .brand {
+    width: 160px;
+    min-width: 160px;
+  }
+
+  .menu {
+    gap: 0;
+  }
+}
+
+@media (max-width: 950px) {
+  .workspace {
+    grid-template-columns:
+      190px
+      minmax(0, 1fr);
+  }
+
+  .planner {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .workspace {
+    grid-template-columns:
+      170px
+      minmax(0, 1fr);
+  }
+
+  .brand {
+    width: 130px;
+    min-width: 130px;
+
+    padding-left: 12px;
+
+    font-size: 12px;
+  }
+
+  .menu button {
+    padding: 0 6px;
+
+    font-size: 11px;
+  }
+
+  .topbar-status {
+    display: none;
+  }
 }
