@@ -7,7 +7,15 @@ interface FileEntry {
 interface Window {
   kryomcode: {
     version: string;
+
     selectProject: () => Promise<string | null>;
-    readDirectory: (directoryPath: string) => Promise<IngeniaFileEntry[]>;
+
+    readDirectory: (
+      directoryPath: string,
+    ) => Promise<FileEntry[]>;
+
+    readFile: (
+      filePath: string,
+    ) => Promise<string>;
   };
 }

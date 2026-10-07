@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
 interface FileEntry {
   name: string;
@@ -8,9 +8,13 @@ interface FileEntry {
 
 interface FileTreeProps {
   entries: FileEntry[];
+  onFileSelect: (file: FileEntry) => void;
 }
 
-function FileTree({ entries }: FileTreeProps) {
+function FileTree({
+  entries,
+  onFileSelect,
+}: FileTreeProps) {
   const [expandedPaths, setExpandedPaths] = useState<string[]>(
     [],
   );
@@ -35,7 +39,10 @@ function FileTree({ entries }: FileTreeProps) {
     }
 
     if (!directoryEntries[path]) {
-      setLoadingPaths((current) => [...current, path]);
+      setLoadingPaths((current) => [
+        ...current,
+        path,
+      ]);
 
       try {
         const children =
@@ -61,20 +68,29 @@ function FileTree({ entries }: FileTreeProps) {
   function renderEntries(
     items: FileEntry[],
     depth = 0,
-  ): React.ReactNode {
+  ): ReactNode {
     return items.map((entry) => {
-      const isDirectory = entry.type === "directory";
-      const isExpanded = expandedPaths.includes(entry.path);
-      const isLoading = loadingPaths.includes(entry.path);
+      const isDirectory =
+        entry.type === "directory";
+
+      const isExpanded =
+        expandedPaths.includes(entry.path);
+
+      const isLoading =
+        loadingPaths.includes(entry.path);
 
       return (
         <div key={entry.path}>
           <div
             className="tree-item"
-            style={{ paddingLeft: `${6 + depth * 16}px` }}
+            style={{
+              paddingLeft: `${6 + depth * 16}px`,
+            }}
             onClick={() => {
               if (isDirectory) {
                 void toggleDirectory(entry.path);
+              } else {
+                onFileSelect(entry);
               }
             }}
           >

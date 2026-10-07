@@ -85,6 +85,20 @@ app.whenReady().then(() => {
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
+      const window = new BrowserWindow({
+  width: 1440,
+  height: 900,
+  minWidth: 1100,
+  minHeight: 700,
+
+  webPreferences: {
+    preload: path.join(__dirname, "preload.cjs"),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+  },
+});
+
       createWindow();
     }
   });

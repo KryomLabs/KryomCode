@@ -10,11 +10,13 @@ interface FileEntry {
 interface ProjectExplorerProps {
   projectPath: string | null;
   entries: FileEntry[];
+  onFileSelect: (file: FileEntry) => void;
 }
 
 function ProjectExplorer({
   projectPath,
   entries,
+  onFileSelect,
 }: ProjectExplorerProps) {
   const projectName = projectPath
     ? projectPath.split("\\").pop() ?? "Project"
@@ -22,13 +24,18 @@ function ProjectExplorer({
 
   return (
     <aside className="project-explorer">
-      <div className="panel-title">PROJECT</div>
+      <div className="panel-title">
+        PROJECT
+      </div>
 
       <div className="project-name">
         {projectName}
       </div>
 
-      <FileTree entries={entries} />
+      <FileTree
+        entries={entries}
+        onFileSelect={onFileSelect}
+      />
     </aside>
   );
 }

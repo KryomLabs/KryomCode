@@ -9,9 +9,23 @@ interface FileEntry {
 }
 
 function App() {
-  const [projectPath, setProjectPath] = useState<string | null>(null);
-  const [entries, setEntries] = useState<FileEntry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [projectPath, setProjectPath] =
+    useState<string | null>(null);
+
+  const [entries, setEntries] =
+    useState<FileEntry[]>([]);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [activeFile, setActiveFile] =
+    useState<FileEntry | null>(null);
+
+  const [fileContent, setFileContent] =
+    useState("");
+
+  const [fileLoading, setFileLoading] =
+    useState(false);
 
   async function openProject() {
     setLoading(true);
@@ -25,20 +39,53 @@ function App() {
       }
 
       const directoryEntries =
-        await window.kryomcode.readDirectory(selectedPath);
+        await window.kryomcode.readDirectory(
+          selectedPath,
+        );
 
       setProjectPath(selectedPath);
       setEntries(directoryEntries);
+      setActiveFile(null);
+      setFileContent("");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function openFile(file: FileEntry) {
+    setFileLoading(true);
+
+    try {
+      const content =
+        await window.kryomcode.readFile(
+          file.path,
+        );
+
+      setActiveFile(file);
+      setFileContent(content);
+    } catch (error) {
+      console.error(
+        "Failed to read file:",
+        error,
+      );
+
+      setActiveFile(file);
+      setFileContent(
+        "Unable to read this file.",
+      );
+    } finally {
+      setFileLoading(false);
     }
   }
 
   return (
     <div className="kryomcode">
       {/* TOP BAR */}
+
       <header className="topbar">
-        <div className="brand">KRYOMCODE</div>
+        <div className="brand">
+          KRYOMCODE
+        </div>
 
         <nav className="menu">
           <span>File</span>
@@ -55,49 +102,64 @@ function App() {
         </div>
       </header>
 
-      {/* MAIN WORKSPACE */}
+      {/* WORKSPACE */}
+
       <main className="workspace">
-        {/* PROJECT EXPLORER */}
         <ProjectExplorer
           projectPath={projectPath}
           entries={entries}
+          onFileSelect={openFile}
         />
 
-        {/* CODE EDITOR */}
+        {/* EDITOR */}
+
         <section className="editor">
           <div className="editor-tabs">
             <div className="editor-tab active">
-              Welcome
+              {activeFile
+                ? activeFile.name
+                : "Welcome"}
             </div>
           </div>
 
           <div className="editor-content">
-            <div className="welcome">
-              <h1>KryomCode</h1>
-
-              <p>
-                AI-Native Software Engineering Environment
-              </p>
-
-              <div className="welcome-actions">
-                <button
-                  onClick={openProject}
-                  disabled={loading}
-                >
-                  {loading
-                    ? "Opening..."
-                    : "Open Project"}
-                </button>
-
-                <button>
-                  New Project
-                </button>
+            {fileLoading ? (
+              <div className="welcome">
+                <h2>Loading file...</h2>
               </div>
-            </div>
+            ) : activeFile ? (
+              <pre className="code-preview">
+                {fileContent}
+              </pre>
+            ) : (
+              <div className="welcome">
+                <h1>KryomCode</h1>
+
+                <p>
+                  AI-Native Software Engineering Environment
+                </p>
+
+                <div className="welcome-actions">
+                  <button
+                    onClick={openProject}
+                    disabled={loading}
+                  >
+                    {loading
+                      ? "Opening..."
+                      : "Open Project"}
+                  </button>
+
+                  <button>
+                    New Project
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
         {/* PROJECT INTELLIGENCE */}
+
         <aside className="planner">
           <div className="panel-title">
             PROJECT INTELLIGENCE
@@ -142,6 +204,7 @@ function App() {
       </main>
 
       {/* BOTTOM PANEL */}
+
       <footer className="bottom-panel">
         <div>
           Problems <strong>0</strong>
