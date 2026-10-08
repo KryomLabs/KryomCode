@@ -1,0 +1,339 @@
+/* =========================================================
+   KryomCode — Problems Panel
+   v0.1.0
+   ========================================================= */
+
+.problems-panel {
+  display: flex;
+  flex-direction: column;
+
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+
+  background: #0d0f14;
+  color: #c9ced8;
+}
+
+/* =========================================================
+   Header
+   ========================================================= */
+
+.problems-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  flex-shrink: 0;
+
+  min-height: 34px;
+  padding: 0 10px;
+
+  border-bottom: 1px solid #292d36;
+
+  background: #13161e;
+}
+
+.problems-title {
+  display: flex;
+  align-items: center;
+
+  min-width: 0;
+
+  gap: 7px;
+
+  color: #9da5b3;
+
+  font-size: 11px;
+  font-weight: 700;
+
+  letter-spacing: 0.08em;
+
+  user-select: none;
+}
+
+.problems-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-width: 18px;
+  height: 17px;
+
+  padding: 0 5px;
+
+  border-radius: 9px;
+
+  background: #252a34;
+  color: #aeb6c4;
+
+  font-size: 10px;
+  font-weight: 600;
+
+  letter-spacing: 0;
+
+  line-height: 1;
+}
+
+.problems-summary {
+  display: flex;
+  align-items: center;
+
+  flex-shrink: 0;
+
+  gap: 10px;
+
+  font-size: 10px;
+  font-weight: 500;
+
+  user-select: none;
+}
+
+.problems-summary-item {
+  white-space: nowrap;
+}
+
+.problems-summary-item.error {
+  color: #e06c75;
+}
+
+.problems-summary-item.warning {
+  color: #d9b65d;
+}
+
+.problems-summary-item.info {
+  color: #61afef;
+}
+
+/* =========================================================
+   Problems Content
+   ========================================================= */
+
+.problems-content {
+  flex: 1;
+
+  min-width: 0;
+  min-height: 0;
+
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  scrollbar-width: thin;
+}
+
+/* =========================================================
+   Empty State
+   ========================================================= */
+
+.problems-empty {
+  display: flex;
+  align-items: center;
+
+  min-height: 48px;
+
+  padding: 0 12px;
+
+  color: #777f8d;
+
+  font-family:
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
+  font-size: 12px;
+  line-height: 1.4;
+
+  user-select: none;
+}
+
+/* =========================================================
+   Problem Item
+   ========================================================= */
+
+.problem-item {
+  display: flex;
+  align-items: flex-start;
+
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+
+  padding: 8px 12px;
+
+  border: 0;
+  border-bottom: 1px solid #1d2028;
+
+  outline: none;
+
+  background: transparent;
+  color: inherit;
+
+  text-align: left;
+
+  font-family:
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
+  cursor: pointer;
+
+  box-sizing: border-box;
+}
+
+.problem-item:hover {
+  background: #171a22;
+}
+
+.problem-item:active {
+  background: #1c2029;
+}
+
+/*
+ * Keyboard accessibility.
+ */
+.problem-item:focus-visible {
+  background: #171a22;
+
+  box-shadow:
+    inset 2px 0 0 #61afef;
+}
+
+/* =========================================================
+   Severity
+   ========================================================= */
+
+.problem-severity {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  flex-shrink: 0;
+
+  width: 18px;
+  height: 18px;
+
+  margin-right: 8px;
+
+  border-radius: 50%;
+
+  font-size: 12px;
+  font-weight: 700;
+
+  line-height: 1;
+}
+
+.problem-severity.error {
+  color: #e06c75;
+}
+
+.problem-severity.warning {
+  color: #d9b65d;
+}
+
+.problem-severity.info {
+  color: #61afef;
+}
+
+/* =========================================================
+   Problem Details
+   ========================================================= */
+
+.problem-details {
+  display: flex;
+  flex-direction: column;
+
+  min-width: 0;
+  flex: 1;
+
+  gap: 4px;
+}
+
+.problem-message {
+  min-width: 0;
+
+  overflow: hidden;
+
+  color: #c9ced8;
+
+  font-size: 12px;
+  font-weight: 400;
+
+  line-height: 1.4;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problem-location {
+  display: flex;
+  align-items: center;
+
+  min-width: 0;
+
+  gap: 8px;
+
+  overflow: hidden;
+
+  color: #777f8d;
+
+  font-family:
+    Consolas,
+    "Cascadia Mono",
+    "Courier New",
+    monospace;
+
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.problem-location span {
+  min-width: 0;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   Scrollbar
+   ========================================================= */
+
+.problems-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.problems-content::-webkit-scrollbar-track {
+  background: #0d0f14;
+}
+
+.problems-content::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+
+  background: #292d36;
+}
+
+.problems-content::-webkit-scrollbar-thumb:hover {
+  background: #3a404c;
+}
+
+/* =========================================================
+   Responsive Header
+   ========================================================= */
+
+@media (max-width: 700px) {
+  .problems-header {
+    padding: 0 8px;
+  }
+
+  .problems-summary {
+    gap: 7px;
+  }
+
+  .problem-item {
+    padding: 8px 10px;
+  }
+}

@@ -9,34 +9,194 @@ const fs = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
 
+const {
+  startTests,
+  stopTests,
+  stopTestsForProject,
+  cleanup: cleanupTestRunner,
+} = require("./services/test-runner.cjs");
+
 const isDev = !app.isPackaged;
+
+let mainWindow = null;
+
+let currentProjectPath = null;
 
 let terminalProcess = null;
 let terminalProjectPath = null;
 
 /**
+ * =========================================================
+ * Utility / Security Helpers
+ * =========================================================
+ */
+
+/**
+ * Normalize a filesystem path.
+ */
+function normalizePath(targetPath) {
+  return path.resolve(targetPath);
+}
+
+/**
+ * Check whether targetPath is inside
+ * the selected project directory.
+ *
+ * The project root itself is allowed.
+ */
+function isPathInsideProject(
+  projectPath,
+  targetPath,
+) {
+  const normalizedProject =
+    normalizePath(projectPath);
+
+  const normalizedTarget =
+    normalizePath(targetPath);
+
+  if (
+    normalizedTarget ===
+    normalizedProject
+  ) {
+    return true;
+  }
+
+  const relativePath =
+    path.relative(
+      normalizedProject,
+      normalizedTarget,
+    );
+
+  return (
+    relativePath !== "" &&
+    !relativePath.startsWith(
+      `..${path.sep}`,
+    ) &&
+    relativePath !== ".." &&
+    !path.isAbsolute(
+      relativePath,
+    )
+  );
+}
+
+/**
+ * Require an active project.
+ */
+function requireProject() {
+  if (!currentProjectPath) {
+    throw new Error(
+      "No project is open.",
+    );
+  }
+
+  return currentProjectPath;
+}
+
+/**
+ * Validate that a path belongs to
+ * the currently opened project.
+ */
+function requireProjectPath(
+  targetPath,
+) {
+  const projectPath =
+    requireProject();
+
+  if (
+    typeof targetPath !==
+      "string" ||
+    targetPath.trim() === ""
+  ) {
+    throw new Error(
+      "A valid filesystem path is required.",
+    );
+  }
+
+  if (
+    !isPathInsideProject(
+      projectPath,
+      targetPath,
+    )
+  ) {
+    throw new Error(
+      "Access denied: path is outside the opened project.",
+    );
+  }
+
+  return normalizePath(
+    targetPath,
+  );
+}
+
+/**
+ * Send an IPC event to the renderer
+ * only when the window is still alive.
+ */
+function sendToRenderer(
+  window,
+  channel,
+  ...args
+) {
+  if (
+    !window ||
+    window.isDestroyed()
+  ) {
+    return;
+  }
+
+  window.webContents.send(
+    channel,
+    ...args,
+  );
+}
+
+/**
+ * =========================================================
+ * Main Window
+ * =========================================================
+ */
+
+/**
  * Create the main application window.
  */
 function createWindow() {
-  const window = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1100,
-    minHeight: 700,
+  mainWindow =
+    new BrowserWindow({
+      width: 1440,
+      height: 900,
 
-    webPreferences: {
-      preload: path.join(__dirname, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
+      minWidth: 1100,
+      minHeight: 700,
+
+      webPreferences: {
+        preload: path.join(
+          __dirname,
+          "preload.cjs",
+        ),
+
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+
+  mainWindow.on(
+    "closed",
+    () => {
+      mainWindow = null;
     },
-  });
+  );
 
   if (isDev) {
-    window.loadURL("http://localhost:5173");
+    void mainWindow.loadURL(
+      "http://localhost:5173",
+    );
   } else {
-    window.loadFile(
-      path.join(__dirname, "../dist/index.html"),
+    void mainWindow.loadFile(
+      path.join(
+        __dirname,
+        "../dist/index.html",
+      ),
     );
   }
 }
@@ -55,7 +215,9 @@ ipcMain.handle(
   async () => {
     const result =
       await dialog.showOpenDialog({
-        properties: ["openDirectory"],
+        properties: [
+          "openDirectory",
+        ],
       });
 
     if (
@@ -65,7 +227,41 @@ ipcMain.handle(
       return null;
     }
 
-    return result.filePaths[0];
+    const selectedPath =
+      normalizePath(
+        result.filePaths[0],
+      );
+
+    /*
+     * Stop the previous terminal when
+     * switching to another project.
+     */
+    if (
+      terminalProcess &&
+      terminalProjectPath !==
+        selectedPath
+    ) {
+      stopTerminalProcess();
+    }
+
+    /*
+     * Stop tests associated with the
+     * previously opened project.
+     */
+    if (
+      currentProjectPath &&
+      currentProjectPath !==
+        selectedPath
+    ) {
+      stopTestsForProject(
+        currentProjectPath,
+      );
+    }
+
+    currentProjectPath =
+      selectedPath;
+
+    return selectedPath;
   },
 );
 
@@ -78,9 +274,14 @@ ipcMain.handle(
     _event,
     directoryPath,
   ) => {
+    const safeDirectoryPath =
+      requireProjectPath(
+        directoryPath,
+      );
+
     const entries =
       await fs.readdir(
-        directoryPath,
+        safeDirectoryPath,
         {
           withFileTypes: true,
         },
@@ -89,17 +290,22 @@ ipcMain.handle(
     return entries
       .map((entry) => ({
         name: entry.name,
+
         type: entry.isDirectory()
           ? "directory"
           : "file",
+
         path: path.join(
-          directoryPath,
+          safeDirectoryPath,
           entry.name,
         ),
       }))
       .sort((a, b) => {
-        if (a.type !== b.type) {
-          return a.type === "directory"
+        if (
+          a.type !== b.type
+        ) {
+          return a.type ===
+            "directory"
             ? -1
             : 1;
         }
@@ -120,8 +326,26 @@ ipcMain.handle(
     _event,
     filePath,
   ) => {
+    const safeFilePath =
+      requireProjectPath(
+        filePath,
+      );
+
+    const fileStats =
+      await fs.stat(
+        safeFilePath,
+      );
+
+    if (
+      !fileStats.isFile()
+    ) {
+      throw new Error(
+        "The selected path is not a file.",
+      );
+    }
+
     return fs.readFile(
-      filePath,
+      safeFilePath,
       "utf-8",
     );
   },
@@ -137,14 +361,42 @@ ipcMain.handle(
     filePath,
     content,
   ) => {
+    const safeFilePath =
+      requireProjectPath(
+        filePath,
+      );
+
+    if (
+      typeof content !==
+      "string"
+    ) {
+      throw new Error(
+        "File content must be a string.",
+      );
+    }
+
+    const fileStats =
+      await fs.stat(
+        safeFilePath,
+      );
+
+    if (
+      !fileStats.isFile()
+    ) {
+      throw new Error(
+        "The selected path is not a file.",
+      );
+    }
+
     await fs.writeFile(
-      filePath,
+      safeFilePath,
       content,
       "utf-8",
     );
 
     return {
       success: true,
+      path: safeFilePath,
     };
   },
 );
@@ -158,8 +410,13 @@ ipcMain.handle(
     _event,
     filePath,
   ) => {
+    const safeFilePath =
+      requireProjectPath(
+        filePath,
+      );
+
     await fs.writeFile(
-      filePath,
+      safeFilePath,
       "",
       {
         encoding: "utf-8",
@@ -169,7 +426,7 @@ ipcMain.handle(
 
     return {
       success: true,
-      path: filePath,
+      path: safeFilePath,
     };
   },
 );
@@ -183,8 +440,13 @@ ipcMain.handle(
     _event,
     directoryPath,
   ) => {
+    const safeDirectoryPath =
+      requireProjectPath(
+        directoryPath,
+      );
+
     await fs.mkdir(
-      directoryPath,
+      safeDirectoryPath,
       {
         recursive: false,
       },
@@ -192,7 +454,7 @@ ipcMain.handle(
 
     return {
       success: true,
-      path: directoryPath,
+      path: safeDirectoryPath,
     };
   },
 );
@@ -207,15 +469,25 @@ ipcMain.handle(
     oldPath,
     newPath,
   ) => {
+    const safeOldPath =
+      requireProjectPath(
+        oldPath,
+      );
+
+    const safeNewPath =
+      requireProjectPath(
+        newPath,
+      );
+
     await fs.rename(
-      oldPath,
-      newPath,
+      safeOldPath,
+      safeNewPath,
     );
 
     return {
       success: true,
-      oldPath,
-      newPath,
+      oldPath: safeOldPath,
+      newPath: safeNewPath,
     };
   },
 );
@@ -230,11 +502,37 @@ ipcMain.handle(
     targetPath,
     targetType,
   ) => {
+    const safeTargetPath =
+      requireProjectPath(
+        targetPath,
+      );
+
+    /*
+     * Prevent deletion of the
+     * project root itself.
+     */
+    const projectPath =
+      requireProject();
+
     if (
-      targetType === "directory"
+      normalizePath(
+        safeTargetPath,
+      ) ===
+      normalizePath(
+        projectPath,
+      )
+    ) {
+      throw new Error(
+        "The project root cannot be deleted.",
+      );
+    }
+
+    if (
+      targetType ===
+      "directory"
     ) {
       await fs.rm(
-        targetPath,
+        safeTargetPath,
         {
           recursive: true,
           force: false,
@@ -242,16 +540,46 @@ ipcMain.handle(
       );
     } else {
       await fs.unlink(
-        targetPath,
+        safeTargetPath,
       );
     }
 
     return {
       success: true,
-      path: targetPath,
+      path: safeTargetPath,
     };
   },
 );
+
+/**
+ * =========================================================
+ * Terminal Helpers
+ * =========================================================
+ */
+
+/**
+ * Stop the current terminal process.
+ */
+function stopTerminalProcess() {
+  if (!terminalProcess) {
+    terminalProjectPath =
+      null;
+
+    return;
+  }
+
+  try {
+    terminalProcess.kill();
+  } catch (error) {
+    console.error(
+      "Failed to stop terminal process:",
+      error,
+    );
+  }
+
+  terminalProcess = null;
+  terminalProjectPath = null;
+}
 
 /**
  * =========================================================
@@ -268,18 +596,20 @@ ipcMain.handle(
     event,
     projectPath,
   ) => {
-    if (!projectPath) {
+    if (
+      typeof projectPath !==
+        "string" ||
+      projectPath.trim() === ""
+    ) {
       throw new Error(
         "No project is open.",
       );
     }
 
-    if (terminalProcess) {
-      return {
-        success: true,
-        alreadyRunning: true,
-      };
-    }
+    const activeProjectPath =
+      requireProjectPath(
+        projectPath,
+      );
 
     const senderWindow =
       BrowserWindow.fromWebContents(
@@ -292,8 +622,33 @@ ipcMain.handle(
       );
     }
 
+    /*
+     * Reuse the current terminal
+     * when it belongs to the same
+     * project.
+     */
+    if (
+      terminalProcess &&
+      terminalProjectPath ===
+        activeProjectPath
+    ) {
+      return {
+        success: true,
+        alreadyRunning: true,
+      };
+    }
+
+    /*
+     * If another terminal exists,
+     * stop it before creating a new
+     * project session.
+     */
+    if (terminalProcess) {
+      stopTerminalProcess();
+    }
+
     terminalProjectPath =
-      projectPath;
+      activeProjectPath;
 
     terminalProcess = spawn(
       "powershell.exe",
@@ -306,8 +661,10 @@ ipcMain.handle(
         "-",
       ],
       {
-        cwd: projectPath,
+        cwd: activeProjectPath,
+
         windowsHide: true,
+
         stdio: [
           "pipe",
           "pipe",
@@ -322,14 +679,11 @@ ipcMain.handle(
     terminalProcess.stdout.on(
       "data",
       (data) => {
-        if (
-          !senderWindow.isDestroyed()
-        ) {
-          senderWindow.webContents.send(
-            "terminal:output",
-            data.toString(),
-          );
-        }
+        sendToRenderer(
+          senderWindow,
+          "terminal:output",
+          data.toString(),
+        );
       },
     );
 
@@ -339,14 +693,11 @@ ipcMain.handle(
     terminalProcess.stderr.on(
       "data",
       (data) => {
-        if (
-          !senderWindow.isDestroyed()
-        ) {
-          senderWindow.webContents.send(
-            "terminal:error",
-            data.toString(),
-          );
-        }
+        sendToRenderer(
+          senderWindow,
+          "terminal:error",
+          data.toString(),
+        );
       },
     );
 
@@ -356,17 +707,17 @@ ipcMain.handle(
     terminalProcess.on(
       "close",
       (code) => {
-        if (
-          !senderWindow.isDestroyed()
-        ) {
-          senderWindow.webContents.send(
-            "terminal:exit",
-            code,
-          );
-        }
+        sendToRenderer(
+          senderWindow,
+          "terminal:exit",
+          code,
+        );
 
-        terminalProcess = null;
-        terminalProjectPath = null;
+        terminalProcess =
+          null;
+
+        terminalProjectPath =
+          null;
       },
     );
 
@@ -376,17 +727,17 @@ ipcMain.handle(
     terminalProcess.on(
       "error",
       (error) => {
-        if (
-          !senderWindow.isDestroyed()
-        ) {
-          senderWindow.webContents.send(
-            "terminal:error",
-            error.message,
-          );
-        }
+        sendToRenderer(
+          senderWindow,
+          "terminal:error",
+          error.message,
+        );
 
-        terminalProcess = null;
-        terminalProjectPath = null;
+        terminalProcess =
+          null;
+
+        terminalProjectPath =
+          null;
       },
     );
 
@@ -413,6 +764,15 @@ ipcMain.handle(
       );
     }
 
+    if (
+      typeof command !==
+      "string"
+    ) {
+      throw new Error(
+        "Terminal command must be a string.",
+      );
+    }
+
     terminalProcess.stdin.write(
       `${command}\r\n`,
     );
@@ -429,20 +789,114 @@ ipcMain.handle(
 ipcMain.handle(
   "terminal:stop",
   async () => {
-    if (!terminalProcess) {
-      return {
-        success: true,
-      };
-    }
-
-    terminalProcess.kill();
-
-    terminalProcess = null;
-    terminalProjectPath = null;
+    stopTerminalProcess();
 
     return {
       success: true,
     };
+  },
+);
+
+/**
+ * =========================================================
+ * Test Runner IPC
+ * =========================================================
+ */
+
+/**
+ * Run the project's test suite.
+ *
+ * Currently the test-runner service
+ * executes:
+ *
+ *     python -m pytest
+ *
+ * inside the active project directory.
+ */
+ipcMain.handle(
+  "tests:run",
+  async (
+    event,
+    projectPath,
+  ) => {
+    const activeProjectPath =
+      requireProjectPath(
+        projectPath,
+      );
+
+    const senderWindow =
+      BrowserWindow.fromWebContents(
+        event.sender,
+      );
+
+    if (!senderWindow) {
+      throw new Error(
+        "Test runner window is unavailable.",
+      );
+    }
+
+    const result =
+      startTests({
+        projectPath:
+          activeProjectPath,
+
+        /**
+         * Stream stdout.
+         */
+        onOutput: (data) => {
+          sendToRenderer(
+            senderWindow,
+            "tests:output",
+            data,
+          );
+        },
+
+        /**
+         * Stream stderr.
+         */
+        onError: (data) => {
+          sendToRenderer(
+            senderWindow,
+            "tests:error",
+            data,
+          );
+        },
+
+        /**
+         * Test process exited.
+         */
+        onExit: (code) => {
+          sendToRenderer(
+            senderWindow,
+            "tests:exit",
+            code,
+          );
+        },
+
+        /**
+         * Test process could not start.
+         */
+        onProcessError: (error) => {
+          sendToRenderer(
+            senderWindow,
+            "tests:process-error",
+            error.message,
+          );
+        },
+      });
+
+    return result;
+  },
+);
+
+/**
+ * Stop the currently running
+ * test process.
+ */
+ipcMain.handle(
+  "tests:stop",
+  async () => {
+    return stopTests();
   },
 );
 
@@ -469,22 +923,34 @@ app.whenReady().then(() => {
 });
 
 /**
- * Stop terminal and quit when
- * all application windows close.
+ * Stop terminal and test runner
+ * when all application windows close.
  */
 app.on(
   "window-all-closed",
   () => {
-    if (terminalProcess) {
-      terminalProcess.kill();
-      terminalProcess = null;
-      terminalProjectPath = null;
-    }
+    stopTerminalProcess();
+    cleanupTestRunner();
+
+    currentProjectPath =
+      null;
 
     if (
-      process.platform !== "darwin"
+      process.platform !==
+      "darwin"
     ) {
       app.quit();
     }
+  },
+);
+
+/**
+ * Cleanup before application quit.
+ */
+app.on(
+  "before-quit",
+  () => {
+    stopTerminalProcess();
+    cleanupTestRunner();
   },
 );

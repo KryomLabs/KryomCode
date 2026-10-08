@@ -1,12 +1,7 @@
 import { useState } from "react";
+
 import FileTree from "./FileTree";
 import "./project-explorer.css";
-
-interface FileEntry {
-  name: string;
-  type: "file" | "directory";
-  path: string;
-}
 
 interface ProjectExplorerProps {
   projectPath: string | null;
@@ -15,26 +10,49 @@ interface ProjectExplorerProps {
   onRefresh: () => Promise<void> | void;
 }
 
+type CreateType =
+  | "file"
+  | "folder"
+  | null;
+
+/**
+ * Project Explorer
+ *
+ * Responsibilities:
+ * - Display project name
+ * - Create files/folders
+ * - Delegate tree rendering to FileTree
+ * - Trigger project refresh
+ *
+ * File/folder navigation, rename and delete
+ * are handled by FileTree.
+ */
 function ProjectExplorer({
   projectPath,
   entries,
   onFileSelect,
   onRefresh,
 }: ProjectExplorerProps) {
-  const [creating, setCreating] = useState<
-    "file" | "folder" | null
-  >(null);
+  const [creating, setCreating] =
+    useState<CreateType>(null);
 
-  const [newName, setNewName] = useState("");
+  const [newName, setNewName] =
+    useState("");
 
-  const [error, setError] = useState<string | null>(
-    null,
-  );
+  const [error, setError] =
+    useState<string | null>(null);
 
+  /**
+   * Get project display name.
+   */
   const projectName = projectPath
-    ? projectPath.split("\\").pop() ?? "Project"
+    ? projectPath.split(/[\\/]/).pop() ??
+      "Project"
     : "No Project";
 
+  /**
+   * Start creating a file or folder.
+   */
   function startCreating(
     type: "file" | "folder",
   ) {
@@ -47,46 +65,77 @@ function ProjectExplorer({
     setCreating(type);
   }
 
+  /**
+   * Cancel creation.
+   */
   function cancelCreating() {
     setCreating(null);
     setNewName("");
     setError(null);
   }
 
-  async function handleCreate() {
-    if (!projectPath || !creating) {
-      return;
-    }
-
-    const name = newName.trim();
-
+  /**
+   * Validate a new item name.
+   */
+  function validateName(
+    name: string,
+  ): string | null {
     if (!name) {
-      setError(
-        creating === "file"
-          ? "File name is required."
-          : "Folder name is required.",
-      );
-
-      return;
+      return creating === "file"
+        ? "File name is required."
+        : "Folder name is required.";
     }
 
     if (
       name.includes("/") ||
       name.includes("\\")
     ) {
-      setError(
-        "Name cannot contain / or \\ characters.",
-      );
+      return "Name cannot contain / or \\ characters.";
+    }
 
+    if (
+      name === "." ||
+      name === ".."
+    ) {
+      return "Invalid file or folder name.";
+    }
+
+    return null;
+  }
+
+  /**
+   * Create the requested file/folder.
+   */
+  async function handleCreate() {
+    if (
+      !projectPath ||
+      !creating
+    ) {
       return;
     }
 
-    const targetPath = `${projectPath}\\${name}`;
+    const name =
+      newName.trim();
+
+    const validationError =
+      validateName(name);
+
+    if (validationError) {
+      setError(
+        validationError,
+      );
+      return;
+    }
+
+    const targetPath =
+      `${projectPath}\\${name}`;
 
     try {
       setError(null);
 
-      if (creating === "file") {
+      if (
+        creating === "file"
+      ) {
         await window.kryomcode.createFile(
           targetPath,
         );
@@ -113,44 +162,67 @@ function ProjectExplorer({
     }
   }
 
+  /**
+   * Handle Enter/Escape while creating.
+   */
   function handleInputKeyDown(
     event: React.KeyboardEvent<HTMLInputElement>,
   ) {
     if (event.key === "Enter") {
       event.preventDefault();
+
       void handleCreate();
+      return;
     }
 
     if (event.key === "Escape") {
       event.preventDefault();
+
       cancelCreating();
     }
   }
 
   return (
-    <aside className="project-explorer">
+    <aside
+      className="project-explorer"
+      aria-label="Project Explorer"
+    >
+      {/* =================================================
+          Panel Header
+          ================================================= */}
+
       <div className="panel-title">
         <span>PROJECT</span>
 
         {projectPath && (
           <div className="project-actions">
+            {/* New File */}
+
             <button
               type="button"
               className="project-action-button"
               title="New File"
+              aria-label="Create new file"
               onClick={() =>
-                startCreating("file")
+                startCreating(
+                  "file",
+                )
               }
             >
               +
             </button>
 
+            {/* New Folder */}
+
             <button
               type="button"
               className="project-action-button folder-action"
               title="New Folder"
+              aria-label="Create new folder"
               onClick={() =>
-                startCreating("folder")
+                startCreating(
+                  "folder",
+                )
               }
             >
               📁
@@ -159,9 +231,23 @@ function ProjectExplorer({
         )}
       </div>
 
-      <div className="project-name">
+      {/* =================================================
+          Project Name
+          ================================================= */}
+
+      <div
+        className="project-name"
+        title={
+          projectPath ??
+          "No project opened"
+        }
+      >
         {projectName}
       </div>
+
+      {/* =================================================
+          Create File / Folder
+          ================================================= */}
 
       {creating && (
         <div className="create-item">
@@ -180,10 +266,21 @@ function ProjectExplorer({
                 ? "filename.ts"
                 : "folder-name"
             }
-            onChange={(event) =>
-              setNewName(event.target.value)
+            aria-label={
+              creating === "file"
+                ? "New file name"
+                : "New folder name"
             }
-            onKeyDown={handleInputKeyDown}
+            onChange={(
+              event,
+            ) =>
+              setNewName(
+                event.target.value,
+              )
+            }
+            onKeyDown={
+              handleInputKeyDown
+            }
           />
 
           <div className="create-item-actions">
@@ -198,23 +295,34 @@ function ProjectExplorer({
 
             <button
               type="button"
-              onClick={cancelCreating}
+              onClick={
+                cancelCreating
+              }
             >
               Cancel
             </button>
           </div>
 
           {error && (
-            <div className="create-item-error">
+            <div
+              className="create-item-error"
+              role="alert"
+            >
               {error}
             </div>
           )}
         </div>
       )}
 
+      {/* =================================================
+          File Tree
+          ================================================= */}
+
       <FileTree
         entries={entries}
-        onFileSelect={onFileSelect}
+        onFileSelect={
+          onFileSelect
+        }
         onRefresh={onRefresh}
       />
     </aside>

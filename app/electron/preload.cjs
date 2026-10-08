@@ -3,248 +3,305 @@ const {
   ipcRenderer,
 } = require("electron");
 
-console.log(
-  "KryomCode preload loaded",
-);
+/**
+ * =========================================================
+ * Event Subscription Helper
+ * =========================================================
+ *
+ * Creates a safe renderer-side subscription
+ * without exposing ipcRenderer directly.
+ */
+function createEventSubscription(
+  channel,
+  callback,
+) {
+  const listener = (
+    _event,
+    ...args
+  ) => {
+    callback(...args);
+  };
+
+  ipcRenderer.on(
+    channel,
+    listener,
+  );
+
+  /**
+   * Return cleanup function.
+   */
+  return () => {
+    ipcRenderer.removeListener(
+      channel,
+      listener,
+    );
+  };
+}
+
+/**
+ * =========================================================
+ * KryomCode Renderer API
+ * =========================================================
+ *
+ * Only explicitly approved APIs are
+ * exposed to the renderer process.
+ *
+ * ipcRenderer itself is NEVER exposed.
+ * =========================================================
+ */
+
+const kryomcodeAPI = {
+  /**
+   * Application version.
+   */
+  version: "0.1.0",
+
+  /**
+   * =======================================================
+   * Project
+   * =======================================================
+   */
+
+  /**
+   * Open a project directory.
+   */
+  selectProject: () =>
+    ipcRenderer.invoke(
+      "project:select",
+    ),
+
+  /**
+   * Read a directory.
+   */
+  readDirectory: (
+    directoryPath,
+  ) =>
+    ipcRenderer.invoke(
+      "project:read-directory",
+      directoryPath,
+    ),
+
+  /**
+   * Read a text file.
+   */
+  readFile: (
+    filePath,
+  ) =>
+    ipcRenderer.invoke(
+      "project:read-file",
+      filePath,
+    ),
+
+  /**
+   * Write a text file.
+   */
+  writeFile: (
+    filePath,
+    content,
+  ) =>
+    ipcRenderer.invoke(
+      "project:write-file",
+      filePath,
+      content,
+    ),
+
+  /**
+   * Create a new file.
+   */
+  createFile: (
+    filePath,
+  ) =>
+    ipcRenderer.invoke(
+      "project:create-file",
+      filePath,
+    ),
+
+  /**
+   * Create a new folder.
+   */
+  createFolder: (
+    directoryPath,
+  ) =>
+    ipcRenderer.invoke(
+      "project:create-folder",
+      directoryPath,
+    ),
+
+  /**
+   * Rename a file or directory.
+   */
+  rename: (
+    oldPath,
+    newPath,
+  ) =>
+    ipcRenderer.invoke(
+      "project:rename",
+      oldPath,
+      newPath,
+    ),
+
+  /**
+   * Delete a file or directory.
+   */
+  delete: (
+    targetPath,
+    targetType,
+  ) =>
+    ipcRenderer.invoke(
+      "project:delete",
+      targetPath,
+      targetType,
+    ),
+
+  /**
+   * =======================================================
+   * Terminal
+   * =======================================================
+   */
+
+  /**
+   * Start integrated terminal.
+   */
+  startTerminal: (
+    projectPath,
+  ) =>
+    ipcRenderer.invoke(
+      "terminal:start",
+      projectPath,
+    ),
+
+  /**
+   * Send command to terminal.
+   */
+  writeTerminal: (
+    command,
+  ) =>
+    ipcRenderer.invoke(
+      "terminal:write",
+      command,
+    ),
+
+  /**
+   * Stop integrated terminal.
+   */
+  stopTerminal: () =>
+    ipcRenderer.invoke(
+      "terminal:stop",
+    ),
+
+  /**
+   * Terminal stdout.
+   */
+  onTerminalOutput: (
+    callback,
+  ) =>
+    createEventSubscription(
+      "terminal:output",
+      callback,
+    ),
+
+  /**
+   * Terminal stderr.
+   */
+  onTerminalError: (
+    callback,
+  ) =>
+    createEventSubscription(
+      "terminal:error",
+      callback,
+    ),
+
+  /**
+   * Terminal process exit.
+   */
+  onTerminalExit: (
+    callback,
+  ) =>
+    createEventSubscription(
+      "terminal:exit",
+      callback,
+    ),
+
+  /**
+   * =======================================================
+   * Test Runner
+   * =======================================================
+   */
+
+  /**
+   * Start pytest.
+   *
+   * The main process validates the
+   * project path before execution.
+   */
+  runTests: (
+    projectPath,
+  ) =>
+    ipcRenderer.invoke(
+      "tests:run",
+      projectPath,
+    ),
+
+  /**
+   * Stop the active pytest process.
+   */
+  stopTests: () =>
+    ipcRenderer.invoke(
+      "tests:stop",
+    ),
+
+  /**
+   * Test stdout.
+   */
+  onTestOutput: (
+    callback,
+  ) =>
+    createEventSubscription(
+      "tests:output",
+      callback,
+    ),
+
+  /**
+   * Test stderr.
+   */
+  onTestError: (
+    callback,
+  ) =>
+    createEventSubscription(
+      "tests:error",
+      callback,
+    ),
+
+  /**
+   * Test process exit.
+   */
+  onTestExit: (
+    callback,
+  ) =>
+    createEventSubscription(
+      "tests:exit",
+      callback,
+    ),
+
+  /**
+   * Test process startup error.
+   */
+  onTestProcessError: (
+    callback,
+  ) =>
+    createEventSubscription(
+      "tests:process-error",
+      callback,
+    ),
+};
+
+/**
+ * =========================================================
+ * Expose API
+ * =========================================================
+ */
 
 contextBridge.exposeInMainWorld(
   "kryomcode",
-  {
-    version: "0.1.0",
-
-    /**
-     * =====================================================
-     * Project
-     * =====================================================
-     */
-
-    /**
-     * Open a project directory.
-     */
-    selectProject: () => {
-      return ipcRenderer.invoke(
-        "project:select",
-      );
-    },
-
-    /**
-     * Read directory contents.
-     */
-    readDirectory: (
-      directoryPath,
-    ) => {
-      return ipcRenderer.invoke(
-        "project:read-directory",
-        directoryPath,
-      );
-    },
-
-    /**
-     * Read a text file.
-     */
-    readFile: (
-      filePath,
-    ) => {
-      return ipcRenderer.invoke(
-        "project:read-file",
-        filePath,
-      );
-    },
-
-    /**
-     * Write a text file.
-     */
-    writeFile: (
-      filePath,
-      content,
-    ) => {
-      return ipcRenderer.invoke(
-        "project:write-file",
-        filePath,
-        content,
-      );
-    },
-
-    /**
-     * Create a new file.
-     */
-    createFile: (
-      filePath,
-    ) => {
-      return ipcRenderer.invoke(
-        "project:create-file",
-        filePath,
-      );
-    },
-
-    /**
-     * Create a new folder.
-     */
-    createFolder: (
-      directoryPath,
-    ) => {
-      return ipcRenderer.invoke(
-        "project:create-folder",
-        directoryPath,
-      );
-    },
-
-    /**
-     * Rename a file or folder.
-     */
-    rename: (
-      oldPath,
-      newPath,
-    ) => {
-      return ipcRenderer.invoke(
-        "project:rename",
-        oldPath,
-        newPath,
-      );
-    },
-
-    /**
-     * Delete a file or folder.
-     */
-    delete: (
-      targetPath,
-      targetType,
-    ) => {
-      return ipcRenderer.invoke(
-        "project:delete",
-        targetPath,
-        targetType,
-      );
-    },
-
-    /**
-     * =====================================================
-     * Terminal
-     * =====================================================
-     */
-
-    /**
-     * Start a persistent PowerShell terminal.
-     */
-    startTerminal: (
-      projectPath,
-    ) => {
-      return ipcRenderer.invoke(
-        "terminal:start",
-        projectPath,
-      );
-    },
-
-    /**
-     * Send a command to the running terminal.
-     */
-    writeTerminal: (
-      command,
-    ) => {
-      return ipcRenderer.invoke(
-        "terminal:write",
-        command,
-      );
-    },
-
-    /**
-     * Stop the running terminal.
-     */
-    stopTerminal: () => {
-      return ipcRenderer.invoke(
-        "terminal:stop",
-      );
-    },
-
-    /**
-     * =====================================================
-     * Terminal Events
-     * =====================================================
-     */
-
-    /**
-     * Receive standard output from terminal.
-     *
-     * Returns a cleanup function that removes
-     * the registered IPC listener.
-     */
-    onTerminalOutput: (
-      callback,
-    ) => {
-      const listener = (
-        _event,
-        data,
-      ) => {
-        callback(data);
-      };
-
-      ipcRenderer.on(
-        "terminal:output",
-        listener,
-      );
-
-      return () => {
-        ipcRenderer.removeListener(
-          "terminal:output",
-          listener,
-        );
-      };
-    },
-
-    /**
-     * Receive error output from terminal.
-     *
-     * Returns a cleanup function.
-     */
-    onTerminalError: (
-      callback,
-    ) => {
-      const listener = (
-        _event,
-        data,
-      ) => {
-        callback(data);
-      };
-
-      ipcRenderer.on(
-        "terminal:error",
-        listener,
-      );
-
-      return () => {
-        ipcRenderer.removeListener(
-          "terminal:error",
-          listener,
-        );
-      };
-    },
-
-    /**
-     * Receive terminal process exit event.
-     *
-     * Returns a cleanup function.
-     */
-    onTerminalExit: (
-      callback,
-    ) => {
-      const listener = (
-        _event,
-        code,
-      ) => {
-        callback(code);
-      };
-
-      ipcRenderer.on(
-        "terminal:exit",
-        listener,
-      );
-
-      return () => {
-        ipcRenderer.removeListener(
-          "terminal:exit",
-          listener,
-        );
-      };
-    },
-  },
+  kryomcodeAPI,
 );

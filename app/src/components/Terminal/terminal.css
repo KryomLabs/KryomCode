@@ -1,102 +1,281 @@
 .terminal-panel {
   display: flex;
   flex-direction: column;
+
+  width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: 0;
+
+  overflow: hidden;
+
   background: #0d0f14;
   color: #c9ced8;
 }
+
+/* ---------------------------------
+   Header
+   --------------------------------- */
 
 .terminal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+
   min-height: 34px;
   padding: 0 10px;
+
   border-bottom: 1px solid #292d36;
+
   background: #13161e;
+
+  user-select: none;
 }
 
 .terminal-title {
   display: flex;
   align-items: center;
+
+  min-width: 0;
+
   gap: 7px;
+
   color: #9da5b3;
+
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
 
 .terminal-icon {
+  flex-shrink: 0;
+
   color: #aeb6c4;
-  font-family: Consolas, "Courier New", monospace;
+
+  font-family:
+    Consolas,
+    "Cascadia Mono",
+    "Courier New",
+    monospace;
+
   font-size: 12px;
   letter-spacing: 0;
 }
 
+/* ---------------------------------
+   Terminal Status
+   --------------------------------- */
+
+.terminal-status {
+  color: #777d89;
+
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+
+  white-space: nowrap;
+}
+
+.terminal-status.running {
+  color: #98c379;
+}
+
+/* ---------------------------------
+   Header Actions
+   --------------------------------- */
+
 .terminal-actions {
   display: flex;
   align-items: center;
+
+  flex-shrink: 0;
+
+  gap: 5px;
 }
 
 .terminal-action-button {
+  min-height: 24px;
+
   padding: 4px 8px;
+
   border: 1px solid #343a46;
   border-radius: 4px;
+
   background: #1a1e27;
   color: #9da5b3;
+
   font-family: inherit;
   font-size: 10px;
+
   cursor: pointer;
+
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
-.terminal-action-button:hover {
+.terminal-action-button:hover:not(:disabled) {
   background: #252b36;
+  border-color: #454c59;
   color: #ffffff;
 }
 
-.terminal-output {
-  flex: 1;
-  min-height: 0;
-  padding: 10px 12px;
-  overflow: auto;
-  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  cursor: text;
+.terminal-action-button:active:not(:disabled) {
+  background: #2c323d;
 }
 
+.terminal-action-button:focus-visible {
+  outline: 1px solid #61afef;
+  outline-offset: 1px;
+}
+
+.terminal-action-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------
+   Terminal Output
+   --------------------------------- */
+
+.terminal-output {
+  flex: 1;
+
+  min-width: 0;
+  min-height: 0;
+
+  padding: 10px 12px;
+
+  overflow: auto;
+
+  background: #0d0f14;
+
+  font-family:
+    Consolas,
+    "Cascadia Mono",
+    "Courier New",
+    monospace;
+
+  font-size: 12px;
+  line-height: 1.6;
+
+  cursor: text;
+
+  scrollbar-width: thin;
+  scrollbar-color: #343a46 transparent;
+}
+
+.terminal-output::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.terminal-output::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.terminal-output::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: #343a46;
+}
+
+.terminal-output::-webkit-scrollbar-thumb:hover {
+  background: #454c59;
+}
+
+/* ---------------------------------
+   Terminal Lines
+   --------------------------------- */
+
 .terminal-line {
+  min-height: 19px;
+
+  color: #c9ced8;
+
   white-space: pre-wrap;
   word-break: break-word;
 }
 
+/* ---------------------------------
+   Command Input
+   --------------------------------- */
+
 .terminal-input-row {
   display: flex;
   align-items: flex-start;
+
   width: 100%;
+  min-width: 0;
+
+  margin-top: 0;
 }
 
 .terminal-prompt {
   flex-shrink: 0;
+
   color: #aeb6c4;
+
   white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .terminal-input {
   flex: 1;
+
   min-width: 0;
+
   margin-left: 6px;
   padding: 0;
+
   border: 0;
   outline: none;
+
   background: transparent;
+
   color: #ffffff;
+
   font-family: inherit;
   font-size: inherit;
   line-height: inherit;
+
+  caret-color: #61afef;
+}
+
+.terminal-input::placeholder {
+  color: #555c68;
+  opacity: 1;
 }
 
 .terminal-input::selection {
   background: #394150;
+}
+
+.terminal-input:disabled {
+  color: #555c68;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------
+   Responsive
+   --------------------------------- */
+
+@media (max-width: 700px) {
+  .terminal-header {
+    padding: 0 8px;
+  }
+
+  .terminal-title {
+    gap: 5px;
+  }
+
+  .terminal-output {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+
+  .terminal-action-button {
+    padding: 3px 7px;
+    font-size: 9px;
+  }
 }
