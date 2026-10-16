@@ -328,3 +328,155 @@ def test_engine_respects_context_limits(tmp_path):
 
     assert len(package.documents) <= 1
     assert package.total_bytes <= 200_000
+
+
+# ============================================================
+# Provider-independent AI interface tests
+# ============================================================
+
+
+def test_chat_message_accepts_supported_roles():
+    from kryomcode.ai.providers import ChatMessage
+
+    message = ChatMessage(role="user", content="Explain this function")
+
+    assert message.role == "user"
+    assert message.content == "Explain this function"
+
+
+@pytest.mark.parametrize("role", ["system", "user", "assistant"])
+def test_chat_message_accepts_each_supported_role(role):
+    from kryomcode.ai.providers import ChatMessage
+
+    assert ChatMessage(role=role, content="Hello").role == role
+
+
+def test_chat_message_rejects_unsupported_role():
+    from kryomcode.ai.providers import ChatMessage
+
+    with pytest.raises(ValueError, match="role"):
+        ChatMessage(role="tool", content="Result")
+
+
+def test_chat_message_rejects_empty_content():
+    from kryomcode.ai.providers import ChatMessage
+
+    with pytest.raises(ValueError, match="content"):
+        ChatMessage(role="user", content="  ")
+
+
+def test_generation_request_normalizes_messages_to_tuple():
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    message = ChatMessage(role="user", content="Write a test")
+    request = GenerationRequest(model="example-model", messages=[message])
+
+    assert request.messages == (message,)
+    assert isinstance(request.messages, tuple)
+
+
+def test_generation_request_rejects_empty_messages():
+    from kryomcode.ai.providers import GenerationRequest
+
+    with pytest.raises(ValueError, match="at least one"):
+        GenerationRequest(model="example-model", messages=())
+
+
+@pytest.mark.parametrize(
+    "temperature",
+    [-0.1, 2.1, float("nan"), float("inf")],
+)
+def test_generation_request_rejects_invalid_temperature(temperature):
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    with pytest.raises(ValueError, match="temperature"):
+        GenerationRequest(
+            model="example-model",
+            messages=(ChatMessage(role="user", content="Hello"),),
+            temperature=temperature,
+        )
+
+
+def test_generation_request_rejects_invalid_token_limit():
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    message = ChatMessage(role="user", content="Hello")
+
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        GenerationRequest(
+            model="example-model",
+            messages=(message,),
+            max_output_tokens=0,
+        )
+
+
+def test_generation_response_preserves_usage_metadata():
+    from kryomcode.ai.providers import GenerationResponse
+
+    response = GenerationResponse(
+        content="Generated result",
+        provider="example",
+        model="example-model",
+        input_tokens=12,
+        output_tokens=8,
+    )
+
+    assert response.content == "Generated result"
+    assert response.provider == "example"
+    assert response.input_tokens == 12
+    assert response.output_tokens == 8
+
+
+def test_generation_response_allows_unknown_token_usage():
+    from kryomcode.ai.providers import GenerationResponse
+
+    response = GenerationResponse(
+        content="Generated result",
+        provider="example",
+        model="example-model",
+    )
+
+    assert response.input_tokens is None
+    assert response.output_tokens is None
+
+
+def test_generation_response_rejects_negative_token_usage():
+    from kryomcode.ai.providers import GenerationResponse
+
+    with pytest.raises(ValueError, match="input_tokens"):
+        GenerationResponse(
+            content="Result",
+            provider="example",
+            model="example-model",
+            input_tokens=-1,
+        )
+
+
+def test_fake_provider_implements_provider_contract():
+    from kryomcode.ai.providers import (
+        ChatMessage,
+        GenerationRequest,
+        GenerationResponse,
+    )
+
+    class FakeProvider:
+        name = "fake"
+
+        def generate(self, request):
+            return GenerationResponse(
+                content=f"Processed: {request.messages[-1].content}",
+                provider=self.name,
+                model=request.model,
+            )
+
+    provider = FakeProvider()
+    request = GenerationRequest(
+        model="test-model",
+        messages=(ChatMessage(role="user", content="Hello KryomCode"),),
+    )
+
+    response = provider.generate(request)
+
+    assert response.provider == "fake"
+    assert response.model == "test-model"
+    assert response.content == "Processed: Hello KryomCode"
