@@ -2,6 +2,7 @@
 
 from kryomcode.ai.providers import AIProvider, GenerationRequest, GenerationResponse
 
+
 class ProviderNotFoundError(LookupError):
     """Raised when a requested AI provider is not registered."""
 

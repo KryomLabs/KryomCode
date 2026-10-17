@@ -868,3 +868,117 @@ class FakeProviderForRegistryTests:
 
 class FakeClientForRegistryTests:
     """Placeholder client for a provider registration test."""
+
+
+# ============================================================
+# AI orchestration tests
+# ============================================================
+
+
+def test_orchestrator_sends_task_to_selected_provider(tmp_path):
+    from kryomcode.ai.orchestrator import AIOrchestrator
+    from kryomcode.ai.registry import AIProviderRegistry
+
+    registry = AIProviderRegistry()
+    provider = FakeProviderForRegistryTests("mock")
+    registry.register(provider)
+
+    orchestrator = AIOrchestrator(registry)
+
+    result = orchestrator.run(
+        project_root=tmp_path,
+        task="Explain this project",
+        provider_name="mock",
+        model="test-model",
+    )
+
+    assert result.content == "Mock response"
+    assert result.provider == "mock"
+    assert provider.last_request.model == "test-model"
+
+    messages = provider.last_request.messages
+    assert messages[0].role == "system"
+    assert messages[1].role == "user"
+    assert "Explain this project" in messages[1].content
+
+
+def test_orchestrator_includes_relevant_project_context(tmp_path):
+    from kryomcode.ai.orchestrator import AIOrchestrator
+    from kryomcode.ai.registry import AIProviderRegistry
+
+    (tmp_path / "calculator.py").write_text(
+        "def add_numbers(a, b):\n"
+        "    return a + b\n",
+        encoding="utf-8",
+    )
+
+    registry = AIProviderRegistry()
+    provider = FakeProviderForRegistryTests("mock")
+    registry.register(provider)
+
+    orchestrator = AIOrchestrator(registry)
+
+    orchestrator.run(
+        project_root=tmp_path,
+        task="Explain the add_numbers function in calculator.py",
+        provider_name="mock",
+        model="test-model",
+    )
+
+    user_message = provider.last_request.messages[1].content
+
+    assert "calculator.py" in user_message
+    assert "def add_numbers(a, b):" in user_message
+
+
+def test_orchestrator_handles_project_without_relevant_files(tmp_path):
+    from kryomcode.ai.orchestrator import AIOrchestrator
+    from kryomcode.ai.registry import AIProviderRegistry
+
+    registry = AIProviderRegistry()
+    provider = FakeProviderForRegistryTests("mock")
+    registry.register(provider)
+
+    orchestrator = AIOrchestrator(registry)
+
+    result = orchestrator.run(
+        project_root=tmp_path,
+        task="Explain an unknown system",
+        provider_name="mock",
+        model="test-model",
+    )
+
+    assert result.content == "Mock response"
+    assert "No relevant project files were selected" in (
+        provider.last_request.messages[1].content
+    )
+
+
+def test_orchestrator_rejects_empty_task(tmp_path):
+    from kryomcode.ai.orchestrator import AIOrchestrator
+    from kryomcode.ai.registry import AIProviderRegistry
+
+    orchestrator = AIOrchestrator(AIProviderRegistry())
+
+    with pytest.raises(ValueError, match="task"):
+        orchestrator.run(
+            project_root=tmp_path,
+            task=" ",
+            provider_name="mock",
+            model="test-model",
+        )
+
+
+def test_orchestrator_rejects_empty_model(tmp_path):
+    from kryomcode.ai.orchestrator import AIOrchestrator
+    from kryomcode.ai.registry import AIProviderRegistry
+
+    orchestrator = AIOrchestrator(AIProviderRegistry())
+
+    with pytest.raises(ValueError, match="model"):
+        orchestrator.run(
+            project_root=tmp_path,
+            task="Explain the code",
+            provider_name="mock",
+            model=" ",
+        )
