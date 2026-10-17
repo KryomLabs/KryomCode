@@ -22,7 +22,9 @@ dev = [
 openai = [
     "openai>=1.66.0"
 ]
-
+anthropic = [
+    "anthropic>=0.40.0"
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

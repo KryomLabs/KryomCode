@@ -587,3 +587,173 @@ def test_openai_provider_rejects_missing_output_text():
 
     with pytest.raises(RuntimeError, match="output_text"):
         provider.generate(request)
+
+
+# ============================================================
+# Anthropic provider adapter tests
+# ============================================================
+
+def test_anthropic_provider_maps_request_and_response():
+    from kryomcode.ai.anthropic_provider import AnthropicProvider
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return SimpleNamespace(
+                content=[
+                    SimpleNamespace(type="text", text="Generated "),
+                    SimpleNamespace(type="text", text="Python code"),
+                ],
+                usage=SimpleNamespace(
+                    input_tokens=20,
+                    output_tokens=12,
+                ),
+            )
+
+    client = SimpleNamespace(messages=FakeMessages())
+    provider = AnthropicProvider(client=client)
+
+    request = GenerationRequest(
+        model="test-model",
+        messages=(
+            ChatMessage(
+                role="system",
+                content="You are a coding assistant.",
+            ),
+            ChatMessage(
+                role="user",
+                content="Write a Python function.",
+            ),
+        ),
+        temperature=0.3,
+        max_output_tokens=512,
+    )
+
+    result = provider.generate(request)
+
+    assert provider.name == "anthropic"
+    assert result.provider == "anthropic"
+    assert result.model == "test-model"
+    assert result.content == "Generated Python code"
+    assert result.input_tokens == 20
+    assert result.output_tokens == 12
+
+    sent = client.messages.kwargs
+    assert sent["model"] == "test-model"
+    assert sent["max_tokens"] == 512
+    assert sent["temperature"] == 0.3
+    assert sent["system"] == "You are a coding assistant."
+    assert sent["messages"] == [
+        {
+            "role": "user",
+            "content": "Write a Python function.",
+        }
+    ]
+
+
+def test_anthropic_provider_combines_system_messages():
+    from kryomcode.ai.anthropic_provider import AnthropicProvider
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="OK")],
+                usage=None,
+            )
+
+    client = SimpleNamespace(messages=FakeMessages())
+    provider = AnthropicProvider(client=client)
+
+    request = GenerationRequest(
+        model="test-model",
+        messages=(
+            ChatMessage(role="system", content="Instruction one."),
+            ChatMessage(role="system", content="Instruction two."),
+            ChatMessage(role="user", content="Continue."),
+        ),
+    )
+
+    result = provider.generate(request)
+
+    assert result.content == "OK"
+    assert client.messages.kwargs["system"] == (
+        "Instruction one.\n\nInstruction two."
+    )
+
+
+def test_anthropic_provider_handles_missing_usage():
+    from kryomcode.ai.anthropic_provider import AnthropicProvider
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    client = SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **kwargs: SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="Hello")],
+                usage=None,
+            )
+        )
+    )
+
+    provider = AnthropicProvider(client=client)
+    request = GenerationRequest(
+        model="test-model",
+        messages=(ChatMessage(role="user", content="Hello"),),
+    )
+
+    result = provider.generate(request)
+
+    assert result.content == "Hello"
+    assert result.input_tokens is None
+    assert result.output_tokens is None
+
+
+def test_anthropic_provider_rejects_missing_api_key(monkeypatch):
+    from kryomcode.ai.anthropic_provider import AnthropicProvider
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="API key"):
+        AnthropicProvider()
+
+
+def test_anthropic_provider_rejects_system_only_request():
+    from kryomcode.ai.anthropic_provider import AnthropicProvider
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    provider = AnthropicProvider(
+        client=SimpleNamespace(messages=SimpleNamespace())
+    )
+    request = GenerationRequest(
+        model="test-model",
+        messages=(
+            ChatMessage(role="system", content="System instruction"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="user or assistant"):
+        provider.generate(request)
+
+
+def test_anthropic_provider_rejects_missing_text_content():
+    from kryomcode.ai.anthropic_provider import AnthropicProvider
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    client = SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **kwargs: SimpleNamespace(
+                content=[SimpleNamespace(type="tool_use")]
+            )
+        )
+    )
+
+    provider = AnthropicProvider(client=client)
+    request = GenerationRequest(
+        model="test-model",
+        messages=(ChatMessage(role="user", content="Hello"),),
+    )
+
+    with pytest.raises(RuntimeError, match="text content"):
+        provider.generate(request)
