@@ -1,12 +1,6 @@
 """Provider registry for KryomCode AI generation."""
 
-from typing import TYPE_CHECKING
-
 from kryomcode.ai.providers import AIProvider, GenerationRequest, GenerationResponse
-
-if TYPE_CHECKING:
-    from kryomcode.ai.providers import AIProvider
-
 
 class ProviderNotFoundError(LookupError):
     """Raised when a requested AI provider is not registered."""
