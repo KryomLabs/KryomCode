@@ -757,3 +757,114 @@ def test_anthropic_provider_rejects_missing_text_content():
 
     with pytest.raises(RuntimeError, match="text content"):
         provider.generate(request)
+
+
+# ============================================================
+# AI provider registry tests
+# ============================================================
+
+
+def test_registry_registers_and_retrieves_providers():
+    from kryomcode.ai.registry import AIProviderRegistry
+
+    registry = AIProviderRegistry()
+    provider = FakeProviderForRegistryTests("openai")
+
+    registry.register(provider)
+
+    assert registry.get("openai") is provider
+    assert registry.provider_names == ("openai",)
+
+
+def test_registry_rejects_duplicate_provider_names():
+    from kryomcode.ai.registry import (
+        AIProviderRegistry,
+        DuplicateProviderError,
+    )
+
+    registry = AIProviderRegistry()
+    first = FakeProviderForRegistryTests("mock")
+    second = FakeProviderForRegistryTests("mock")
+
+    registry.register(first)
+
+    with pytest.raises(DuplicateProviderError, match="already registered"):
+        registry.register(second)
+
+
+def test_registry_can_replace_a_provider():
+    from kryomcode.ai.registry import AIProviderRegistry
+
+    registry = AIProviderRegistry()
+    first = FakeProviderForRegistryTests("mock")
+    second = FakeProviderForRegistryTests("mock")
+
+    registry.register(first)
+    registry.register(second, replace=True)
+
+    assert registry.get("mock") is second
+
+
+def test_registry_reports_unknown_provider():
+    from kryomcode.ai.registry import (
+        AIProviderRegistry,
+        ProviderNotFoundError,
+    )
+
+    registry = AIProviderRegistry()
+    registry.register(FakeProviderForRegistryTests("openai"))
+
+    with pytest.raises(ProviderNotFoundError, match="openai"):
+        registry.get("anthropic")
+
+
+def test_registry_generates_using_selected_provider():
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+    from kryomcode.ai.registry import AIProviderRegistry
+
+    registry = AIProviderRegistry()
+    provider = FakeProviderForRegistryTests("mock")
+    registry.register(provider)
+
+    request = GenerationRequest(
+        model="test-model",
+        messages=(ChatMessage(role="user", content="Hello"),),
+    )
+
+    response = registry.generate("mock", request)
+
+    assert response.provider == "mock"
+    assert response.content == "Mock response"
+    assert provider.last_request is request
+
+
+def test_registry_returns_sorted_provider_names():
+    from kryomcode.ai.registry import AIProviderRegistry
+
+    registry = AIProviderRegistry()
+    registry.register(FakeProviderForRegistryTests("openai"))
+    registry.register(FakeProviderForRegistryTests("anthropic"))
+
+    assert registry.provider_names == ("anthropic", "openai")
+
+
+class FakeProviderForRegistryTests:
+    """Minimal provider used only by registry unit tests."""
+
+    def __init__(self, name):
+        self.name = name
+        self.last_request = None
+
+    def generate(self, request):
+        from kryomcode.ai.providers import GenerationResponse
+
+        self.last_request = request
+        return GenerationResponse(
+            content="Mock response",
+            provider=self.name,
+            model=request.model,
+        )
+
+
+class FakeClientForRegistryTests:
+    """Placeholder client for a provider registration test."""
