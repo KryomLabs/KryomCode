@@ -982,3 +982,143 @@ def test_orchestrator_rejects_empty_model(tmp_path):
             provider_name="mock",
             model=" ",
         )
+
+
+# ============================================================
+# Controlled AI tool registry tests
+# ============================================================
+
+
+def test_project_tools_list_safe_project_entries(tmp_path):
+    from kryomcode.ai.tools import create_project_tool_registry
+
+    (tmp_path / "app.py").write_text("print('safe')\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("API_KEY=secret\n", encoding="utf-8")
+    (tmp_path / "node_modules").mkdir()
+
+    registry = create_project_tool_registry(tmp_path)
+
+    result = registry.execute("list_project_files", {})
+    paths = [entry["path"] for entry in result["entries"]]
+
+    assert "app.py" in paths
+    assert ".env" not in paths
+    assert "node_modules" not in paths
+
+
+def test_project_tools_read_text_file(tmp_path):
+    from kryomcode.ai.tools import create_project_tool_registry
+
+    source = tmp_path / "app.py"
+    source.write_text("def greet():\n    return 'hello'\n", encoding="utf-8")
+
+    registry = create_project_tool_registry(tmp_path)
+
+    result = registry.execute(
+        "read_project_file",
+        {"path": "app.py"},
+    )
+
+    assert result["path"] == "app.py"
+    assert "def greet():" in result["content"]
+    assert result["bytes"] > 0
+
+
+def test_project_tools_reject_parent_directory_traversal(tmp_path):
+    from kryomcode.ai.tools import create_project_tool_registry
+
+    outside = tmp_path.parent / "outside.py"
+    outside.write_text("private = True\n", encoding="utf-8")
+
+    registry = create_project_tool_registry(tmp_path)
+
+    with pytest.raises(ValueError, match="traversal"):
+        registry.execute(
+            "read_project_file",
+            {"path": "../outside.py"},
+        )
+
+
+def test_project_tools_reject_sensitive_files(tmp_path):
+    from kryomcode.ai.tools import create_project_tool_registry
+
+    (tmp_path / ".env").write_text("API_KEY=secret\n", encoding="utf-8")
+    registry = create_project_tool_registry(tmp_path)
+
+    with pytest.raises(ValueError, match="sensitive"):
+        registry.execute(
+            "read_project_file",
+            {"path": ".env"},
+        )
+
+
+def test_tool_registry_rejects_unknown_tool():
+    from kryomcode.ai.tools import (
+        ToolRegistry,
+        UnknownToolError,
+    )
+
+    registry = ToolRegistry()
+
+    with pytest.raises(UnknownToolError, match="Unknown tool"):
+        registry.execute("run_terminal_command", {})
+
+
+def test_tool_registry_rejects_unexpected_arguments(tmp_path):
+    from kryomcode.ai.tools import (
+        InvalidToolArguments,
+        create_project_tool_registry,
+    )
+
+    registry = create_project_tool_registry(tmp_path)
+
+    with pytest.raises(InvalidToolArguments, match="Unexpected arguments"):
+        registry.execute(
+            "list_project_files",
+            {"path": ".", "execute_command": "whoami"},
+        )
+
+
+def test_tool_registry_validates_argument_types(tmp_path):
+    from kryomcode.ai.tools import (
+        InvalidToolArguments,
+        create_project_tool_registry,
+    )
+
+    registry = create_project_tool_registry(tmp_path)
+
+    with pytest.raises(InvalidToolArguments, match="integer"):
+        registry.execute(
+            "list_project_files",
+            {"max_entries": "many"},
+        )
+
+
+def test_tool_registry_enforces_read_size_limit(tmp_path):
+    from kryomcode.ai.tools import (
+        InvalidToolArguments,
+        create_project_tool_registry,
+    )
+
+    (tmp_path / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    registry = create_project_tool_registry(tmp_path)
+
+    with pytest.raises(InvalidToolArguments, match="maximum"):
+        registry.execute(
+            "read_project_file",
+            {"path": "app.py", "max_bytes": 100_001},
+        )
+
+
+def test_tool_definitions_do_not_expose_handlers(tmp_path):
+    from kryomcode.ai.tools import create_project_tool_registry
+
+    registry = create_project_tool_registry(tmp_path)
+
+    definitions = registry.definitions()
+
+    assert [item["name"] for item in definitions] == [
+        "list_project_files",
+        "read_project_file",
+    ]
+    assert all("handler" not in item for item in definitions)
