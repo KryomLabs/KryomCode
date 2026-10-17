@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from kryomcode.ai.context import ContextDocument, collect_project_context
@@ -480,3 +482,108 @@ def test_fake_provider_implements_provider_contract():
     assert response.provider == "fake"
     assert response.model == "test-model"
     assert response.content == "Processed: Hello KryomCode"
+
+
+# ============================================================
+# OpenAI provider adapter tests
+# ============================================================
+
+def test_openai_provider_maps_request_and_response():
+    from kryomcode.ai.openai_provider import OpenAIProvider
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return SimpleNamespace(
+                output_text="Generated Python code",
+                usage=SimpleNamespace(
+                    input_tokens=15,
+                    output_tokens=9,
+                ),
+            )
+
+    class FakeClient:
+        def __init__(self):
+            self.responses = FakeResponses()
+
+    client = FakeClient()
+    provider = OpenAIProvider(client=client)
+
+    request = GenerationRequest(
+        model="test-model",
+        messages=(
+            ChatMessage(role="system", content="You are a coding assistant."),
+            ChatMessage(role="user", content="Write a Python function."),
+        ),
+        temperature=0.3,
+        max_output_tokens=512,
+    )
+
+    result = provider.generate(request)
+
+    assert result.provider == "openai"
+    assert result.model == "test-model"
+    assert result.content == "Generated Python code"
+    assert result.input_tokens == 15
+    assert result.output_tokens == 9
+
+    assert client.responses.kwargs["model"] == "test-model"
+    assert client.responses.kwargs["temperature"] == 0.3
+    assert client.responses.kwargs["max_output_tokens"] == 512
+    assert len(client.responses.kwargs["input"]) == 2
+
+
+def test_openai_provider_handles_missing_usage():
+    from kryomcode.ai.openai_provider import OpenAIProvider
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    fake_client = SimpleNamespace(
+        responses=SimpleNamespace(
+            create=lambda **kwargs: SimpleNamespace(
+                output_text="Hello",
+                usage=None,
+            )
+        )
+    )
+
+    provider = OpenAIProvider(client=fake_client)
+    request = GenerationRequest(
+        model="test-model",
+        messages=(ChatMessage(role="user", content="Hello"),),
+    )
+
+    result = provider.generate(request)
+
+    assert result.content == "Hello"
+    assert result.input_tokens is None
+    assert result.output_tokens is None
+
+
+def test_openai_provider_rejects_missing_api_key(monkeypatch):
+    from kryomcode.ai.openai_provider import OpenAIProvider
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="API key"):
+        OpenAIProvider()
+
+
+def test_openai_provider_rejects_missing_output_text():
+    from kryomcode.ai.openai_provider import OpenAIProvider
+    from kryomcode.ai.providers import ChatMessage, GenerationRequest
+
+    fake_client = SimpleNamespace(
+        responses=SimpleNamespace(
+            create=lambda **kwargs: SimpleNamespace(output_text=None)
+        )
+    )
+
+    provider = OpenAIProvider(client=fake_client)
+    request = GenerationRequest(
+        model="test-model",
+        messages=(ChatMessage(role="user", content="Hello"),),
+    )
+
+    with pytest.raises(RuntimeError, match="output_text"):
+        provider.generate(request)
