@@ -1,9 +1,18 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from kryomcode.ai.context import ContextDocument, collect_project_context
+from kryomcode.ai.openai_provider import OpenAIProvider
+from kryomcode.ai.providers import ChatMessage, GenerationRequest
 from kryomcode.ai.selection import select_relevant_context
+from kryomcode.ai.tool_calling import (
+    ToolCall,
+    ToolCallingResponse,
+    ToolResult,
+)
+from kryomcode.ai.tools import ToolDefinition, ToolRegistry
 
 # ============================================================
 # Project context collection tests
@@ -1122,3 +1131,236 @@ def test_tool_definitions_do_not_expose_handlers(tmp_path):
         "read_project_file",
     ]
     assert all("handler" not in item for item in definitions)
+
+
+# ============================================================
+# Provider-independent tool-calling model tests
+# ============================================================
+
+
+
+def test_tool_call_accepts_valid_arguments():
+    call = ToolCall(
+        call_id="call_1",
+        name="read_project_file",
+        arguments={"path": "src/main.py", "max_bytes": 1000},
+    )
+
+    assert call.call_id == "call_1"
+    assert call.name == "read_project_file"
+    assert call.arguments["path"] == "src/main.py"
+
+
+def test_tool_call_rejects_invalid_arguments():
+    with pytest.raises(ValueError, match="arguments"):
+        ToolCall(
+            call_id="call_1",
+            name="read_project_file",
+            arguments={"value": object()},
+        )
+
+
+def test_tool_call_rejects_empty_call_id():
+    with pytest.raises(ValueError, match="call_id"):
+        ToolCall(
+            call_id=" ",
+            name="read_project_file",
+            arguments={},
+        )
+
+
+def test_tool_result_preserves_error_status():
+    result = ToolResult(
+        call_id="call_1",
+        name="read_project_file",
+        content="Access denied",
+        is_error=True,
+    )
+
+    assert result.content == "Access denied"
+    assert result.is_error is True
+
+
+def test_tool_calling_response_accepts_multiple_calls():
+    first = ToolCall("call_1", "list_project_files", {"path": "."})
+    second = ToolCall("call_2", "read_project_file", {"path": "main.py"})
+
+    response = ToolCallingResponse(
+        content="I will inspect the project.",
+        tool_calls=[first, second],
+        provider="openai",
+        model="test-model",
+        finish_reason="tool_calls",
+    )
+
+    assert len(response.tool_calls) == 2
+    assert response.finish_reason == "tool_calls"
+
+
+def test_tool_calling_response_rejects_duplicate_call_ids():
+    first = ToolCall("duplicate", "first_tool", {})
+    second = ToolCall("duplicate", "second_tool", {})
+
+    with pytest.raises(ValueError, match="unique"):
+        ToolCallingResponse(
+            content="",
+            tool_calls=(first, second),
+        )
+
+
+def test_tool_calling_response_rejects_invalid_tool_call():
+    with pytest.raises(TypeError, match="ToolCall"):
+        ToolCallingResponse(
+            content="",
+            tool_calls=("not-a-tool-call",),
+        )
+
+
+# ============================================================
+# OpenAI tool-calling integration tests
+# ============================================================
+
+
+def _make_tool_call_response(call_id, name, arguments):
+    return SimpleNamespace(
+        output=[
+            SimpleNamespace(
+                type="function_call",
+                call_id=call_id,
+                name=name,
+                arguments=json.dumps(arguments),
+            )
+        ],
+        output_text="",
+        usage=None,
+    )
+
+
+def _make_final_response(text):
+    return SimpleNamespace(
+        output=[
+            SimpleNamespace(type="message"),
+        ],
+        output_text=text,
+        usage=None,
+    )
+
+
+def _make_test_registry(handler):
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="inspect_project",
+            description="Inspect a test project.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            handler=handler,
+        )
+    )
+    return registry
+
+
+def _make_test_request():
+    return GenerationRequest(
+        model="test-model",
+        messages=(
+            ChatMessage(role="user", content="Inspect this project."),
+        ),
+    )
+
+
+def test_openai_tool_call_executes_registered_tool():
+    calls = []
+    responses = [
+        _make_tool_call_response(
+            "call_1",
+            "inspect_project",
+            {"path": "."},
+        ),
+        _make_final_response("Project inspected."),
+    ]
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return responses.pop(0)
+
+    client = SimpleNamespace(
+        responses=SimpleNamespace(create=FakeResponses().create)
+    )
+    registry = _make_test_registry(lambda args: {"entries": [args["path"]]})
+
+    result = OpenAIProvider(client=client).generate_with_tools(
+        _make_test_request(),
+        registry,
+    )
+
+    assert result.content == "Project inspected."
+    assert len(result.tool_calls) == 1
+    assert len(calls) == 2
+    assert calls[1]["input"][-1]["type"] == "function_call_output"
+
+
+def test_openai_tool_call_rejects_unknown_tool_without_execution():
+    responses = [
+        _make_tool_call_response("call_1", "unknown_tool", {}),
+        _make_final_response("The requested tool was unavailable."),
+    ]
+
+    def create(**kwargs):
+        return responses.pop(0)
+
+    client = SimpleNamespace(
+        responses=SimpleNamespace(create=create)
+    )
+    registry = _make_test_registry(lambda args: {"unexpected": True})
+
+    result = OpenAIProvider(client=client).generate_with_tools(
+        _make_test_request(),
+        registry,
+    )
+
+    assert result.content == "The requested tool was unavailable."
+    tool_output = result.tool_calls
+    assert len(tool_output) == 1
+
+
+def test_openai_tool_call_iteration_limit_is_enforced():
+    def create(**kwargs):
+        return _make_tool_call_response(
+            "call_1",
+            "inspect_project",
+            {"path": "."},
+        )
+
+    client = SimpleNamespace(
+        responses=SimpleNamespace(create=create)
+    )
+    registry = _make_test_registry(lambda args: {"ok": True})
+
+    with pytest.raises(RuntimeError, match="Maximum tool-call iterations"):
+        OpenAIProvider(client=client).generate_with_tools(
+            _make_test_request(),
+            registry,
+            max_tool_iterations=1,
+        )
+
+
+def test_openai_tool_call_rejects_invalid_iteration_limit():
+    client = SimpleNamespace(
+        responses=SimpleNamespace(create=lambda **kwargs: None)
+    )
+    registry = _make_test_registry(lambda args: {"ok": True})
+
+    with pytest.raises(ValueError, match="max_tool_iterations"):
+        OpenAIProvider(client=client).generate_with_tools(
+            _make_test_request(),
+            registry,
+            max_tool_iterations=0,
+        )
