@@ -128,6 +128,29 @@ function requireProjectPath(
   );
 }
 
+
+/**
+ * Register an IPC handler that only accepts
+ * requests from this application's main frame.
+ */
+function registerSecureHandler(channel, handler) {
+  ipcMain.handle(channel, async (event, ...args) => {
+    if (
+      !mainWindow ||
+      mainWindow.isDestroyed() ||
+      event.sender !== mainWindow.webContents ||
+      event.senderFrame !== event.sender.mainFrame
+    ) {
+      throw new Error(
+        `Blocked unauthorized IPC request: ${channel}`,
+      );
+    }
+
+    return handler(event, ...args);
+  });
+}
+
+
 /**
  * Send an IPC event to the renderer
  * only when the window is still alive.
