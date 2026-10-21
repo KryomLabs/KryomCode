@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest an improvement or new capability for KryomCode.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Suggest a feature that would improve the KryomCode developer experience.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What problem should this feature solve?
+      placeholder: As a developer, I need...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature you want.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any alternative solutions you considered.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature area
+      options:
+        - Editor
+        - AI agent
+        - Terminal
+        - Git and GitHub
+        - Project explorer
+        - Testing and debugging
+        - Performance
+        - Security
+        - Other
+    validations:
+      required: true

@@ -1,4 +1,3 @@
-@"
 # Python
 __pycache__/
 *.py[cod]
@@ -64,4 +63,3 @@ release/
 
 # KryomCode local data
 .kryomcode/
-"@ | Set-Content .gitignore
