@@ -26,7 +26,7 @@
     "concurrently": "^10.0.5",
     "electron": "^44.5.1",
     "oxlint": "^1.81.0",
-    "typescript": "~6.0.2",
+    "typescript": "~7.0.2",
     "vite": "^8.3.0",
     "wait-on": "^9.5.1"
   }
