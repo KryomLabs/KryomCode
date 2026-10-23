@@ -7,14 +7,16 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+
 import Editor, { type OnMount } from "@monaco-editor/react";
 
 import ProjectExplorer from "./components/ProjectExplorer/ProjectExplorer";
 import Problems from "./components/Problems/Problems";
 import Terminal from "./components/Terminal/Terminal";
-type Problem = Parameters<typeof Problems>[0]["problems"][number];
 
 import "./App.css";
+
+type Problem = Parameters<typeof Problems>[0]["problems"][number];
 
 type BottomPanel = "problems" | "terminal" | "tests" | "git" | "ai";
 
@@ -29,12 +31,10 @@ type MaximizedPanel =
   | "explorer"
   | "editor"
   | "intelligence"
-  | "problems"
-  | "terminal"
-  | "tests"
-  | "git"
-  | "ai"
+  | BottomPanel
   | null;
+
+type ResizeTarget = "explorer" | "intelligence" | "bottom" | null;
 
 type EditorTab = {
   path: string;
@@ -49,7 +49,9 @@ type ProblemLocation = {
   column: number;
 };
 
-type ResizeTarget = "explorer" | "intelligence" | "bottom" | null;
+type ProjectEntry = Awaited<
+  ReturnType<typeof window.kryomcode.readDirectory>
+>[number];
 
 const MIN_EXPLORER_WIDTH = 170;
 const MAX_EXPLORER_WIDTH = 480;
@@ -81,17 +83,24 @@ function getFileName(path: string): string {
 }
 
 function getLanguage(path: string): string {
-  const extension = getFileName(path).split(".").pop()?.toLowerCase();
+  const fileName = getFileName(path);
+  const extension = fileName.includes(".")
+    ? fileName.split(".").pop()?.toLowerCase()
+    : "";
 
   const languages: Record<string, string> = {
     ts: "typescript",
     tsx: "typescript",
+    mts: "typescript",
+    cts: "typescript",
     js: "javascript",
     jsx: "javascript",
     mjs: "javascript",
     cjs: "javascript",
     json: "json",
+    jsonc: "json",
     html: "html",
+    htm: "html",
     css: "css",
     scss: "scss",
     less: "less",
@@ -100,8 +109,9 @@ function getLanguage(path: string): string {
     py: "python",
     java: "java",
     c: "c",
-    cpp: "cpp",
     h: "cpp",
+    cc: "cpp",
+    cpp: "cpp",
     hpp: "cpp",
     cs: "csharp",
     go: "go",
@@ -111,6 +121,7 @@ function getLanguage(path: string): string {
     sql: "sql",
     sh: "shell",
     bash: "shell",
+    zsh: "shell",
     yml: "yaml",
     yaml: "yaml",
     xml: "xml",
@@ -118,7 +129,20 @@ function getLanguage(path: string): string {
     toml: "ini",
     ini: "ini",
     env: "ini",
+    dockerfile: "dockerfile",
+    graphql: "graphql",
+    gql: "graphql",
+    kt: "kotlin",
+    swift: "swift",
+    dart: "dart",
+    lua: "lua",
+    r: "r",
+    ipynb: "json",
   };
+
+  if (fileName.toLowerCase() === "dockerfile") {
+    return "dockerfile";
+  }
 
   return languages[extension ?? ""] ?? "plaintext";
 }
@@ -128,27 +152,40 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }
 
 function App() {
   const [projectPath, setProjectPath] = useState("");
-  const [entries, setEntries] = useState<
-    Awaited<ReturnType<typeof window.kryomcode.readDirectory>>
-  >([]);
+
+  const [entries, setEntries] = useState<ProjectEntry[]>([]);
 
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState("");
 
   const [tabs, setTabs] = useState<EditorTab[]>([]);
   const [activeTabPath, setActiveTabPath] = useState("");
+
   const [saveStatus, setSaveStatus] = useState("Ready");
+
+  // Keep Monaco's cursor position in React state so the status bar does not
+  // read a mutable ref during render.
+  const [cursorPosition, setCursorPosition] = useState({
+    lineNumber: 1,
+    column: 1,
+  });
 
   const [activeBottomPanel, setActiveBottomPanel] =
     useState<BottomPanel>("terminal");
 
   const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
+
   const [problems] = useState<Problem[]>([]);
+
   const [pendingProblemLocation, setPendingProblemLocation] =
     useState<ProblemLocation | null>(null);
 
@@ -168,11 +205,15 @@ function App() {
   );
 
   const [resizeTarget, setResizeTarget] = useState<ResizeTarget>(null);
+
   const [maximizedPanel, setMaximizedPanel] =
     useState<MaximizedPanel>(null);
 
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
-  const editorContainerRef = useRef<HTMLElement | null>(null);
+
+  const openRequestsRef = useRef(new Map<string, Promise<void>>());
+
+  const mountedRef = useRef(true);
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.path === activeTabPath) ?? null,
@@ -184,38 +225,75 @@ function App() {
     [tabs],
   );
 
-  const isDirty = useCallback(
-    (tab: EditorTab) => tab.content !== tab.savedContent,
-    [],
-  );
+  const isDirty = useCallback((tab: EditorTab) => {
+    return tab.content !== tab.savedContent;
+  }, []);
+
+  const confirmDiscardChanges = useCallback(() => {
+    if (tabs.every((tab) => !isDirty(tab))) {
+      return true;
+    }
+
+    return window.confirm(
+      "You have unsaved changes. Continue and discard those changes?",
+    );
+  }, [tabs, isDirty]);
+
+  // ---------------------------------------------------------
+  // Project operations
+  // ---------------------------------------------------------
 
   const refreshProject = useCallback(async () => {
-    if (!projectPath) return;
+    if (!projectPath) {
+      setProjectError("Open a project before refreshing the workspace.");
+      return;
+    }
 
     try {
       setProjectLoading(true);
       setProjectError("");
 
       const result = await window.kryomcode.readDirectory(projectPath);
+
+      if (!mountedRef.current) return;
+
       setEntries(result);
+      setSaveStatus("Workspace refreshed");
     } catch (error) {
-      setProjectError(`Could not refresh project: ${getErrorMessage(error)}`);
+      if (!mountedRef.current) return;
+
+      setProjectError(
+        `Could not refresh project: ${getErrorMessage(error)}`,
+      );
+
+      setSaveStatus("Refresh failed");
     } finally {
-      setProjectLoading(false);
+      if (mountedRef.current) {
+        setProjectLoading(false);
+      }
     }
   }, [projectPath]);
 
   const openProject = useCallback(async () => {
     try {
       setProjectError("");
+
       const selectedPath = await window.kryomcode.selectProject();
 
-      if (!selectedPath) return;
+      if (!selectedPath) {
+        return;
+      }
+
+      if (!confirmDiscardChanges()) {
+        return;
+      }
 
       setProjectLoading(true);
       setSaveStatus("Opening project…");
 
       const result = await window.kryomcode.readDirectory(selectedPath);
+
+      if (!mountedRef.current) return;
 
       setProjectPath(selectedPath);
       setEntries(result);
@@ -223,47 +301,96 @@ function App() {
       setActiveTabPath("");
       setPendingProblemLocation(null);
       setMaximizedPanel(null);
+
       setSaveStatus("Project opened");
     } catch (error) {
-      setProjectError(`Could not open project: ${getErrorMessage(error)}`);
+      if (!mountedRef.current) return;
+
+      setProjectError(
+        `Could not open project: ${getErrorMessage(error)}`,
+      );
+
       setSaveStatus("Open failed");
     } finally {
-      setProjectLoading(false);
+      if (mountedRef.current) {
+        setProjectLoading(false);
+      }
     }
-  }, []);
+  }, [confirmDiscardChanges]);
 
-  const openFile = useCallback(async (path: string) => {
-    const existingTab = tabs.find((tab) => tab.path === path);
+  // ---------------------------------------------------------
+  // File operations
+  // ---------------------------------------------------------
 
-    if (existingTab) {
-      setActiveTabPath(path);
-      return;
-    }
+  const openFile = useCallback(
+    async (path: string) => {
+      if (!path) return;
 
-    try {
+      const existingTab = tabs.find((tab) => tab.path === path);
+
+      if (existingTab) {
+        setActiveTabPath(path);
+        setProjectError("");
+        return;
+      }
+
+      const existingRequest = openRequestsRef.current.get(path);
+
+      if (existingRequest) {
+        await existingRequest;
+        setActiveTabPath(path);
+        return;
+      }
+
       setSaveStatus("Opening file…");
+      setProjectError("");
 
-      const content = await window.kryomcode.readFile(path);
+      const request = (async () => {
+        try {
+          const content = await window.kryomcode.readFile(path);
 
-      const newTab: EditorTab = {
-        path,
-        name: getFileName(path),
-        content,
-        savedContent: content,
-      };
+          if (!mountedRef.current) return;
 
-      setTabs((currentTabs) => {
-        const alreadyOpen = currentTabs.some((tab) => tab.path === path);
-        return alreadyOpen ? currentTabs : [...currentTabs, newTab];
-      });
+          const newTab: EditorTab = {
+            path,
+            name: getFileName(path),
+            content,
+            savedContent: content,
+          };
 
-      setActiveTabPath(path);
-      setSaveStatus("Ready");
-    } catch (error) {
-      setSaveStatus("Open failed");
-      setProjectError(`Could not open file: ${getErrorMessage(error)}`);
-    }
-  }, [tabs]);
+          setTabs((currentTabs) => {
+            const alreadyOpen = currentTabs.some(
+              (tab) => tab.path === path,
+            );
+
+            if (alreadyOpen) {
+              return currentTabs;
+            }
+
+            return [...currentTabs, newTab];
+          });
+
+          setActiveTabPath(path);
+          setSaveStatus("Ready");
+        } catch (error) {
+          if (!mountedRef.current) return;
+
+          setSaveStatus("Open failed");
+
+          setProjectError(
+            `Could not open file: ${getErrorMessage(error)}`,
+          );
+        } finally {
+          openRequestsRef.current.delete(path);
+        }
+      })();
+
+      openRequestsRef.current.set(path, request);
+
+      await request;
+    },
+    [tabs],
+  );
 
   const updateActiveContent = useCallback(
     (content: string | undefined) => {
@@ -287,6 +414,7 @@ function App() {
   const saveTab = useCallback(
     async (path: string) => {
       const tab = tabs.find((item) => item.path === path);
+
       if (!tab) return;
 
       if (!isDirty(tab)) {
@@ -294,43 +422,82 @@ function App() {
         return;
       }
 
+      // Capture the exact content being written.
+      // If the user keeps typing while saving, newer edits remain unsaved.
+      const contentBeingSaved = tab.content;
+
       try {
+        setProjectError("");
         setSaveStatus("Saving…");
 
-        await window.kryomcode.writeFile(tab.path, tab.content);
+        await window.kryomcode.writeFile(path, contentBeingSaved);
+
+        if (!mountedRef.current) return;
 
         setTabs((currentTabs) =>
-          currentTabs.map((item) =>
-            item.path === path
-              ? { ...item, savedContent: item.content }
-              : item,
-          ),
+          currentTabs.map((item) => {
+            if (item.path !== path) {
+              return item;
+            }
+
+            return {
+              ...item,
+              savedContent: contentBeingSaved,
+            };
+          }),
         );
 
         setSaveStatus("Saved");
       } catch (error) {
+        if (!mountedRef.current) return;
+
         setSaveStatus("Save failed");
-        setProjectError(`Could not save file: ${getErrorMessage(error)}`);
+
+        setProjectError(
+          `Could not save file: ${getErrorMessage(error)}`,
+        );
       }
     },
     [tabs, isDirty],
   );
 
   const saveAll = useCallback(async () => {
-    const unsavedTabs = tabs.filter(isDirty);
+    const unsavedPaths = tabs
+      .filter(isDirty)
+      .map((tab) => tab.path);
 
-    for (const tab of unsavedTabs) {
-      await saveTab(tab.path);
-    }
-
-    if (unsavedTabs.length === 0) {
+    if (unsavedPaths.length === 0) {
       setSaveStatus("All changes saved");
+      return;
     }
+
+    setSaveStatus("Saving all files…");
+
+    for (const path of unsavedPaths) {
+      if (!mountedRef.current) return;
+
+      await saveTab(path);
+    }
+
+    if (!mountedRef.current) return;
+
+    setTabs((currentTabs) => {
+      const hasUnsavedChanges = currentTabs.some(
+        (tab) => tab.content !== tab.savedContent,
+      );
+
+      if (!hasUnsavedChanges) {
+        setSaveStatus("All changes saved");
+      }
+
+      return currentTabs;
+    });
   }, [tabs, isDirty, saveTab]);
 
   const closeTab = useCallback(
     (path: string) => {
       const tab = tabs.find((item) => item.path === path);
+
       if (!tab) return;
 
       if (isDirty(tab)) {
@@ -342,13 +509,18 @@ function App() {
       }
 
       const currentIndex = tabs.findIndex((item) => item.path === path);
+
       const remainingTabs = tabs.filter((item) => item.path !== path);
 
       setTabs(remainingTabs);
 
       if (activeTabPath === path) {
-        const nextTab =
-          remainingTabs[Math.min(currentIndex, remainingTabs.length - 1)];
+        const nextIndex = Math.min(
+          currentIndex,
+          remainingTabs.length - 1,
+        );
+
+        const nextTab = remainingTabs[nextIndex];
 
         setActiveTabPath(nextTab?.path ?? "");
       }
@@ -357,60 +529,97 @@ function App() {
   );
 
   const closeActiveTab = useCallback(() => {
-    if (activeTabPath) closeTab(activeTabPath);
+    if (activeTabPath) {
+      closeTab(activeTabPath);
+    }
   }, [activeTabPath, closeTab]);
 
-  const handleProblemClick = useCallback((problem: Problem) => {
-    const item = problem as Problem & {
-      filePath?: string;
-      path?: string;
-      file?: string;
-      line?: number;
-      column?: number;
-    };
+  // ---------------------------------------------------------
+  // Editor operations
+  // ---------------------------------------------------------
 
-    const path = item.filePath ?? item.path ?? item.file;
-    if (!path) return;
+  const handleProblemClick = useCallback(
+    (problem: Problem) => {
+      const item = problem as Problem & {
+        filePath?: string;
+        path?: string;
+        file?: string;
+        line?: number;
+        column?: number;
+      };
 
-    const location: ProblemLocation = {
-      path,
-      line: Math.max(1, item.line ?? 1),
-      column: Math.max(1, item.column ?? 1),
-    };
+      const path = item.filePath ?? item.path ?? item.file;
 
-    setPendingProblemLocation(location);
-    void openFile(path);
-  }, [openFile]);
+      if (!path) return;
+
+      const location: ProblemLocation = {
+        path,
+        line: Math.max(1, item.line ?? 1),
+        column: Math.max(1, item.column ?? 1),
+      };
+
+      setPendingProblemLocation(location);
+
+      void openFile(path);
+    },
+    [openFile],
+  );
 
   const handleEditorMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
+
+    const updateCursorPosition = () => {
+      const position = editor.getPosition();
+
+      if (!position) return;
+
+      setCursorPosition({
+        lineNumber: position.lineNumber,
+        column: position.column,
+      });
+    };
+
+    // Initialize the status bar and keep it synchronized with cursor movement.
+    updateCursorPosition();
+    editor.onDidChangeCursorPosition(updateCursorPosition);
   }, []);
 
   useEffect(() => {
     if (!pendingProblemLocation || !activeTab) return;
+
     if (activeTab.path !== pendingProblemLocation.path) return;
 
     const editor = editorRef.current;
+
     if (!editor) return;
 
     editor.revealLineInCenter(pendingProblemLocation.line);
+
     editor.setPosition({
       lineNumber: pendingProblemLocation.line,
       column: pendingProblemLocation.column,
     });
+
     editor.focus();
 
     setPendingProblemLocation(null);
   }, [pendingProblemLocation, activeTab]);
 
+  // ---------------------------------------------------------
+  // Keyboard shortcuts
+  // ---------------------------------------------------------
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const isMac = navigator.platform.toLowerCase().includes("mac");
+
       const modifier = isMac ? event.metaKey : event.ctrlKey;
 
       if (!modifier) return;
 
-      if (event.key.toLowerCase() === "s") {
+      const key = event.key.toLowerCase();
+
+      if (key === "s") {
         event.preventDefault();
 
         if (event.shiftKey) {
@@ -422,7 +631,7 @@ function App() {
         return;
       }
 
-      if (event.key.toLowerCase() === "w") {
+      if (key === "w") {
         event.preventDefault();
         closeActiveTab();
       }
@@ -430,12 +639,19 @@ function App() {
 
     window.addEventListener("keydown", handleKeyDown);
 
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, [activeTabPath, saveTab, saveAll, closeActiveTab]);
 
+  // Warn before leaving the application with unsaved changes.
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (dirtyTabCount === 0) return;
+      const hasUnsavedChanges = tabs.some(
+        (tab) => tab.content !== tab.savedContent,
+      );
+
+      if (!hasUnsavedChanges) return;
 
       event.preventDefault();
       event.returnValue = "";
@@ -443,8 +659,14 @@ function App() {
 
     window.addEventListener("beforeunload", handleBeforeUnload);
 
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [dirtyTabCount]);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [tabs]);
+
+  // ---------------------------------------------------------
+  // Resizable panels
+  // ---------------------------------------------------------
 
   useEffect(() => {
     if (!resizeTarget) return;
@@ -452,7 +674,11 @@ function App() {
     const handlePointerMove = (event: PointerEvent) => {
       if (resizeTarget === "explorer") {
         setExplorerWidth(
-          clamp(event.clientX, MIN_EXPLORER_WIDTH, MAX_EXPLORER_WIDTH),
+          clamp(
+            event.clientX,
+            MIN_EXPLORER_WIDTH,
+            MAX_EXPLORER_WIDTH,
+          ),
         );
       }
 
@@ -477,7 +703,9 @@ function App() {
       }
     };
 
-    const handlePointerUp = () => setResizeTarget(null);
+    const handlePointerUp = () => {
+      setResizeTarget(null);
+    };
 
     document.body.classList.add("kryomcode-resizing");
 
@@ -486,6 +714,7 @@ function App() {
 
     return () => {
       document.body.classList.remove("kryomcode-resizing");
+
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
@@ -495,12 +724,45 @@ function App() {
     if (!maximizedPanel) return;
 
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMaximizedPanel(null);
+      if (event.key === "Escape") {
+        setMaximizedPanel(null);
+      }
     };
 
     window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+    };
   }, [maximizedPanel]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth <= 600) {
+        setExplorerWidth((width) =>
+          Math.min(width, MIN_EXPLORER_WIDTH),
+        );
+
+        setIntelligenceWidth((width) =>
+          Math.min(width, MIN_INTELLIGENCE_WIDTH),
+        );
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const beginResize = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -511,12 +773,15 @@ function App() {
   };
 
   const toggleMaximize = (panel: Exclude<MaximizedPanel, null>) => {
-    setMaximizedPanel((current) => (current === panel ? null : panel));
+    setMaximizedPanel((current) =>
+      current === panel ? null : panel,
+    );
   };
 
   const showBottomPanel = (panel: BottomPanel) => {
     setActiveBottomPanel(panel);
     setBottomPanelVisible(true);
+
     setMaximizedPanel((current) =>
       current === panel ? null : current,
     );
@@ -528,13 +793,19 @@ function App() {
     setSaveStatus(message);
   };
 
+  // ---------------------------------------------------------
+  // Derived UI state
+  // ---------------------------------------------------------
+
   const activeSection = INTELLIGENCE_SECTIONS.find(
     (section) => section.id === intelligenceSection,
   );
 
   const isExplorerMaximized = maximizedPanel === "explorer";
   const isEditorMaximized = maximizedPanel === "editor";
-  const isIntelligenceMaximized = maximizedPanel === "intelligence";
+
+  const isIntelligenceMaximized =
+    maximizedPanel === "intelligence";
 
   const isBottomMaximized =
     maximizedPanel === "problems" ||
@@ -543,9 +814,15 @@ function App() {
     maximizedPanel === "git" ||
     maximizedPanel === "ai";
 
+  // ---------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------
+
   return (
     <div
-      className={`kryomcode ${maximizedPanel ? "has-maximized-panel" : ""}`}
+      className={`kryomcode ${
+        maximizedPanel ? "has-maximized-panel" : ""
+      }`}
       style={
         {
           "--explorer-width": `${explorerWidth}px`,
@@ -554,47 +831,67 @@ function App() {
         } as CSSProperties
       }
     >
+      {/* Top application bar */}
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" aria-hidden="true">
             <span>⬡</span>
           </div>
+
           <span className="brand-name">KryomCode</span>
         </div>
 
         <nav className="menubar" aria-label="Main menu">
-          <button type="button" onClick={openProject}>File</button>
-          <button type="button" onClick={() => setSaveStatus("Edit menu")}>
+          <button type="button" onClick={() => void openProject()}>
+            File
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSaveStatus("Edit menu")}
+          >
             Edit
           </button>
+
           <button
             type="button"
             onClick={() => setSaveStatus("Selection menu")}
           >
             Selection
           </button>
+
           <button
             type="button"
             onClick={() => setSaveStatus("View menu")}
           >
             View
           </button>
-          <button type="button" onClick={() => setSaveStatus("Go menu")}>
+
+          <button
+            type="button"
+            onClick={() => setSaveStatus("Go menu")}
+          >
             Go
           </button>
+
           <button
             type="button"
             onClick={() => setSaveStatus("Run configuration not set")}
           >
             Run
           </button>
+
           <button
             type="button"
             onClick={() => showBottomPanel("terminal")}
           >
             Terminal
           </button>
-          <button type="button" onClick={() => setSaveStatus("Help menu")}>
+
+          <button
+            type="button"
+            onClick={() => setSaveStatus("Help menu")}
+          >
             Help
           </button>
         </nav>
@@ -603,12 +900,13 @@ function App() {
           <button
             type="button"
             className="icon-button"
-            aria-label="Minimize panel layout"
+            aria-label="Restore panel layout"
             title="Restore panels"
             onClick={() => setMaximizedPanel(null)}
           >
             −
           </button>
+
           <button
             type="button"
             className="icon-button"
@@ -621,62 +919,86 @@ function App() {
         </div>
       </header>
 
+      {/* Activity bar */}
       <div className="activity-bar" aria-label="Activity bar">
         <button
           type="button"
-          className="activity-icon"
+          className={`activity-icon ${
+            isExplorerMaximized ? "active" : ""
+          }`}
           title="Explorer"
           aria-label="Explorer"
-          onClick={() => setMaximizedPanel("explorer")}
+          onClick={() => toggleMaximize("explorer")}
         >
           ◫
         </button>
+
         <button
           type="button"
-          className="activity-icon active"
-          title="KryomCode"
-          aria-label="KryomCode"
-          onClick={() => setMaximizedPanel("editor")}
+          className={`activity-icon ${
+            isEditorMaximized ? "active" : ""
+          }`}
+          title="Editor"
+          aria-label="Editor"
+          onClick={() => toggleMaximize("editor")}
         >
           ⬡
         </button>
+
         <button
           type="button"
           className="activity-icon"
-          title="Project"
-          aria-label="Project"
-          onClick={openProject}
+          title="Open project"
+          aria-label="Open project"
+          onClick={() => void openProject()}
         >
           ▰
         </button>
+
         <button
           type="button"
-          className="activity-icon"
+          className={`activity-icon ${
+            activeBottomPanel === "git" && bottomPanelVisible
+              ? "active"
+              : ""
+          }`}
           title="Git"
           aria-label="Git"
           onClick={() => showBottomPanel("git")}
         >
           ⑂
         </button>
+
         <button
           type="button"
-          className="activity-icon"
+          className={`activity-icon ${
+            activeBottomPanel === "ai" && bottomPanelVisible
+              ? "active"
+              : ""
+          }`}
           title="AI Activity"
           aria-label="AI Activity"
           onClick={() => showBottomPanel("ai")}
         >
           ✧
         </button>
+
         <button
           type="button"
-          className="activity-icon"
+          className={`activity-icon ${
+            activeBottomPanel === "tests" && bottomPanelVisible
+              ? "active"
+              : ""
+          }`}
           title="Tests"
           aria-label="Tests"
           onClick={() => showBottomPanel("tests")}
         >
           ✓
         </button>
+
         <div className="activity-spacer" />
+
         <button
           type="button"
           className="activity-icon"
@@ -688,26 +1010,39 @@ function App() {
         </button>
       </div>
 
+      {/* Main workspace */}
       <main
         className={`workspace ${
-          bottomPanelVisible ? "bottom-panel-open" : "bottom-panel-closed"
+          bottomPanelVisible
+            ? "bottom-panel-open"
+            : "bottom-panel-closed"
         }`}
-        ref={(node) => {
-          editorContainerRef.current = node;
-        }}
       >
+        {/* Project Explorer */}
         <aside
           className={`explorer-shell ${
             isExplorerMaximized ? "panel-maximized" : ""
           }`}
-          style={{ width: isExplorerMaximized ? undefined : explorerWidth }}
+          style={{
+            width: isExplorerMaximized
+              ? undefined
+              : explorerWidth,
+          }}
         >
           <div className="panel-floating-actions">
             <button
               type="button"
               className="panel-action-button"
-              title={isExplorerMaximized ? "Restore Explorer" : "Maximize Explorer"}
-              aria-label={isExplorerMaximized ? "Restore Explorer" : "Maximize Explorer"}
+              title={
+                isExplorerMaximized
+                  ? "Restore Explorer"
+                  : "Maximize Explorer"
+              }
+              aria-label={
+                isExplorerMaximized
+                  ? "Restore Explorer"
+                  : "Maximize Explorer"
+              }
               onClick={() => toggleMaximize("explorer")}
             >
               {isExplorerMaximized ? "❐" : "□"}
@@ -717,8 +1052,10 @@ function App() {
           <ProjectExplorer
             projectPath={projectPath}
             entries={entries}
-            onFileSelect={(file) => { void openFile(file.path); }}
-            onRefresh={refreshProject}
+            onFileSelect={(file) => {
+              void openFile(file.path);
+            }}
+            onRefresh={() => void refreshProject()}
           />
         </aside>
 
@@ -728,12 +1065,17 @@ function App() {
             role="separator"
             aria-label="Resize Project Explorer"
             aria-orientation="vertical"
-            onPointerDown={(event) => beginResize(event, "explorer")}
+            onPointerDown={(event) =>
+              beginResize(event, "explorer")
+            }
           />
         )}
 
+        {/* Code Editor */}
         <section
-          className={`editor ${isEditorMaximized ? "panel-maximized" : ""}`}
+          className={`editor ${
+            isEditorMaximized ? "panel-maximized" : ""
+          }`}
         >
           <div className="editor-tabs">
             <button
@@ -759,9 +1101,13 @@ function App() {
                   onClick={() => setActiveTabPath(tab.path)}
                   title={tab.path}
                 >
-                  {isDirty(tab) && <span className="dirty-indicator">●</span>}
+                  {isDirty(tab) && (
+                    <span className="dirty-indicator">●</span>
+                  )}
+
                   <span>{tab.name}</span>
                 </button>
+
                 <button
                   type="button"
                   className="editor-tab-close"
@@ -779,8 +1125,16 @@ function App() {
             <button
               type="button"
               className="panel-action-button"
-              title={isEditorMaximized ? "Restore Editor" : "Maximize Editor"}
-              aria-label={isEditorMaximized ? "Restore Editor" : "Maximize Editor"}
+              title={
+                isEditorMaximized
+                  ? "Restore Editor"
+                  : "Maximize Editor"
+              }
+              aria-label={
+                isEditorMaximized
+                  ? "Restore Editor"
+                  : "Maximize Editor"
+              }
               onClick={() => toggleMaximize("editor")}
             >
               {isEditorMaximized ? "❐" : "□"}
@@ -790,6 +1144,7 @@ function App() {
           {projectError && (
             <div className="app-notice error-notice" role="alert">
               <span>{projectError}</span>
+
               <button
                 type="button"
                 onClick={() => setProjectError("")}
@@ -803,9 +1158,16 @@ function App() {
           {activeTab ? (
             <div className="monaco-container">
               <div className="editor-breadcrumb">
-                <span>{projectPath ? getFileName(projectPath) : "Project"}</span>
+                <span>
+                  {projectPath
+                    ? getFileName(projectPath)
+                    : "Project"}
+                </span>
+
                 <span className="breadcrumb-separator">›</span>
+
                 <span>{activeTab.name}</span>
+
                 {isDirty(activeTab) && (
                   <span className="unsaved-label">Unsaved</span>
                 )}
@@ -823,8 +1185,7 @@ function App() {
                   automaticLayout: true,
                   minimap: { enabled: true },
                   fontSize: 13,
-                  fontFamily:
-                    'Consolas, "Courier New", monospace',
+                  fontFamily: 'Consolas, "Courier New", monospace',
                   fontLigatures: true,
                   tabSize: 2,
                   wordWrap: "off",
@@ -850,9 +1211,10 @@ function App() {
                 </div>
 
                 <h1>From Idea to Working Software</h1>
+
                 <p className="welcome-description">
-                  KryomCode helps you build, iterate, and ship — guided by
-                  your AI engineering partner.
+                  KryomCode helps you build, iterate, and ship — guided
+                  by your AI engineering partner.
                 </p>
 
                 {!projectPath && (
@@ -866,13 +1228,15 @@ function App() {
                   <button
                     type="button"
                     className="welcome-card"
-                    onClick={openProject}
+                    onClick={() => void openProject()}
                   >
                     <span className="welcome-card-icon">✧</span>
+
                     <span className="welcome-card-copy">
                       <strong>Open Project</strong>
                       <small>Open a local project folder</small>
                     </span>
+
                     <span className="welcome-card-arrow">↗</span>
                   </button>
 
@@ -880,14 +1244,18 @@ function App() {
                     type="button"
                     className="welcome-card"
                     onClick={() =>
-                      handleAiAction("Describe the project you want to create")
+                      handleAiAction(
+                        "Describe the project you want to create",
+                      )
                     }
                   >
                     <span className="welcome-card-icon">◈</span>
+
                     <span className="welcome-card-copy">
                       <strong>Create New Project</strong>
                       <small>Start planning a new application</small>
                     </span>
+
                     <span className="welcome-card-arrow">↗</span>
                   </button>
 
@@ -901,10 +1269,12 @@ function App() {
                     }
                   >
                     <span className="welcome-card-icon">＋</span>
+
                     <span className="welcome-card-copy">
                       <strong>New File</strong>
                       <small>Create a file in your project</small>
                     </span>
+
                     <span className="welcome-card-arrow">↗</span>
                   </button>
 
@@ -914,10 +1284,12 @@ function App() {
                     onClick={() => showBottomPanel("terminal")}
                   >
                     <span className="welcome-card-icon">ϟ</span>
+
                     <span className="welcome-card-copy">
                       <strong>Run &amp; Debug</strong>
                       <small>Open your integrated terminal</small>
                     </span>
+
                     <span className="welcome-card-arrow">↗</span>
                   </button>
                 </div>
@@ -925,7 +1297,11 @@ function App() {
                 <div className="recent-projects">
                   <div className="section-heading">
                     <span>Workspace</span>
-                    <button type="button" onClick={openProject}>
+
+                    <button
+                      type="button"
+                      onClick={() => void openProject()}
+                    >
                       Open folder
                     </button>
                   </div>
@@ -934,13 +1310,15 @@ function App() {
                     <button
                       type="button"
                       className="recent-project-row"
-                      onClick={refreshProject}
+                      onClick={() => void refreshProject()}
                     >
                       <span className="recent-project-icon">▰</span>
+
                       <span className="recent-project-copy">
                         <strong>{getFileName(projectPath)}</strong>
                         <small>{projectPath}</small>
                       </span>
+
                       <span className="recent-project-open">↗</span>
                     </button>
                   ) : (
@@ -951,7 +1329,9 @@ function App() {
                   )}
 
                   {projectLoading && (
-                    <div className="loading-message">Loading project…</div>
+                    <div className="loading-message">
+                      Loading project…
+                    </div>
                   )}
                 </div>
               </div>
@@ -965,21 +1345,27 @@ function App() {
             role="separator"
             aria-label="Resize Project Intelligence"
             aria-orientation="vertical"
-            onPointerDown={(event) => beginResize(event, "intelligence")}
+            onPointerDown={(event) =>
+              beginResize(event, "intelligence")
+            }
           />
         )}
 
+        {/* Project Intelligence */}
         <aside
           className={`planner ${
             isIntelligenceMaximized ? "panel-maximized" : ""
           }`}
           style={{
-            width: isIntelligenceMaximized ? undefined : intelligenceWidth,
+            width: isIntelligenceMaximized
+              ? undefined
+              : intelligenceWidth,
           }}
         >
           <div className="planner-header">
             <div className="planner-title">
               <span className="ai-logo">✧</span>
+
               <div>
                 <strong>Project Intelligence</strong>
                 <small>AI engineering partner</small>
@@ -1004,6 +1390,7 @@ function App() {
               >
                 {isIntelligenceMaximized ? "❐" : "□"}
               </button>
+
               <button
                 type="button"
                 className="panel-action-button"
@@ -1022,7 +1409,13 @@ function App() {
                 <span className="status-pulse" />
                 PROJECT OVERVIEW
               </div>
-              <h2>{projectPath ? getFileName(projectPath) : "Your project"}</h2>
+
+              <h2>
+                {projectPath
+                  ? getFileName(projectPath)
+                  : "Your project"}
+              </h2>
+
               <p>
                 {projectPath
                   ? "Your workspace is ready. Explore your files, review project structure, and use AI Activity to plan your next implementation step."
@@ -1042,20 +1435,29 @@ function App() {
                     type="button"
                     key={section.id}
                     className={`intelligence-nav-item ${
-                      intelligenceSection === section.id ? "active" : ""
+                      intelligenceSection === section.id
+                        ? "active"
+                        : ""
                     }`}
-                    onClick={() => setIntelligenceSection(section.id)}
+                    onClick={() =>
+                      setIntelligenceSection(section.id)
+                    }
                   >
                     <span className="intelligence-nav-icon">
                       {section.icon}
                     </span>
+
                     <span className="intelligence-nav-label">
                       <span className="intelligence-nav-number">
                         {String(index + 1).padStart(2, "0")}
                       </span>
+
                       {section.label}
                     </span>
-                    <span className="intelligence-nav-chevron">›</span>
+
+                    <span className="intelligence-nav-chevron">
+                      ›
+                    </span>
                   </button>
                 ))}
               </div>
@@ -1071,8 +1473,12 @@ function App() {
                 <span className="focus-card-icon">
                   {activeSection?.icon ?? "◈"}
                 </span>
+
                 <div>
-                  <strong>{activeSection?.label ?? "Requirements"}</strong>
+                  <strong>
+                    {activeSection?.label ?? "Requirements"}
+                  </strong>
+
                   <p>
                     {projectPath
                       ? "Review your project and choose the next engineering task."
@@ -1104,7 +1510,9 @@ function App() {
                 type="button"
                 className="planner-action"
                 onClick={() =>
-                  handleAiAction("Review project implementation and problems")
+                  handleAiAction(
+                    "Review project implementation and problems",
+                  )
                 }
               >
                 <span>✓</span>
@@ -1136,6 +1544,7 @@ function App() {
           </div>
         </aside>
 
+        {/* Bottom panel */}
         {bottomPanelVisible && (
           <div
             className={`bottom-panel-content ${
@@ -1152,7 +1561,9 @@ function App() {
               role="separator"
               aria-label="Resize bottom panel"
               aria-orientation="horizontal"
-              onPointerDown={(event) => beginResize(event, "bottom")}
+              onPointerDown={(event) =>
+                beginResize(event, "bottom")
+              }
             />
 
             <div className="bottom-panel-header">
@@ -1166,6 +1577,7 @@ function App() {
                 >
                   TERMINAL
                 </button>
+
                 <button
                   type="button"
                   className={
@@ -1174,27 +1586,39 @@ function App() {
                   onClick={() => setActiveBottomPanel("problems")}
                 >
                   PROBLEMS
+
                   {problems.length > 0 && (
-                    <span className="panel-count">{problems.length}</span>
+                    <span className="panel-count">
+                      {problems.length}
+                    </span>
                   )}
                 </button>
+
                 <button
                   type="button"
-                  className={activeBottomPanel === "tests" ? "active" : ""}
+                  className={
+                    activeBottomPanel === "tests" ? "active" : ""
+                  }
                   onClick={() => setActiveBottomPanel("tests")}
                 >
                   TESTS
                 </button>
+
                 <button
                   type="button"
-                  className={activeBottomPanel === "git" ? "active" : ""}
+                  className={
+                    activeBottomPanel === "git" ? "active" : ""
+                  }
                   onClick={() => setActiveBottomPanel("git")}
                 >
                   GIT
                 </button>
+
                 <button
                   type="button"
-                  className={activeBottomPanel === "ai" ? "active" : ""}
+                  className={
+                    activeBottomPanel === "ai" ? "active" : ""
+                  }
                   onClick={() => setActiveBottomPanel("ai")}
                 >
                   AI ACTIVITY
@@ -1205,12 +1629,21 @@ function App() {
                 <button
                   type="button"
                   className="panel-action-button"
-                  title={isBottomMaximized ? "Restore panel" : "Maximize panel"}
-                  aria-label={isBottomMaximized ? "Restore panel" : "Maximize panel"}
+                  title={
+                    isBottomMaximized
+                      ? "Restore panel"
+                      : "Maximize panel"
+                  }
+                  aria-label={
+                    isBottomMaximized
+                      ? "Restore panel"
+                      : "Maximize panel"
+                  }
                   onClick={() => toggleMaximize(activeBottomPanel)}
                 >
                   {isBottomMaximized ? "❐" : "□"}
                 </button>
+
                 <button
                   type="button"
                   className="panel-action-button"
@@ -1242,24 +1675,32 @@ function App() {
                 <div className="utility-panel">
                   <div className="utility-panel-heading">
                     <span className="utility-panel-icon">✓</span>
+
                     <div>
                       <strong>Tests</strong>
-                      <p>Review and run your project's test suite.</p>
+                      <p>
+                        Review and run your project's test suite.
+                      </p>
                     </div>
                   </div>
 
                   <div className="utility-empty-state">
                     <span className="utility-empty-icon">◉</span>
+
                     <strong>Test runner</strong>
+
                     <p>
-                      Open the terminal and run your project's test command.
-                      Test discovery and result integration can be connected
-                      here next.
+                      Open the terminal and run your project's test
+                      command. Test discovery and result integration
+                      can be connected here next.
                     </p>
+
                     <button
                       type="button"
                       className="primary-button"
-                      onClick={() => setActiveBottomPanel("terminal")}
+                      onClick={() =>
+                        setActiveBottomPanel("terminal")
+                      }
                     >
                       Open Terminal
                     </button>
@@ -1271,6 +1712,7 @@ function App() {
                 <div className="utility-panel">
                   <div className="utility-panel-heading">
                     <span className="utility-panel-icon">⑂</span>
+
                     <div>
                       <strong>Source Control</strong>
                       <p>Git workspace</p>
@@ -1279,16 +1721,21 @@ function App() {
 
                   <div className="utility-empty-state">
                     <span className="utility-empty-icon">⑂</span>
+
                     <strong>Source control</strong>
+
                     <p>
                       {projectPath
                         ? "Use the terminal to inspect branches, changes, and repository status. Git integration can be connected to the source-control API next."
                         : "Open a project folder to start working with source control."}
                     </p>
+
                     <button
                       type="button"
                       className="primary-button"
-                      onClick={() => setActiveBottomPanel("terminal")}
+                      onClick={() =>
+                        setActiveBottomPanel("terminal")
+                      }
                     >
                       Open Terminal
                     </button>
@@ -1299,18 +1746,25 @@ function App() {
               {activeBottomPanel === "ai" && (
                 <div className="utility-panel ai-activity-panel">
                   <div className="utility-panel-heading">
-                    <span className="utility-panel-icon ai-logo">✧</span>
+                    <span className="utility-panel-icon ai-logo">
+                      ✧
+                    </span>
+
                     <div>
                       <strong>AI Activity</strong>
-                      <p>Project assistant and engineering tasks</p>
+                      <p>
+                        Project assistant and engineering tasks
+                      </p>
                     </div>
                   </div>
 
                   <div className="ai-activity-content">
                     <div className="ai-activity-message">
                       <span className="ai-activity-avatar">✧</span>
+
                       <div>
                         <strong>KryomCode Assistant</strong>
+
                         <p>
                           {projectPath
                             ? `Workspace selected: ${projectPath}. Choose a task to continue.`
@@ -1328,17 +1782,23 @@ function App() {
                       >
                         Analyze project
                       </button>
+
                       <button
                         type="button"
                         onClick={() =>
-                          setSaveStatus("Implementation plan requested")
+                          setSaveStatus(
+                            "Implementation plan requested",
+                          )
                         }
                       >
                         Create implementation plan
                       </button>
+
                       <button
                         type="button"
-                        onClick={() => setActiveBottomPanel("problems")}
+                        onClick={() =>
+                          setActiveBottomPanel("problems")
+                        }
                       >
                         Review problems
                       </button>
@@ -1351,6 +1811,7 @@ function App() {
         )}
       </main>
 
+      {/* Status bar */}
       <footer className="statusbar">
         <div className="statusbar-left">
           <button
@@ -1375,7 +1836,9 @@ function App() {
           >
             <span className="status-warning">⚠</span>
             Problems
-            <span className="status-number">{problems.length}</span>
+            <span className="status-number">
+              {problems.length}
+            </span>
           </button>
         </div>
 
@@ -1383,10 +1846,11 @@ function App() {
           {activeTab && (
             <>
               <span className="statusbar-item">
-                Ln {editorRef.current?.getPosition()?.lineNumber ?? 1},
-                {" "}Col {editorRef.current?.getPosition()?.column ?? 1}
+                Ln {cursorPosition.lineNumber}, Col {cursorPosition.column}
               </span>
+
               <span className="statusbar-item">Spaces: 2</span>
+
               <span className="statusbar-item">
                 {getLanguage(activeTab.path)}
               </span>
@@ -1402,9 +1866,13 @@ function App() {
             title="Save all files"
           >
             <span>▣</span>
+
             {saveStatus}
+
             {dirtyTabCount > 0 && (
-              <span className="status-number">{dirtyTabCount} unsaved</span>
+              <span className="status-number">
+                {dirtyTabCount} unsaved
+              </span>
             )}
           </button>
         </div>
