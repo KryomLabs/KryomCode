@@ -1,40 +1,227 @@
+/* =========================================================
+   KRYOMCODE — GLOBAL STYLES
+   File: app/src/index.css
+   Purpose: Global theme, reset, typography and base layout
+   ========================================================= */
+
+/* -------------------------
+   1. Design Tokens
+   ------------------------- */
+
 :root {
-  font-family: Inter, "Segoe UI", sans-serif;
-  color: #e6edf3;
-  background: #090c12;
+  font-family:
+    Inter,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+
+  color-scheme: dark;
+  color: var(--text-primary);
+  background: var(--app-bg);
+
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
+  /* Application backgrounds */
   --app-bg: #090c12;
+  --app-bg-elevated: #0b1018;
+
+  /* Panel backgrounds */
   --panel-bg: #0d1119;
   --panel-secondary: #111722;
+  --panel-tertiary: #151c28;
+  --panel-hover: #1a2331;
+  --panel-active: #202b3a;
+
+  /* Borders */
   --border-color: #252c38;
+  --border-subtle: #1b2230;
+  --border-strong: #343e4e;
+
+  /* Text */
   --text-primary: #e6edf3;
-  --text-secondary: #8b95a7;
+  --text-secondary: #a0aaba;
+  --text-muted: #737f92;
+  --text-disabled: #505b6b;
+
+  /* Brand and interaction colors */
   --accent-color: #42c8f5;
+  --accent-hover: #72d8fa;
+  --accent-active: #20b4e6;
+  --accent-soft: rgb(66 200 245 / 12%);
+  --accent-border: rgb(66 200 245 / 35%);
+
+  /* Status colors */
+  --success-color: #3fb950;
+  --warning-color: #d29922;
+  --error-color: #f85149;
+  --info-color: #58a6ff;
+
+  /* Editor */
+  --editor-bg: #090c12;
+  --editor-gutter-bg: #090c12;
+  --editor-line-number: #667085;
+  --editor-active-line: rgb(255 255 255 / 3%);
+
+  /* Layout */
+  --titlebar-height: 36px;
+  --activitybar-width: 48px;
+  --sidebar-width: 250px;
+  --statusbar-height: 24px;
+
+  /* Shape */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Shadows */
+  --shadow-sm: 0 2px 8px rgb(0 0 0 / 18%);
+  --shadow-md: 0 8px 24px rgb(0 0 0 / 28%);
+  --shadow-lg: 0 16px 48px rgb(0 0 0 / 36%);
+
+  /* Motion */
+  --transition-fast: 120ms ease;
+  --transition-normal: 180ms ease;
 }
 
-* {
+
+/* -------------------------
+   2. Global Reset
+   ------------------------- */
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
-html,
-body,
-#root {
+html {
   width: 100%;
-  min-width: 0;
   height: 100%;
-  min-height: 100%;
+  min-width: 0;
   margin: 0;
+
+  background: var(--app-bg);
+
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+
   overflow: hidden;
+
   background: var(--app-bg);
   color: var(--text-primary);
+
+  font-family:
+    Inter,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+
+  font-size: 13px;
+  line-height: 1.5;
 }
+
+#root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+
+  overflow: hidden;
+
+  background: var(--app-bg);
+}
+
+
+/* -------------------------
+   3. Typography
+   ------------------------- */
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+
+  color: var(--text-primary);
+
+  font-family: inherit;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+p {
+  margin: 0;
+}
+
+strong,
+b {
+  font-weight: 600;
+}
+
+small {
+  font-size: 12px;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family:
+    "Cascadia Code",
+    "JetBrains Mono",
+    "Fira Code",
+    Consolas,
+    "Courier New",
+    monospace;
+}
+
+code {
+  font-size: 0.95em;
+}
+
+pre {
+  margin: 0;
+  white-space: pre;
+}
+
+a {
+  color: var(--accent-color);
+  text-decoration: none;
+
+  transition: color var(--transition-fast);
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+
+/* -------------------------
+   4. Form Elements
+   ------------------------- */
 
 button,
 input,
@@ -47,16 +234,97 @@ button {
   color: inherit;
 }
 
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
+button,
+input,
+textarea,
+select {
+  accent-color: var(--accent-color);
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+input,
+textarea,
+select {
+  color: var(--text-primary);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+textarea {
+  resize: vertical;
+}
+
+input,
+textarea,
+select {
+  background-color: var(--panel-bg);
+}
+
+
+/* -------------------------
+   5. Focus Accessibility
+   ------------------------- */
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
   outline: 2px solid var(--accent-color);
   outline-offset: 2px;
 }
 
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+[tabindex="-1"]:focus {
+  outline: none;
+}
+
+
+/* -------------------------
+   6. Text Selection
+   ------------------------- */
+
 ::selection {
-  background: #164e63;
   color: #ffffff;
+  background: #164e63;
+}
+
+::-moz-selection {
+  color: #ffffff;
+  background: #164e63;
+}
+
+
+/* -------------------------
+   7. Scrollbars
+   ------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #303948 transparent;
 }
 
 ::-webkit-scrollbar {
@@ -71,6 +339,123 @@ textarea:focus-visible {
 ::-webkit-scrollbar-thumb {
   background: #303948;
   border: 2px solid transparent;
-  background-clip: padding-box;
   border-radius: 8px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #465368;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: #596a82;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+
+/* -------------------------
+   8. Images and Media
+   ------------------------- */
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+img,
+video {
+  display: block;
+}
+
+svg {
+  flex-shrink: 0;
+}
+
+
+/* -------------------------
+   9. Layout Utilities
+   ------------------------- */
+
+[hidden] {
+  display: none !important;
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.min-w-0 {
+  min-width: 0;
+}
+
+.min-h-0 {
+  min-height: 0;
+}
+
+
+/* -------------------------
+   10. Desktop Application
+   ------------------------- */
+
+html,
+body,
+#root {
+  overscroll-behavior: none;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* Allow text selection in editable content. */
+
+input,
+textarea,
+[contenteditable="true"],
+.monaco-editor,
+.monaco-editor *,
+.monaco-editor textarea {
+  user-select: text;
+}
+
+/* Keep application panels within the viewport. */
+
+#root > * {
+  min-width: 0;
+  min-height: 0;
+}
+
+
+/* -------------------------
+   11. Reduced Motion
+   ------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
