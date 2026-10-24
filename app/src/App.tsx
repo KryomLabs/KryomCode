@@ -8,11 +8,16 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
+import { filesystemService } from "./services/filesystem";
 import Editor, { type OnMount } from "@monaco-editor/react";
 
 import ProjectExplorer from "./components/ProjectExplorer/ProjectExplorer";
 import Problems from "./components/Problems/Problems";
 import Terminal from "./components/Terminal/Terminal";
+import Requirements from "./components/ProjectIntelligence/Requirements";
+import Architecture from "./components/ProjectIntelligence/Architecture";
+import ProjectPlan from "./components/ProjectIntelligence/ProjectPlan";
+import Testing from "./components/ProjectIntelligence/Testing";
 
 import "./App.css";
 
@@ -253,7 +258,7 @@ function App() {
       setProjectLoading(true);
       setProjectError("");
 
-      const result = await window.kryomcode.readDirectory(projectPath);
+      const result = await filesystemService.readDirectory(projectPath);
 
       if (!mountedRef.current) return;
 
@@ -278,7 +283,7 @@ function App() {
     try {
       setProjectError("");
 
-      const selectedPath = await window.kryomcode.selectProject();
+      const selectedPath = await filesystemService.selectProject();
 
       if (!selectedPath) {
         return;
@@ -291,7 +296,7 @@ function App() {
       setProjectLoading(true);
       setSaveStatus("Opening project…");
 
-      const result = await window.kryomcode.readDirectory(selectedPath);
+      const result = await filesystemService.readDirectory(selectedPath);
 
       if (!mountedRef.current) return;
 
@@ -347,7 +352,7 @@ function App() {
 
       const request = (async () => {
         try {
-          const content = await window.kryomcode.readFile(path);
+          const content = await filesystemService.readFile(path);
 
           if (!mountedRef.current) return;
 
@@ -430,7 +435,7 @@ function App() {
         setProjectError("");
         setSaveStatus("Saving…");
 
-        await window.kryomcode.writeFile(path, contentBeingSaved);
+        await filesystemService.writeFile(path, contentBeingSaved);
 
         if (!mountedRef.current) return;
 
@@ -1462,6 +1467,28 @@ function App() {
                 ))}
               </div>
             </section>
+
+{
+  intelligenceSection === "requirements" ? (<Requirements/>):
+  intelligenceSection === "architecture" ? (<Architecture/>):
+  intelligenceSection === "implementation" ? (<ProjectPlan/>):
+  intelligenceSection === "testing" ? (<Testing/>):
+
+        (<section className="planner-section">
+          <div className="planner-section-heading">
+            <span className="section-heading-icon">
+            {activeSection?.icon ?? "◈"}
+          </span>
+        <strong>{activeSection?.label ?? "Engineering Plan"}</strong>
+      </div>
+
+    <p className="requirements-progress">
+      This workspace is being prepared. Requirements are available now;
+      additional planning features will be implemented next.
+    </p>
+  </section>
+)}
+
 
             <section className="planner-section">
               <div className="planner-section-heading">
