@@ -130,12 +130,13 @@ Please check the repository's license and contribution guidelines before submitt
 
 ## 📄 License
 
-The project license has not yet been specified. Licensing will be added once the project's open-source license is selected.
+KryomCode is licensed under the MIT License.
+See the [LICENSE](LICENSE) file for details.
 
 ## 🎯 Vision
 
 KryomCode aims to make AI-assisted software development more accessible by combining a familiar coding workspace with increasingly capable AI tools.
 
-### From prompt to code. From code to a working project.
+### From prompt to code. From code to a working project
 
 Built by KryomLabs.
