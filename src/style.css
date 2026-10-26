@@ -172,3 +172,62 @@ summary.tree-row {
   color: #fff;
   overflow-wrap: anywhere;
 }
+
+.terminal-panel {
+  width: 340px;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  background: #111116;
+  border-left: 1px solid #292930;
+}
+
+.terminal-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid #292930;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.terminal-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid #292930;
+}
+
+.terminal-input input {
+  width: 100%;
+  min-width: 0;
+  color: #f4f4f5;
+  background: #1c1c23;
+  border: 1px solid #363640;
+  border-radius: 5px;
+  padding: 8px;
+  outline: none;
+}
+
+.terminal-input input:focus {
+  border-color: #7777ef;
+}
+
+.prompt-symbol {
+  color: #a5b4fc;
+}
+
+.terminal-output {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #c9cad5;
+  font: 12px/1.7 Consolas, monospace;
+}

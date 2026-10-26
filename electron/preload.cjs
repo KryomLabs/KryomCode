@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('kryom', {
   platform: process.platform,
+runCommand: (command) =>
+  ipcRenderer.invoke('terminal:run', command),
 
   versions: {
     electron: process.versions.electron,

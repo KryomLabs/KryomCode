@@ -13,6 +13,12 @@ function App() {
   const [status, setStatus] = useState('Ready')
   const [error, setError] = useState('')
 
+  const [command, setCommand] = useState('npm run build')
+  const [terminalOutput, setTerminalOutput] = useState(
+    'Open a project to run commands.',
+  )
+  const [running, setRunning] = useState(false)
+
   async function openWorkspace() {
     try {
       setError('')
@@ -24,6 +30,7 @@ function App() {
         setFileName('')
         setContent('')
         setSavedContent('')
+        setTerminalOutput('Project opened. Enter a command to run it.')
         setStatus('Project opened')
       }
     } catch (e) {
@@ -72,6 +79,7 @@ function App() {
             >
               📁 {node.name}
             </summary>
+
             {renderTree(node.children ?? [], depth + 1)}
           </details>
         ) : (
@@ -82,7 +90,7 @@ function App() {
               (activeFile === node.path ? 'selected' : '')
             }
             style={{ paddingLeft: 12 + depth * 14 }}
-            onClick={() => openFile(node)}
+            onClick={() => void openFile(node)}
           >
             📄 {node.name}
           </button>
@@ -91,17 +99,50 @@ function App() {
     ))
   }
 
+  async function runTerminalCommand() {
+    if (!workspace || running || !command.trim()) return
+
+    setRunning(true)
+    setError('')
+    setTerminalOutput(`> ${command}\nRunning...\n`)
+
+    try {
+      const result = await window.kryom.runCommand(command)
+
+      setTerminalOutput(
+        `> ${command}\n${result.output}\n\nExit code: ${result.exitCode}`,
+      )
+
+      setStatus(
+        result.exitCode === 0
+          ? 'Command completed'
+          : 'Command failed',
+      )
+    } catch (e) {
+      setTerminalOutput(`Terminal error: ${String(e)}`)
+      setStatus('Terminal error')
+    } finally {
+      setRunning(false)
+    }
+  }
+
   return (
     <main className="ide">
       <header className="topbar">
         <strong className="brand">KryomCode</strong>
-        <button onClick={openWorkspace}>Open Project</button>
+
+        <button onClick={() => void openWorkspace()}>
+          Open Project
+        </button>
+
         <span className="muted">
           {workspace?.root ?? 'No project selected'}
         </span>
+
         <span className="spacer" />
+
         <button
-          onClick={saveFile}
+          onClick={() => void saveFile()}
           disabled={!activeFile || content === savedContent}
         >
           Save File
@@ -111,15 +152,19 @@ function App() {
       <section className="workspace">
         <aside className="sidebar">
           <div className="section-title">EXPLORER</div>
+
           {workspace ? (
             <>
               <div className="root-name">
                 📁 {workspace.root.split(/[\\/]/).pop()}
               </div>
+
               {renderTree(workspace.tree)}
             </>
           ) : (
-            <p className="muted">Open a folder to get started.</p>
+            <p className="muted">
+              Open a folder to get started.
+            </p>
           )}
         </aside>
 
@@ -148,9 +193,47 @@ function App() {
           ) : (
             <div className="welcome">
               <h1>Your workspace.</h1>
-              <p>Open a project and select a file to start editing.</p>
+              <p>
+                Open a project and select a file to start editing.
+              </p>
             </div>
           )}
+        </section>
+
+        <section className="terminal-panel">
+          <div className="terminal-heading">
+            <span>TERMINAL</span>
+            <span className="muted">
+              {running ? 'Running command...' : 'Project workspace'}
+            </span>
+          </div>
+
+          <form
+            className="terminal-input"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void runTerminalCommand()
+            }}
+          >
+            <span className="prompt-symbol">&gt;</span>
+
+            <input
+              aria-label="Terminal command"
+              value={command}
+              onChange={(event) => setCommand(event.target.value)}
+              placeholder="Enter a command..."
+              disabled={!workspace || running}
+            />
+
+            <button
+              type="submit"
+              disabled={!workspace || running || !command.trim()}
+            >
+              {running ? 'Running…' : 'Run'}
+            </button>
+          </form>
+
+          <pre className="terminal-output">{terminalOutput}</pre>
         </section>
       </section>
 
