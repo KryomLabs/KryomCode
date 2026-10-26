@@ -1,15 +1,17 @@
 function App() {
   return (
     <main className="app">
-      <div className="status">KRYOMCODE / INITIAL BUILD</div>
-      <h1>Build something intelligent.</h1>
-      <p>
-        Your AI development workspace starts here.
-      </p>
+      <div className="status">KRYOMCODE / DESKTOP</div>
+      <h1>Welcome to KryomCode.</h1>
+      <p>Your desktop development workspace is running.</p>
+
       <div className="panel">
         <span className="dot" />
-        Workspace initialized
+        Electron connected successfully
       </div>
+
+      <p>Platform: {window.kryom.platform}</p>
+      <p>Electron: {window.kryom.versions.electron}</p>
     </main>
   )
 }
