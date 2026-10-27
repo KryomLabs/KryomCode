@@ -2,8 +2,6 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('kryom', {
   platform: process.platform,
-runCommand: (command) =>
-  ipcRenderer.invoke('terminal:run', command),
 
   versions: {
     electron: process.versions.electron,
@@ -18,4 +16,10 @@ runCommand: (command) =>
 
   saveFile: (filePath, content) =>
     ipcRenderer.invoke('workspace:save-file', filePath, content),
+
+  runCommand: (command) =>
+    ipcRenderer.invoke('terminal:run', command),
+
+  askAI: (payload) =>
+    ipcRenderer.invoke('ai:chat', payload),
 })

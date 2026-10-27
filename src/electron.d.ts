@@ -10,6 +10,16 @@ interface KryomWorkspace {
   tree: KryomNode[]
 }
 
+interface KryomAIMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+interface KryomAIResponse {
+  answer: string
+  model: string
+}
+
 interface KryomAPI {
   platform: string
 
@@ -34,6 +44,12 @@ interface KryomAPI {
     timedOut: boolean
     outputLimited: boolean
   }>
+
+  askAI: (payload: {
+    prompt: string
+    context?: string
+    history?: KryomAIMessage[]
+  }) => Promise<KryomAIResponse>
 }
 
 interface Window {
