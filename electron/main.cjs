@@ -15,16 +15,16 @@ const IGNORED = new Set([
 ])
 
 function isInsideWorkspace(filePath) {
-if (!workspaceRoot) return false
+  if (!workspaceRoot) return false
 
-const relative = path.relative(workspaceRoot, filePath)
+  const relative = path.relative(workspaceRoot, filePath)
 
-return (
-relative === '' ||
-(!path.isAbsolute(relative) &&
-relative !== '..' &&
-!relative.startsWith("..${path.sep}"))
-)
+  return (
+    relative === '' ||
+    (!path.isAbsolute(relative) &&
+      relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`))
+  )
 }
 
 async function buildTree(dir, depth = 0, counter = { count: 0 }) {
