@@ -40,8 +40,8 @@ Install the following:
 
 ### 1. Clone the repository
 
-git clone https://github.com/KryomLabs/KryomCode.git
-cd KryomCode
+git clone https://github.com/KryomLabs/kryomcode.git
+cd kryomcode
 
 «If your repository uses a different GitHub owner or capitalization, replace the clone URL with your actual repository URL.»
 
