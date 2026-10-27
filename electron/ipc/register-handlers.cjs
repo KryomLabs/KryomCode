@@ -1,5 +1,12 @@
 const registerWorkspaceIPC = require('./workspace.ipc.cjs')
 const registerFilesystemIPC = require('./filesystem.ipc.cjs')
+const registerTerminalIPC = require('./terminal.ipc.cjs')
+const registerAIIPC = require('./ai.ipc.cjs')
+const registerGitIPC = require('./git.ipc.cjs')
+const registerDiagnosticsIPC = require('./diagnostics.ipc.cjs')
+const registerIntelligenceIPC = require('./project-intelligence.ipc.cjs')
+const registerAgentIPC = require('./agent.ipc.cjs')
+const registerSettingsIPC = require('./settings.ipc.cjs')
 
 module.exports = function registerHandlers({
   getMainWindow,
@@ -11,6 +18,34 @@ module.exports = function registerHandlers({
   })
 
   registerFilesystemIPC({
+    isTrustedSender,
+  })
+
+  registerTerminalIPC({
+    isTrustedSender,
+  })
+
+  registerAIIPC({
+    isTrustedSender,
+  })
+
+  registerGitIPC({
+    isTrustedSender,
+  })
+
+  registerDiagnosticsIPC({
+    isTrustedSender,
+  })
+
+  registerIntelligenceIPC({
+    isTrustedSender,
+  })
+
+  registerAgentIPC({
+    isTrustedSender,
+  })
+
+  registerSettingsIPC({
     isTrustedSender,
   })
 }

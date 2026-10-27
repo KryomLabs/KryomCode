@@ -31,6 +31,12 @@ async function setWorkspaceRoot(directoryPath) {
   return workspaceRoot
 }
 
+function closeWorkspace() {
+  workspaceRoot = null
+
+  return { success: true }
+}
+
 function isInsideWorkspace(targetPath) {
   if (!workspaceRoot || typeof targetPath !== 'string') {
     return false
@@ -97,6 +103,7 @@ async function buildTree(
 module.exports = {
   getWorkspaceRoot,
   setWorkspaceRoot,
+  closeWorkspace,
   isInsideWorkspace,
   buildTree,
 }

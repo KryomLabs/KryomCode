@@ -1,0 +1,65 @@
+# KryomCode Backend Limitations (Phase 1)
+
+Explicitly known limits after the Phase 1 backend gate. All items below
+are verified statements, not guesses.
+
+## Verification status
+
+- Live Meta API smoke tests passed on 2026-10-28 (one request per
+  model, prompt "Reply with exactly: KRYOMCODE_OK"): muse-spark-1.3
+  answered in ~4.1 s and muse-wonder-1.0 in ~2.5 s. Both returned the
+  exact marker with the expected model echo. No retries were needed.
+  Responses are not persisted to chat history by the smoke path.
+- Electron was not launched live in this headless session. `npm run build`
+  (tsc + Vite) passes; dev/prod startup needs a manual run.
+- The production `dist/` fallback in `loadApp` is implemented but
+  unexecuted.
+- Phase 3 (2026-10-27): `npm run pack` produced
+  `release/win-unpacked/KryomCode.exe` and `npm run dist` produced the
+  unsigned NSIS installer `release/KryomCode Setup 0.1.0.exe` (default
+  Electron icon, no signing certificate). The packaged asar was
+  verified to contain `dist/index.html`, `electron/main.cjs`,
+  `electron/preload.cjs`, and `dotenv`, with no `.env` or test files.
+  Neither the unpacked app nor the installer has been launched or
+  installed yet; that remains a manual check.
+
+## Approval and autonomy boundaries
+
+- Terminal execution requires one explicit `terminal:run` call per command.
+  Command warnings are advisory metadata only, never a safety verdict.
+- Agent plans never execute. `agent:apply` writes only the edits passed in
+  by the caller after re-validating every path. Commands in a plan are
+  suggestions and have no execution path in the agent service.
+- Git commit and push are separate explicit channels. Push uses ambient
+  git credentials; KryomCode never handles, stores, or transmits them.
+
+## Operational limits
+
+- Terminal results arrive on completion; mid-run output streaming is not
+  exposed. Cancellation kills running processes via `terminal:cancel`.
+- Agent planning is bounded by the 90 s provider timeout. There is no
+  IPC-level mid-plan cancel; batch apply checks cancellation between edits
+  and keeps already-applied approved work.
+- Diagnostics parsers cover TypeScript, generic file:line:col, and Node
+  stack formats only. Unknown formats yield zero diagnostics, never fake
+  ones, and `success` still reflects the real exit code.
+- File tree, search, and intelligence indexes are bounded (2000 entries,
+  depth 8, result caps) and report truncation instead of silently cutting.
+- The UI edits one file at a time; files are capped at 1 MB.
+
+## Phase 3 cleanup record
+
+The 0-byte scaffold files listed here in Phase 1 were re-verified as
+unreferenced (no imports anywhere in `electron/` or `src/`) and removed
+during Phase 3, along with the empty `src/features/`, `tests/`,
+`public/assets/`, and `public/icons/` directory trees and the empty root
+`.prettierrc.json` / `eslint.config.js` (no Prettier or ESLint
+dependency exists). `.editorconfig` was filled with real content.
+`tsconfig.tsbuildinfo` was removed from version control. A secret scan
+found no hardcoded keys (only `test-key` fixtures and env plumbing).
+
+## Environment note
+
+`C:\Users\LENOVO` (the user profile) is itself a git repository on this
+machine. Verify whether that is intentional (dotfiles) or a stray init:
+every folder currently reports git membership through ancestor discovery.

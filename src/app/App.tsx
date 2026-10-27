@@ -1,452 +1,894 @@
-import { useState } from 'react'
-import Editor from '@monaco-editor/react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { kryom, errorMessage, isWriteConflict } from '../api/kryom'
+import { baseName, joinName, parentDir } from '../utils/paths'
+import {
+  dirtyTabs,
+  findTab,
+  isDirty,
+  nextActivePath,
+  openTab,
+  removeTabs,
+  repathTabs,
+  tabsUnder,
+  updateTab,
+  type TabState,
+} from '../utils/tabs'
+import { DialogProvider, useDialogs } from '../components/dialogs'
+import { TopBar, StatusBar } from '../components/Chrome'
+import { ResizeHandle } from '../components/ResizeHandle'
+import { Explorer } from '../components/Explorer'
+import { SearchPanel } from '../components/SearchPanel'
+import { EditorPanel, type EditorApi } from '../components/EditorPanel'
+import { AiChat } from '../components/AiChat'
+import { AgentPanel } from '../components/AgentPanel'
+import { TerminalPanel } from '../components/TerminalPanel'
+import { ProblemsPanel } from '../components/ProblemsPanel'
+import { GitPanel } from '../components/GitPanel'
+import { SettingsModal } from '../components/SettingsModal'
+import { WelcomePage } from '../components/WelcomePage'
 
-type Node = KryomNode
-type ChatMessage = KryomAIMessage
-type RightPanel = 'terminal' | 'ai'
+type LeftTab = 'explorer' | 'search'
+type RightTab = 'ai' | 'agent'
+type BottomTab = 'terminal' | 'problems' | 'git'
 
-function App() {
-  const [workspace, setWorkspace] =
-    useState<KryomWorkspace | null>(null)
-  const [activeFile, setActiveFile] = useState<string | null>(null)
-  const [fileName, setFileName] = useState('')
-  const [content, setContent] = useState('')
-  const [savedContent, setSavedContent] = useState('')
+const FALLBACK_SETTINGS: KryomSettings = {
+  defaultModel: 'muse-spark-1.3',
+  aiContextEnabled: true,
+  panelLeftWidth: 260,
+  panelRightWidth: 360,
+  panelBottomHeight: 264,
+}
+
+// Panel sizing limits in pixels. Minimums keep controls usable, maximums
+// keep the editor visible; the clamps below additionally reserve at least
+// 280px for the editor (plus 2px for the divider handles) and 282px for
+// the top workspace area.
+const PANEL_LIMITS = {
+  left: { min: 180, max: 420, fallback: 260 },
+  right: { min: 300, max: 560, fallback: 360 },
+  bottom: { min: 140, max: 640, fallback: 264 },
+} as const
+
+function clampLeftWidth(value: number, rightWidth: number): number {
+  const max = Math.max(
+    PANEL_LIMITS.left.min,
+    Math.min(
+      PANEL_LIMITS.left.max,
+      window.innerWidth - rightWidth - 284
+    )
+  )
+
+  return Math.min(max, Math.max(PANEL_LIMITS.left.min, Math.round(value)))
+}
+
+function clampRightWidth(value: number, leftWidth: number): number {
+  const max = Math.max(
+    PANEL_LIMITS.right.min,
+    Math.min(
+      PANEL_LIMITS.right.max,
+      window.innerWidth - leftWidth - 284
+    )
+  )
+
+  return Math.min(max, Math.max(PANEL_LIMITS.right.min, Math.round(value)))
+}
+
+function clampBottomHeight(value: number): number {
+  const max = Math.max(
+    200,
+    Math.min(PANEL_LIMITS.bottom.max, window.innerHeight - 282)
+  )
+
+  return Math.min(
+    max,
+    Math.max(PANEL_LIMITS.bottom.min, Math.round(value))
+  )
+}
+
+function AppShell() {
+  const dialogs = useDialogs()
+  const [workspace, setWorkspace] = useState<KryomWorkspace | null>(null)
+  const [explorerLoading, setExplorerLoading] = useState(false)
+  const [tabs, setTabs] = useState<TabState[]>([])
+  const [activePath, setActivePath] = useState<string | null>(null)
+  const [pendingLine, setPendingLine] = useState<number | null>(null)
+  const [settings, setSettings] = useState<KryomSettings>(FALLBACK_SETTINGS)
+  const [leftWidth, setLeftWidth] = useState(FALLBACK_SETTINGS.panelLeftWidth)
+  const [rightWidth, setRightWidth] = useState(
+    FALLBACK_SETTINGS.panelRightWidth
+  )
+  const [bottomHeight, setBottomHeight] = useState(
+    FALLBACK_SETTINGS.panelBottomHeight
+  )
+  // Mirror of the live dimensions so drag-end persistence reads the
+  // latest values without waiting for a re-render.
+  const panelsRef = useRef({
+    left: FALLBACK_SETTINGS.panelLeftWidth,
+    right: FALLBACK_SETTINGS.panelRightWidth,
+    bottom: FALLBACK_SETTINGS.panelBottomHeight,
+  })
+  const [summary, setSummary] = useState<KryomWorkspaceSummary | null>(null)
   const [status, setStatus] = useState('Ready')
   const [error, setError] = useState('')
+  const [leftTab, setLeftTab] = useState<LeftTab>('explorer')
+  const [rightTab, setRightTab] = useState<RightTab>('ai')
+  const [bottomTab, setBottomTab] = useState<BottomTab>('terminal')
+  const [bottomOpen, setBottomOpen] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [opening, setOpening] = useState(false)
+  const editorApi = useRef<EditorApi | null>(null)
 
-  const [command, setCommand] = useState('npm run build')
-  const [terminalOutput, setTerminalOutput] = useState(
-    'Open a project to run commands.',
+  const activeTab = activePath ? findTab(tabs, activePath) : null
+  const dirty = activeTab !== null && isDirty(activeTab)
+
+  useEffect(() => {
+    kryom()
+      .getSettings()
+      .then((loaded) => {
+        setSettings(loaded)
+
+        const left = clampLeftWidth(
+          loaded.panelLeftWidth,
+          loaded.panelRightWidth
+        )
+        const right = clampRightWidth(loaded.panelRightWidth, left)
+        const bottom = clampBottomHeight(loaded.panelBottomHeight)
+
+        panelsRef.current = { left, right, bottom }
+        setLeftWidth(left)
+        setRightWidth(right)
+        setBottomHeight(bottom)
+      })
+      .catch(() => undefined)
+  }, [])
+
+  // Keep the layout valid when the Electron window itself is resized.
+  useEffect(() => {
+    const onWindowResize = () => {
+      const left = clampLeftWidth(
+        panelsRef.current.left,
+        panelsRef.current.right
+      )
+      const right = clampRightWidth(panelsRef.current.right, left)
+      const bottom = clampBottomHeight(panelsRef.current.bottom)
+
+      panelsRef.current = { left, right, bottom }
+      setLeftWidth(left)
+      setRightWidth(right)
+      setBottomHeight(bottom)
+    }
+
+    window.addEventListener('resize', onWindowResize)
+
+    return () => window.removeEventListener('resize', onWindowResize)
+  }, [])
+
+  const persistPanels = useCallback(() => {
+    const panels = panelsRef.current
+
+    kryom()
+      .updateSettings({
+        panelLeftWidth: panels.left,
+        panelRightWidth: panels.right,
+        panelBottomHeight: panels.bottom,
+      })
+      .catch(() => undefined)
+  }, [])
+
+  const resizeLeft = useCallback(
+    (value: number) => {
+      const next = clampLeftWidth(value, panelsRef.current.right)
+
+      panelsRef.current.left = next
+      setLeftWidth(next)
+    },
+    []
   )
-  const [running, setRunning] = useState(false)
 
-  const [rightPanel, setRightPanel] =
-    useState<RightPanel>('terminal')
-  const [prompt, setPrompt] = useState('')
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiError, setAiError] = useState('')
-  const [includeFileContext, setIncludeFileContext] = useState(true)
+  const resizeRight = useCallback(
+    (value: number) => {
+      const next = clampRightWidth(value, panelsRef.current.left)
 
-  async function openWorkspace() {
+      panelsRef.current.right = next
+      setRightWidth(next)
+    },
+    []
+  )
+
+  const resizeBottom = useCallback((value: number) => {
+    const next = clampBottomHeight(value)
+
+    panelsRef.current.bottom = next
+    setBottomHeight(next)
+  }, [])
+
+  useEffect(() => {
+    if (!workspace) {
+      setSummary(null)
+      return
+    }
+
+    kryom()
+      .getWorkspaceSummary()
+      .then(setSummary)
+      .catch(() => setSummary(null))
+  }, [workspace])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === '`') {
+        event.preventDefault()
+        setBottomOpen((open) => !open)
+      }
+    }
+
+    document.addEventListener('keydown', onKey)
+
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  const confirmDiscardTabs = useCallback(async (): Promise<boolean> => {
+    const dirty = dirtyTabs(tabs)
+
+    if (dirty.length === 0) {
+      return true
+    }
+
+    const names = dirty
+      .slice(0, 3)
+      .map((tab) => baseName(tab.path))
+      .join(', ')
+    const extra = dirty.length > 3 ? ` and ${dirty.length - 3} more` : ''
+
+    return dialogs.confirm({
+      title: 'Discard unsaved changes?',
+      message: `${names}${extra} ${dirty.length === 1 ? 'has' : 'have'} unsaved edits that will be lost.`,
+      confirmLabel: 'Discard changes',
+      danger: true,
+    })
+  }, [dialogs, tabs])
+
+  async function refreshExplorer() {
+    if (!workspace || explorerLoading) {
+      return
+    }
+
+    setExplorerLoading(true)
+
     try {
-      setError('')
-      const result = await window.kryom.openWorkspace()
+      setWorkspace(await kryom().refreshWorkspace())
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setExplorerLoading(false)
+    }
+  }
+
+  async function openProject() {
+    if (!(await confirmDiscardTabs())) {
+      return
+    }
+
+    setError('')
+
+    try {
+      const result = await kryom().openWorkspace()
 
       if (result) {
         setWorkspace(result)
-        setActiveFile(null)
-        setFileName('')
-        setContent('')
-        setSavedContent('')
-        setTerminalOutput('Project opened. Enter a command to run it.')
+        setTabs([])
+        setActivePath(null)
         setStatus('Project opened')
       }
     } catch (e) {
-      setError(String(e))
+      setError(errorMessage(e))
     }
   }
 
-  async function openFile(node: Node) {
-    if (node.type !== 'file') return
+  async function closeProject() {
+    if (!workspace || !(await confirmDiscardTabs())) {
+      return
+    }
 
     try {
-      setError('')
-      const text = await window.kryom.readFile(node.path)
-
-      setActiveFile(node.path)
-      setFileName(node.name)
-      setContent(text)
-      setSavedContent(text)
-      setStatus('File opened')
+      await kryom().closeWorkspace()
+      setWorkspace(null)
+      setTabs([])
+      setActivePath(null)
+      setSummary(null)
+      setStatus('Project closed')
     } catch (e) {
-      setError(String(e))
+      setError(errorMessage(e))
     }
   }
 
-  async function saveFile() {
-    if (!activeFile) return
+  async function openEditorFile(targetPath: string, line?: number) {
+    const existing = findTab(tabs, targetPath)
 
-    try {
-      setError('')
-      await window.kryom.saveFile(activeFile, content)
-      setSavedContent(content)
-      setStatus('All changes saved')
-    } catch (e) {
-      setError(String(e))
-    }
-  }
+    if (existing) {
+      setActivePath(existing.path)
 
-  function renderTree(nodes: Node[], depth = 0) {
-    return nodes.map((node) => (
-      <div key={node.path}>
-        {node.type === 'directory' ? (
-          <details open={depth === 0}>
-            <summary
-              className="tree-row"
-              style={{ paddingLeft: 12 + depth * 14 }}
-            >
-              📁 {node.name}
-            </summary>
-
-            {renderTree(node.children ?? [], depth + 1)}
-          </details>
-        ) : (
-          <button
-            className={
-              'tree-row file-row ' +
-              (activeFile === node.path ? 'selected' : '')
-            }
-            style={{ paddingLeft: 12 + depth * 14 }}
-            onClick={() => void openFile(node)}
-            key={node.path}
-          >
-            📄 {node.name}
-          </button>
-        )}
-      </div>
-    ))
-  }
-
-  async function runTerminalCommand() {
-    if (!workspace || running || !command.trim()) return
-
-    setRunning(true)
-    setError('')
-    setTerminalOutput(`> ${command}\nRunning...\n`)
-
-    try {
-      const result = await window.kryom.runCommand(command)
-
-      setTerminalOutput(
-        `> ${command}\n${result.output}\n\nExit code: ${result.exitCode}`,
-      )
-
-      setStatus(
-        result.exitCode === 0
-          ? 'Command completed'
-          : 'Command failed',
-      )
-    } catch (e) {
-      setTerminalOutput(`Terminal error: ${String(e)}`)
-      setStatus('Terminal error')
-    } finally {
-      setRunning(false)
-    }
-  }
-
-  async function sendAIMessage() {
-    const userPrompt = prompt.trim()
-    if (!userPrompt || aiLoading) return
-
-    setAiError('')
-    setPrompt('')
-    setRightPanel('ai')
-    setAiLoading(true)
-
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: userPrompt,
-    }
-
-    try {
-      let context = ''
-
-      if (includeFileContext && activeFile) {
-        context =
-          `Active file: ${activeFile}\n` +
-          `Unsaved changes are included if present.\n\n` +
-          content.slice(0, 18000)
-      } else if (workspace) {
-        context = `Workspace root: ${workspace.root}`
+      if (line !== undefined) {
+        setPendingLine(line)
       }
 
-      const result = await window.kryom.askAI({
-        prompt: userPrompt,
-        context,
-        history: messages.slice(-10),
-      })
+      return
+    }
 
-      setMessages((previous) => [
-        ...previous,
-        userMessage,
-        { role: 'assistant', content: result.answer },
-      ])
-      setStatus(`AI response received (${result.model})`)
-    } catch (e) {
-      setMessages((previous) => [...previous, userMessage])
-      setAiError(
-        e instanceof Error ? e.message : String(e),
+    setOpening(true)
+    setError('')
+
+    try {
+      const meta = await kryom().readFileMeta(targetPath)
+
+      setTabs((previous) =>
+        openTab(previous, {
+          path: meta.path,
+          content: meta.content,
+          savedContent: meta.content,
+          mtimeMs: meta.mtimeMs,
+        })
       )
+      setActivePath(meta.path)
+
+      if (line !== undefined) {
+        setPendingLine(line)
+      }
+
+      setStatus('File opened')
+    } catch (e) {
+      setError(errorMessage(e))
     } finally {
-      setAiLoading(false)
+      setOpening(false)
     }
   }
 
-  function clearChat() {
-    if (aiLoading) return
-    setMessages([])
-    setAiError('')
-    setStatus('AI chat cleared')
+  function selectTab(targetPath: string) {
+    if (findTab(tabs, targetPath)) {
+      setActivePath(targetPath)
+    }
   }
+
+  async function reloadEditor(targetPath: string) {
+    try {
+      const meta = await kryom().readFileMeta(targetPath)
+
+      setTabs((previous) =>
+        updateTab(previous, meta.path, {
+          path: meta.path,
+          content: meta.content,
+          savedContent: meta.content,
+          mtimeMs: meta.mtimeMs,
+        })
+      )
+      setStatus('Reloaded from disk')
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  async function overwriteEditor(targetPath: string, content: string) {
+    try {
+      await kryom().saveFile(targetPath, content)
+      const meta = await kryom().readFileMeta(targetPath)
+
+      setTabs((previous) =>
+        updateTab(previous, meta.path, {
+          path: meta.path,
+          content: meta.content,
+          savedContent: meta.content,
+          mtimeMs: meta.mtimeMs,
+        })
+      )
+      setStatus('All changes saved')
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  // Saves one tab by path. Returns true when the tab no longer holds
+  // unsaved work (saved, reloaded after a conflict, or already clean).
+  async function saveTab(targetPath: string): Promise<boolean> {
+    const tab = findTab(tabs, targetPath)
+
+    if (!tab || saving) {
+      return false
+    }
+
+    if (!isDirty(tab)) {
+      setStatus('No changes to save')
+      return true
+    }
+
+    const content = tab.content
+    const expectedMtimeMs = tab.mtimeMs
+
+    setSaving(true)
+    setError('')
+
+    try {
+      const result = await kryom().saveFileConditional(
+        targetPath,
+        content,
+        expectedMtimeMs
+      )
+
+      setTabs((previous) =>
+        updateTab(previous, targetPath, {
+          savedContent: content,
+          mtimeMs: result.mtimeMs,
+        })
+      )
+      setStatus('All changes saved')
+
+      return true
+    } catch (e) {
+      if (isWriteConflict(e)) {
+        const choice = await dialogs.resolveConflict({
+          fileName: baseName(targetPath),
+        })
+
+        if (choice === 'reload') {
+          await reloadEditor(targetPath)
+
+          return true
+        }
+
+        if (choice === 'overwrite') {
+          await overwriteEditor(targetPath, content)
+
+          return true
+        }
+
+        return false
+      }
+
+      setError(errorMessage(e))
+
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function saveEditor() {
+    if (activePath) {
+      await saveTab(activePath)
+    }
+  }
+
+  function dropTabs(paths: string[]) {
+    setTabs((previous) => {
+      const next = removeTabs(previous, paths)
+
+      if (activePath && !next.some((tab) => tab.path === activePath)) {
+        setActivePath(next.length > 0 ? next[0].path : null)
+      }
+
+      return next
+    })
+  }
+
+  async function closeTab(targetPath: string) {
+    const tab = findTab(tabs, targetPath)
+
+    if (!tab) {
+      return
+    }
+
+    if (isDirty(tab)) {
+      const choice = await dialogs.confirmCloseDirty({
+        fileName: baseName(tab.path),
+      })
+
+      if (choice === 'cancel') {
+        return
+      }
+
+      if (choice === 'save') {
+        const saved = await saveTab(tab.path)
+
+        if (!saved) {
+          return
+        }
+      }
+    }
+
+    const next = nextActivePath(tabs, targetPath, activePath)
+
+    setTabs((previous) => removeTabs(previous, [targetPath]))
+    setActivePath(next)
+    setStatus('Tab closed')
+  }
+
+  async function closeOtherTabs(keepPath: string) {
+    const others = tabs.filter((tab) => tab.path !== keepPath)
+    const dirtyOthers = others.filter(isDirty)
+
+    if (dirtyOthers.length > 0) {
+      const confirmed = await dialogs.confirm({
+        title: 'Discard unsaved changes?',
+        message:
+          `${dirtyOthers.length} other tab${dirtyOthers.length === 1 ? ' has' : 's have'} ` +
+          'unsaved edits that will be lost.',
+        confirmLabel: 'Discard changes',
+        danger: true,
+      })
+
+      if (!confirmed) {
+        return
+      }
+    }
+
+    setTabs((previous) => previous.filter((tab) => tab.path === keepPath))
+    setActivePath(keepPath)
+    setStatus('Other tabs closed')
+  }
+
+  async function createEntry(dir: string, type: 'file' | 'directory') {
+    const name = await dialogs.prompt({
+      title: type === 'file' ? 'New file' : 'New folder',
+      label: 'Name',
+      placeholder: type === 'file' ? 'example.ts' : 'components',
+      confirmLabel: 'Create',
+    })
+
+    if (!name) {
+      return
+    }
+
+    try {
+      const created = await kryom().createPath({
+        path: joinName(dir, name),
+        type,
+      })
+      await refreshExplorer()
+      setStatus(type === 'file' ? 'File created' : 'Folder created')
+
+      if (type === 'file') {
+        await openEditorFile(created.path)
+      }
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  async function renameEntry(node: KryomNode) {
+    const name = await dialogs.prompt({
+      title: `Rename ${node.type}`,
+      label: 'New name',
+      initialValue: baseName(node.path),
+      confirmLabel: 'Rename',
+    })
+
+    if (!name) {
+      return
+    }
+
+    const oldPath = node.path
+    const newPath = joinName(parentDir(oldPath), name)
+
+    try {
+      await kryom().renamePath({ oldPath, newPath })
+
+      setTabs((previous) => repathTabs(previous, oldPath, newPath))
+      setActivePath((previous) => {
+        if (!previous) {
+          return previous
+        }
+
+        if (previous === oldPath) {
+          return newPath
+        }
+
+        if (
+          previous.startsWith(`${oldPath}/`) ||
+          previous.startsWith(`${oldPath}\\`)
+        ) {
+          return newPath + previous.slice(oldPath.length)
+        }
+
+        return previous
+      })
+
+      await refreshExplorer()
+      setStatus('Renamed')
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  async function deleteEntry(node: KryomNode) {
+    const affected = tabsUnder(tabs, node.path)
+    const dirtyAffected = affected.filter(isDirty)
+    const confirmed = await dialogs.confirm({
+      title: `Delete ${node.type}?`,
+      message:
+        `"${baseName(node.path)}" will be permanently deleted.` +
+        (dirtyAffected.length > 0
+          ? ` ${dirtyAffected.length} open tab${dirtyAffected.length === 1 ? ' has' : 's have'} unsaved changes that will be lost.`
+          : ''),
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      await kryom().deletePath(node.path)
+
+      if (affected.length > 0) {
+        dropTabs(affected.map((tab) => tab.path))
+      }
+
+      await refreshExplorer()
+      setStatus('Deleted')
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  async function handleAgentFilesChanged(changedPaths: string[]) {
+    await refreshExplorer()
+
+    let warned = false
+
+    for (const changed of changedPaths) {
+      const tab = findTab(tabs, changed)
+
+      if (!tab) {
+        continue
+      }
+
+      if (isDirty(tab)) {
+        warned = true
+        continue
+      }
+
+      await reloadEditor(tab.path)
+    }
+
+    if (warned) {
+      setStatus(
+        'Agent changed an open file with unsaved edits. Save to review the disk conflict.'
+      )
+    }
+  }
+
+  const projectInfo = summary
+    ? `${summary.projectType}${
+        summary.frameworks.length > 0
+          ? ` · ${summary.frameworks.join(', ')}`
+          : ''
+      }`
+    : null
+
+  const scripts = summary ? Object.keys(summary.scripts) : []
+  const platform = window.kryom?.platform ?? 'unknown'
 
   return (
     <main className="ide">
-      <header className="topbar">
-        <strong className="brand">KryomCode</strong>
-
-        <button onClick={() => void openWorkspace()}>
-          Open Project
-        </button>
-
-        <span className="muted">
-          {workspace?.root ?? 'No project selected'}
-        </span>
-
-        <span className="spacer" />
-
-        <button
-          onClick={() => void saveFile()}
-          disabled={!activeFile || content === savedContent}
-        >
-          Save File
-        </button>
-      </header>
+      <TopBar
+        workspaceRoot={workspace?.root ?? null}
+        canSave={dirty && !saving}
+        busy={opening || saving || explorerLoading}
+        onOpenProject={() => void openProject()}
+        onCloseProject={() => void closeProject()}
+        onSave={() => void saveEditor()}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
 
       <section className="workspace">
-        <aside className="sidebar">
-          <div className="section-title">EXPLORER</div>
-
-          {workspace ? (
-            <>
-              <div className="root-name">
-                📁 {workspace.root.split(/[\\/]/).pop()}
-              </div>
-              {renderTree(workspace.tree)}
-            </>
-          ) : (
-            <p className="muted">
-              Open a folder to get started.
-            </p>
-          )}
-        </aside>
-
-        <section className="editor-panel">
-          <div className="tabbar">
-            {fileName || 'No file open'}
-            {activeFile && content !== savedContent ? ' •' : ''}
+        <aside className="sidebar" style={{ width: leftWidth }}>
+          <div className="side-tabs">
+            <button
+              className={leftTab === 'explorer' ? 'panel-tab active' : 'panel-tab'}
+              onClick={() => setLeftTab('explorer')}
+            >
+              EXPLORER
+            </button>
+            <button
+              className={leftTab === 'search' ? 'panel-tab active' : 'panel-tab'}
+              onClick={() => setLeftTab('search')}
+            >
+              SEARCH
+            </button>
           </div>
 
-          {activeFile ? (
-            <Editor
-              height="100%"
-              path={activeFile}
-              language="plaintext"
-              theme="vs-dark"
-              value={content}
-              onChange={(value) => setContent(value ?? '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-                readOnly: false,
+          <div hidden={leftTab !== 'explorer'} className="tab-body">
+            <Explorer
+              workspace={workspace}
+              activeFile={activePath}
+              loading={explorerLoading}
+              projectInfo={projectInfo}
+              onOpenFile={(node) => void openEditorFile(node.path)}
+              onRefresh={() => void refreshExplorer()}
+              onNewFile={(dir) => void createEntry(dir, 'file')}
+              onNewFolder={(dir) => void createEntry(dir, 'directory')}
+              onRename={(node) => void renameEntry(node)}
+              onDelete={(node) => void deleteEntry(node)}
+            />
+          </div>
+
+          <div hidden={leftTab !== 'search'} className="tab-body">
+            <SearchPanel
+              workspaceRoot={workspace?.root ?? null}
+              onOpenMatch={(path, line) => void openEditorFile(path, line)}
+            />
+          </div>
+        </aside>
+
+        <ResizeHandle
+          orientation="vertical"
+          direction={1}
+          label="Resize explorer panel"
+          value={leftWidth}
+          min={PANEL_LIMITS.left.min}
+          max={PANEL_LIMITS.left.max}
+          onResize={resizeLeft}
+          onResizeEnd={persistPanels}
+        />
+
+        {activeTab ? (
+          <EditorPanel
+            tabs={tabs}
+            activeTabPath={activeTab.path}
+            onSelectTab={selectTab}
+            onCloseTab={(path) => void closeTab(path)}
+            onCloseOthers={(path) => void closeOtherTabs(path)}
+            filePath={activeTab.path}
+            fileName={baseName(activeTab.path)}
+            content={activeTab.content}
+            dirty={dirty}
+            pendingLine={pendingLine}
+            onChange={(value) =>
+              setTabs((previous) =>
+                updateTab(previous, activeTab.path, { content: value })
+              )
+            }
+            onSave={() => void saveEditor()}
+            onRevealConsumed={() => setPendingLine(null)}
+            registerApi={(api) => {
+              editorApi.current = api
+            }}
+          />
+        ) : (
+          <section className="editor-panel">
+            <WelcomePage
+              workspaceRoot={workspace?.root ?? null}
+              defaultModel={settings.defaultModel}
+              onOpenProject={() => void openProject()}
+              onShowAiChat={() => setRightTab('ai')}
+              onShowTerminal={() => {
+                setBottomTab('terminal')
+                setBottomOpen(true)
               }}
             />
-          ) : (
-            <div className="welcome">
-              <h1>Your workspace.</h1>
-              <p>
-                Open a project and select a file to start editing.
-              </p>
-              <p>Use AI Chat to ask questions about your code.</p>
-            </div>
-          )}
-        </section>
+          </section>
+        )}
 
-        <aside className="right-panel">
+        <ResizeHandle
+          orientation="vertical"
+          direction={-1}
+          label="Resize AI panel"
+          value={rightWidth}
+          min={PANEL_LIMITS.right.min}
+          max={PANEL_LIMITS.right.max}
+          onResize={resizeRight}
+          onResizeEnd={persistPanels}
+        />
+
+        <aside className="right-panel" style={{ width: rightWidth }}>
           <div className="right-panel-tabs">
             <button
-              className={rightPanel === 'terminal' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => setRightPanel('terminal')}
+              className={rightTab === 'ai' ? 'panel-tab active' : 'panel-tab'}
+              onClick={() => setRightTab('ai')}
+            >
+              AI CHAT
+            </button>
+            <button
+              className={rightTab === 'agent' ? 'panel-tab active' : 'panel-tab'}
+              onClick={() => setRightTab('agent')}
+            >
+              AGENT
+            </button>
+          </div>
+
+          <div hidden={rightTab !== 'ai'} className="tab-body">
+            <AiChat
+              workspaceRoot={workspace?.root ?? null}
+              activeFile={activeTab?.path ?? null}
+              fileName={activeTab ? baseName(activeTab.path) : ''}
+              fileContent={activeTab?.content ?? ''}
+              dirty={dirty}
+              defaultModel={settings.defaultModel}
+              contextEnabled={settings.aiContextEnabled}
+              onStatus={setStatus}
+            />
+          </div>
+
+          <div hidden={rightTab !== 'agent'} className="tab-body">
+            <AgentPanel
+              workspaceRoot={workspace?.root ?? null}
+              defaultModel={settings.defaultModel}
+              onFilesChanged={(paths) => void handleAgentFilesChanged(paths)}
+              onStatus={setStatus}
+            />
+          </div>
+        </aside>
+      </section>
+
+      {bottomOpen && (
+        <>
+          <ResizeHandle
+            orientation="horizontal"
+            direction={-1}
+            label="Resize bottom panel"
+            value={bottomHeight}
+            min={PANEL_LIMITS.bottom.min}
+            max={PANEL_LIMITS.bottom.max}
+            onResize={resizeBottom}
+            onResizeEnd={persistPanels}
+          />
+          <section className="bottom-panel" style={{ height: bottomHeight }}>
+          <div className="bottom-tabs">
+            <button
+              className={bottomTab === 'terminal' ? 'panel-tab active' : 'panel-tab'}
+              onClick={() => setBottomTab('terminal')}
             >
               TERMINAL
             </button>
             <button
-              className={rightPanel === 'ai' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => setRightPanel('ai')}
+              className={bottomTab === 'problems' ? 'panel-tab active' : 'panel-tab'}
+              onClick={() => setBottomTab('problems')}
             >
-              AI CHAT
+              PROBLEMS
+            </button>
+            <button
+              className={bottomTab === 'git' ? 'panel-tab active' : 'panel-tab'}
+              onClick={() => setBottomTab('git')}
+            >
+              GIT
             </button>
           </div>
 
-          {rightPanel === 'terminal' ? (
-            <section className="terminal-panel">
-              <div className="terminal-heading">
-                <span>PROJECT TERMINAL</span>
-                <span className="muted">
-                  {running ? 'Running command...' : 'Workspace'}
-                </span>
-              </div>
+          <div className="bottom-body">
+            <div hidden={bottomTab !== 'terminal'} className="tab-body">
+              <TerminalPanel
+                workspaceRoot={workspace?.root ?? null}
+                onStatus={setStatus}
+              />
+            </div>
+            <div hidden={bottomTab !== 'problems'} className="tab-body">
+              <ProblemsPanel
+                workspaceRoot={workspace?.root ?? null}
+                scripts={scripts}
+                onOpenFileAtLine={(path, line) => void openEditorFile(path, line)}
+                onStatus={setStatus}
+              />
+            </div>
+            <div hidden={bottomTab !== 'git'} className="tab-body">
+              <GitPanel
+                workspaceRoot={workspace?.root ?? null}
+                onStatus={setStatus}
+              />
+            </div>
+          </div>
+        </section>
+        </>
+      )}
 
-              <form
-                className="terminal-input"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  void runTerminalCommand()
-                }}
-              >
-                <span className="prompt-symbol">&gt;</span>
-
-                <input
-                  aria-label="Terminal command"
-                  value={command}
-                  onChange={(event) => setCommand(event.target.value)}
-                  placeholder="Enter a command..."
-                  disabled={!workspace || running}
-                />
-
-                <button
-                  type="submit"
-                  disabled={!workspace || running || !command.trim()}
-                >
-                  {running ? 'Running…' : 'Run'}
-                </button>
-              </form>
-
-              <pre className="terminal-output">{terminalOutput}</pre>
-            </section>
-          ) : (
-            <section className="ai-panel">
-              <div className="ai-heading">
-                <div>
-                  <strong>Kryom AI</strong>
-                  <div className="muted">
-                    Meta Muse · API key configured separately
-                  </div>
-                </div>
-                <button
-                  onClick={clearChat}
-                  disabled={aiLoading || messages.length === 0}
-                  title="Clear conversation"
-                >
-                  Clear
-                </button>
-              </div>
-
-              <label className="context-toggle">
-                <input
-                  type="checkbox"
-                  checked={includeFileContext}
-                  onChange={(event) =>
-                    setIncludeFileContext(event.target.checked)
-                  }
-                />
-                Include active file context
-              </label>
-
-              {includeFileContext && activeFile ? (
-                <div className="context-file">
-                  Context: {fileName}
-                  {content !== savedContent ? ' (unsaved edits)' : ''}
-                </div>
-              ) : (
-                <div className="context-file">
-                  {includeFileContext
-                    ? 'No active file. Workspace context will be used.'
-                    : 'File context is disabled.'}
-                </div>
-              )}
-
-              <div className="ai-messages" aria-live="polite">
-                {messages.length === 0 && (
-                  <div className="ai-empty">
-                    <div className="ai-empty-icon">✦</div>
-                    <h3>What are we building?</h3>
-                    <p>
-                      Ask for code explanations, debugging help,
-                      implementation ideas or tests.
-                    </p>
-                    <p className="muted">
-                      AI suggestions do not change files automatically.
-                    </p>
-                  </div>
-                )}
-
-                {messages.map((message, index) => (
-                  <article
-                    className={`chat-message ${message.role}`}
-                    key={`${index}-${message.role}`}
-                  >
-                    <div className="message-role">
-                      {message.role === 'user' ? 'YOU' : 'KRYOM AI'}
-                    </div>
-                    <pre>{message.content}</pre>
-                  </article>
-                ))}
-
-                {aiLoading && (
-                  <div className="ai-loading" role="status">
-                    <span className="loading-dot" />
-                    Kryom AI is thinking…
-                  </div>
-                )}
-
-                <div id="ai-message-end" />
-              </div>
-
-              {aiError && (
-                <div className="ai-error" role="alert">
-                  <strong>AI request failed</strong>
-                  <p>{aiError}</p>
-                  <button
-                    onClick={() => setAiError('')}
-                    className="secondary-button"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-
-              <form
-                className="ai-composer"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  void sendAIMessage()
-                }}
-              >
-                <textarea
-                  aria-label="Ask Kryom AI"
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Ask Kryom AI anything about your code…"
-                  rows={4}
-                  maxLength={12000}
-                  disabled={aiLoading}
-                />
-
-                <div className="composer-footer">
-                  <span className="muted">
-                    {prompt.length}/12000
-                  </span>
-                  <button
-                    type="submit"
-                    disabled={aiLoading || !prompt.trim()}
-                  >
-                    {aiLoading ? 'Thinking…' : 'Send ↑'}
-                  </button>
-                </div>
-              </form>
-            </section>
-          )}
-        </aside>
-      </section>
-
-      <footer className="statusbar">
-        <span>{status}</span>
-        <span>{window.kryom.platform}</span>
-      </footer>
+      <StatusBar
+        status={status}
+        fileName={activeTab ? baseName(activeTab.path) : null}
+        dirty={dirty}
+        platform={platform}
+        bottomOpen={bottomOpen}
+        onToggleBottom={() => setBottomOpen((open) => !open)}
+      />
 
       {error && (
         <div className="error-banner">
@@ -454,7 +896,25 @@ function App() {
           <button onClick={() => setError('')}>Dismiss</button>
         </div>
       )}
+
+      <SettingsModal
+        open={settingsOpen}
+        initial={settings}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={(next) => {
+          setSettings(next)
+          setStatus('Settings saved')
+        }}
+      />
     </main>
+  )
+}
+
+function App() {
+  return (
+    <DialogProvider>
+      <AppShell />
+    </DialogProvider>
   )
 }
 

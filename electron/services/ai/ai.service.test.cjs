@@ -1,0 +1,136 @@
+const { describe, it } = require('node:test')
+const assert = require('node:assert/strict')
+
+const { chat } = require('./ai.service.cjs')
+const { MockProvider } = require('./providers/mock.provider.cjs')
+
+function useTestKey() {
+  const saved = {
+    MODEL_API_KEY: process.env.MODEL_API_KEY,
+    META_MODEL: process.env.META_MODEL,
+  }
+
+  process.env.MODEL_API_KEY = 'test-key'
+  delete process.env.META_MODEL
+
+  return () => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = value
+      }
+    }
+  }
+}
+
+describe('ai.service', () => {
+  it('rejects missing, empty, and oversized prompts', async () => {
+    await assert.rejects(() => chat(null), /prompt/)
+    await assert.rejects(() => chat({ prompt: '   ' }), /prompt/)
+    await assert.rejects(
+      () => chat({ prompt: 'x'.repeat(12001) }),
+      /prompt/
+    )
+  })
+
+  it('requires MODEL_API_KEY before any network call', async () => {
+    const saved = process.env.MODEL_API_KEY
+    delete process.env.MODEL_API_KEY
+
+    try {
+      await assert.rejects(
+        () => chat({ prompt: 'hi' }),
+        /not configured/
+      )
+    } finally {
+      if (saved === undefined) {
+        delete process.env.MODEL_API_KEY
+      } else {
+        process.env.MODEL_API_KEY = saved
+      }
+    }
+  })
+
+  it('uses Muse Spark by default', async () => {
+    const restore = useTestKey()
+
+    try {
+      const provider = new MockProvider({ answer: 'Spark says hi.' })
+      const result = await chat({ prompt: 'hi' }, { provider })
+
+      assert.equal(result.answer, 'Spark says hi.')
+      assert.equal(result.model, 'muse-spark-1.3')
+      assert.equal(provider.lastCall.model, 'muse-spark-1.3')
+      assert.ok(
+        provider.lastCall.messages.some(
+          (message) => message.role === 'user' && message.content === 'hi'
+        )
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  it('accepts a validated per-request override for Muse Wonder', async () => {
+    const restore = useTestKey()
+
+    try {
+      const provider = new MockProvider({ answer: 'Wonder says hi.' })
+      const result = await chat(
+        { prompt: 'hi', model: 'muse-wonder-1.0' },
+        { provider }
+      )
+
+      assert.equal(result.answer, 'Wonder says hi.')
+      assert.equal(result.model, 'muse-wonder-1.0')
+      assert.equal(provider.lastCall.model, 'muse-wonder-1.0')
+    } finally {
+      restore()
+    }
+  })
+
+  it('rejects unsupported per-request models without calling the provider', async () => {
+    const restore = useTestKey()
+
+    try {
+      const provider = new MockProvider()
+
+      await assert.rejects(
+        () => chat({ prompt: 'hi', model: 'gpt-4' }, { provider }),
+        /Unsupported model/
+      )
+      assert.equal(provider.calls.length, 0)
+    } finally {
+      restore()
+    }
+  })
+
+  it('rejects objects that do not implement the provider contract', async () => {
+    const restore = useTestKey()
+
+    try {
+      await assert.rejects(
+        () => chat({ prompt: 'hi' }, { provider: {} }),
+        /must implement/
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  it('rejects empty provider answers', async () => {
+    const restore = useTestKey()
+
+    try {
+      const provider = new MockProvider({ answer: '   ' })
+
+      await assert.rejects(
+        () => chat({ prompt: 'hi' }, { provider }),
+        /empty or unsupported/
+      )
+    } finally {
+      restore()
+    }
+  })
+})

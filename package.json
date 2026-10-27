@@ -1,14 +1,20 @@
 {
   "name": "kryomcode",
   "version": "0.1.0",
+  "description": "KryomCode is an AI-assisted desktop coding workspace built with Electron, React, and Meta AI models.",
   "license": "MIT",
+  "author": "KryomLabs",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1 --strictPort\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test electron/services/terminal/terminal.service.test.cjs electron/services/workspace/workspace.service.test.cjs electron/services/ai/ai.service.test.cjs electron/services/ai/ai-config.service.test.cjs electron/services/ai/providers/meta-muse.provider.test.cjs electron/services/filesystem/directory.service.test.cjs electron/services/filesystem/file-search.service.test.cjs electron/services/git/git.service.test.cjs electron/services/diagnostics/diagnostics.service.test.cjs electron/services/project-intelligence/project-analyzer.service.test.cjs electron/services/agent/agent.service.test.cjs electron/services/settings/settings.service.test.cjs electron/security/security.test.cjs electron/utils/utils.test.cjs electron/wiring.test.cjs",
+    "check:syntax": "node scripts/check-backend-syntax.cjs",
+    "pack": "npm run build && electron-builder --win --dir",
+    "dist": "npm run build && electron-builder --win"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -22,8 +28,39 @@
     "@vitejs/plugin-react": "^4.3.0",
     "concurrently": "^10.0.6",
     "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
     "wait-on": "^9.5.1"
+  },
+  "build": {
+    "appId": "com.kryomlabs.kryomcode",
+    "productName": "KryomCode",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json",
+      "!**/.env",
+      "!**/.env.*",
+      "!**/*.test.cjs",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/.bin"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.cjs"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

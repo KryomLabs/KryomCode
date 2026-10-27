@@ -1,5 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+// Minimal capability bridge: each method maps to one validated main
+// process channel. No Node.js APIs, no file system, and no secrets are
+// exposed to the renderer.
+
 contextBridge.exposeInMainWorld('kryom', {
   platform: process.platform,
 
@@ -11,15 +15,87 @@ contextBridge.exposeInMainWorld('kryom', {
 
   openWorkspace: () => ipcRenderer.invoke('workspace:open'),
 
+  closeWorkspace: () => ipcRenderer.invoke('workspace:close'),
+
+  refreshWorkspace: () => ipcRenderer.invoke('workspace:refresh'),
+
   readFile: (filePath) =>
     ipcRenderer.invoke('workspace:read-file', filePath),
 
   saveFile: (filePath, content) =>
     ipcRenderer.invoke('workspace:save-file', filePath, content),
 
+  readFileMeta: (filePath) =>
+    ipcRenderer.invoke('filesystem:read-meta', filePath),
+
+  saveFileConditional: (filePath, content, expectedMtimeMs) =>
+    ipcRenderer.invoke(
+      'filesystem:save-conditional',
+      filePath,
+      content,
+      expectedMtimeMs
+    ),
+
+  createPath: (payload) =>
+    ipcRenderer.invoke('filesystem:create', payload),
+
+  renamePath: (payload) =>
+    ipcRenderer.invoke('filesystem:rename', payload),
+
+  deletePath: (targetPath) =>
+    ipcRenderer.invoke('filesystem:delete', targetPath),
+
+  searchFiles: (payload) =>
+    ipcRenderer.invoke('search:files', payload),
+
   runCommand: (command) =>
     ipcRenderer.invoke('terminal:run', command),
 
+  cancelCommand: () =>
+    ipcRenderer.invoke('terminal:cancel'),
+
+  getTerminalStatus: () =>
+    ipcRenderer.invoke('terminal:status'),
+
   askAI: (payload) =>
     ipcRenderer.invoke('ai:chat', payload),
+
+  planAgentTask: (payload) =>
+    ipcRenderer.invoke('agent:plan', payload),
+
+  applyAgentEdits: (payload) =>
+    ipcRenderer.invoke('agent:apply', payload),
+
+  gitStatus: () =>
+    ipcRenderer.invoke('git:status'),
+
+  gitDiff: (payload) =>
+    ipcRenderer.invoke('git:diff', payload),
+
+  gitChangedFiles: (payload) =>
+    ipcRenderer.invoke('git:changed-files', payload),
+
+  gitStage: (paths) =>
+    ipcRenderer.invoke('git:stage', paths),
+
+  gitCommit: (payload) =>
+    ipcRenderer.invoke('git:commit', payload),
+
+  gitPush: (payload) =>
+    ipcRenderer.invoke('git:push', payload),
+
+  runDiagnostics: (payload) =>
+    ipcRenderer.invoke('diagnostics:run', payload),
+
+  getWorkspaceSummary: () =>
+    ipcRenderer.invoke('intelligence:summary'),
+
+  getWorkspaceContext: (payload) =>
+    ipcRenderer.invoke('intelligence:context', payload),
+
+  getSettings: () =>
+    ipcRenderer.invoke('settings:get'),
+
+  updateSettings: (patch) =>
+    ipcRenderer.invoke('settings:update', patch),
 })
