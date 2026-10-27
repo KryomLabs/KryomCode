@@ -43,12 +43,65 @@ function isInsideWorkspace(targetPath) {
   }
 
   const resolved = path.resolve(targetPath)
+
+  // Windows compares paths case-insensitively. Normalize both sides so
+  // containment does not depend on Node's per-version relative() casing
+  // behavior. Separators and drive letters are normalized by resolve().
+  if (process.platform === 'win32') {
+    const relative = path.relative(
+      workspaceRoot.toLowerCase(),
+      resolved.toLowerCase()
+    )
+
+    return relative === '' ||
+      (!path.isAbsolute(relative) &&
+        relative !== '..' &&
+        !relative.startsWith(`..${path.sep}`))
+  }
+
   const relative = path.relative(workspaceRoot, resolved)
 
   return relative === '' ||
     (!path.isAbsolute(relative) &&
       relative !== '..' &&
       !relative.startsWith(`..${path.sep}`))
+}
+
+// Case-insensitive on Windows, exact elsewhere. Compares two already
+// resolved absolute paths for identity (workspace-root targeting).
+function isSamePath(firstPath, secondPath) {
+  if (typeof firstPath !== 'string' || typeof secondPath !== 'string') {
+    return false
+  }
+
+  if (process.platform === 'win32') {
+    return firstPath.toLowerCase() === secondPath.toLowerCase()
+  }
+
+  return firstPath === secondPath
+}
+
+// True when both resolved absolute paths share one volume (drive letter
+// or UNC root, case-insensitive on Windows). Paths on different volumes
+// can never canonicalize inside each other, so callers can reject them
+// before touching the filesystem.
+function isSameVolume(firstPath, secondPath) {
+  if (typeof firstPath !== 'string' || typeof secondPath !== 'string') {
+    return false
+  }
+
+  const firstRoot = path.parse(firstPath).root
+  const secondRoot = path.parse(secondPath).root
+
+  if (!firstRoot || !secondRoot) {
+    return false
+  }
+
+  if (process.platform === 'win32') {
+    return firstRoot.toLowerCase() === secondRoot.toLowerCase()
+  }
+
+  return firstRoot === secondRoot
 }
 
 async function buildTree(
@@ -105,5 +158,7 @@ module.exports = {
   setWorkspaceRoot,
   closeWorkspace,
   isInsideWorkspace,
+  isSamePath,
+  isSameVolume,
   buildTree,
 }

@@ -4,6 +4,8 @@ const path = require('node:path')
 const {
   getWorkspaceRoot,
   isInsideWorkspace,
+  isSamePath,
+  isSameVolume,
 } = require('../workspace/workspace.service.cjs')
 
 const MAX_FILE_SIZE = 1024 * 1024
@@ -14,25 +16,34 @@ async function resolveExistingFile(filePath) {
   }
 
   const root = getWorkspaceRoot()
-  const resolved = path.resolve(filePath)
 
-  if (!root || !isInsideWorkspace(resolved) || resolved === root) {
+  if (!root) {
     throw new Error('File is outside the selected workspace.')
   }
 
-  const stat = await fs.lstat(resolved)
+  // Relative paths resolve against the workspace root, matching
+  // validate-path. Containment is decided after realpath so valid
+  // non-canonical forms (Windows 8.3 short names, junctions, case and
+  // separator variants) are accepted; only cross-volume paths fail fast.
+  const logical = path.resolve(root, filePath)
+
+  if (!isSameVolume(root, logical)) {
+    throw new Error('File is outside the selected workspace.')
+  }
+
+  const stat = await fs.lstat(logical)
 
   if (!stat.isFile() || stat.isSymbolicLink()) {
     throw new Error('Only regular files can be accessed.')
   }
 
-  const realPath = await fs.realpath(resolved)
+  const realPath = await fs.realpath(logical)
 
-  if (!isInsideWorkspace(realPath)) {
+  if (!isInsideWorkspace(realPath) || isSamePath(realPath, root)) {
     throw new Error('File resolves outside the selected workspace.')
   }
 
-  return { resolved, stat }
+  return { resolved: realPath, stat }
 }
 
 async function readFile(filePath) {

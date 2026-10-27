@@ -99,4 +99,142 @@ describe('security guards', () => {
       /outside/
     )
   })
+
+  it('accepts non-canonical aliases that resolve inside the workspace', async () => {
+    // Regression: on Windows CI os.tmpdir() can return an 8.3 short-name
+    // path while setWorkspaceRoot stores the long canonical form. A
+    // junction alias reproduces the same shape (string-outside,
+    // canonical-inside) on every platform without needing 8.3 names.
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-secalias-'))
+    await fs.writeFile(path.join(root, 'ok.txt'), 'ok')
+    const canonicalRoot = await setWorkspaceRoot(root)
+
+    const aliasBase = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-secaliasbase-'))
+    const alias = path.join(aliasBase, 'alias-ws')
+    await fs.symlink(root, alias, 'junction')
+
+    const viaAlias = path.join(alias, 'ok.txt')
+    const resolved = await resolveWorkspacePath(viaAlias)
+
+    assert.equal(resolved.exists, true)
+    assert.equal(resolved.path, path.join(canonicalRoot, 'ok.txt'))
+
+    // A missing file whose existing ancestor IS the alias still reports
+    // the symlink itself: ancestor links are never followed for create
+    // flows. Windows 8.3 short names differ (they are not symlinks), so
+    // missing short-name paths canonicalize and succeed; covered below.
+    await assert.rejects(
+      () => resolveWorkspacePath(path.join(alias, 'missing.txt'), {
+        allowMissing: true,
+      }),
+      /Symbolic links are not followed/
+    )
+  })
+
+  it('accepts Windows 8.3 short-name paths for existing and missing files', async (t) => {
+    if (process.platform !== 'win32') {
+      t.skip('Windows-only 8.3 short names')
+      return
+    }
+
+    const { execSync } = require('node:child_process')
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-secshort-'))
+    await fs.writeFile(path.join(root, 'ok.txt'), 'ok')
+    const canonicalRoot = await setWorkspaceRoot(root)
+
+    let shortRoot = null
+    try {
+      shortRoot = execSync(
+        `cmd /c for %I in ("${root}") do @echo %~sI`,
+        { encoding: 'utf8' }
+      ).trim()
+    } catch {
+      t.skip('short names unavailable')
+      return
+    }
+
+    if (!shortRoot || shortRoot === root) {
+      t.skip('short names unavailable')
+      return
+    }
+
+    const existing = await resolveWorkspacePath(path.join(shortRoot, 'ok.txt'))
+    assert.equal(existing.exists, true)
+    assert.equal(existing.path, path.join(canonicalRoot, 'ok.txt'))
+
+    const missing = await resolveWorkspacePath(
+      path.join(shortRoot, 'missing.txt'),
+      { allowMissing: true }
+    )
+    assert.equal(missing.exists, false)
+    assert.equal(missing.path, path.join(canonicalRoot, 'missing.txt'))
+  })
+
+  it('accepts Windows case and separator variants inside the workspace', async (t) => {
+    if (process.platform !== 'win32') {
+      t.skip('Windows-only path variants')
+      return
+    }
+
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-seccase-'))
+    await fs.writeFile(path.join(root, 'ok.txt'), 'ok')
+    const canonicalRoot = await setWorkspaceRoot(root)
+    const canonicalFile = path.join(canonicalRoot, 'ok.txt')
+
+    const upper = await resolveWorkspacePath(canonicalFile.toUpperCase())
+    assert.equal(upper.exists, true)
+    assert.equal(upper.path, canonicalFile)
+
+    const forward = await resolveWorkspacePath(
+      canonicalFile.replace(/\\/g, '/')
+    )
+    assert.equal(forward.exists, true)
+    assert.equal(forward.path, canonicalFile)
+  })
+
+  it('rejects outside paths, other volumes, and symlink escapes', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-secout-'))
+    await fs.writeFile(path.join(root, 'ok.txt'), 'ok')
+    await setWorkspaceRoot(root)
+    const canonicalRoot = await fs.realpath(root)
+
+    // Same-volume absolute outside.
+    await assert.rejects(
+      () => resolveWorkspacePath(path.join(path.dirname(canonicalRoot), 'evil-outside.txt')),
+      /outside/
+    )
+
+    // Traversal with redundant segments.
+    await assert.rejects(
+      () => resolveWorkspacePath(
+        path.join(canonicalRoot, 'sub', '..', '..', 'evil.txt')
+      ),
+      /outside/
+    )
+
+    if (process.platform === 'win32') {
+      // A different volume can never canonicalize inside.
+      const otherRoot = path.parse(canonicalRoot).root.toUpperCase().startsWith('C:')
+        ? 'D:\\definitely-outside-kryom\\evil.txt'
+        : 'C:\\definitely-outside-kryom\\evil.txt'
+      await assert.rejects(
+        () => resolveWorkspacePath(otherRoot),
+        /outside/
+      )
+    }
+
+    // A final-component symlink is never followed, even when it
+    // points inside the workspace.
+    const link = path.join(canonicalRoot, 'link.txt')
+    try {
+      await fs.symlink(path.join(canonicalRoot, 'ok.txt'), link, 'file')
+    } catch {
+      return
+    }
+
+    await assert.rejects(
+      () => resolveWorkspacePath(link),
+      /Symbolic links are not followed/
+    )
+  })
 })

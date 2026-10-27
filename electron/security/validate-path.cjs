@@ -4,6 +4,8 @@ const path = require('node:path')
 const {
   getWorkspaceRoot,
   isInsideWorkspace,
+  isSamePath,
+  isSameVolume,
 } = require('../services/workspace/workspace.service.cjs')
 
 // Resolves a caller-supplied path against the open workspace. Rejects
@@ -31,12 +33,14 @@ async function resolveWorkspacePath(targetPath, options = {}) {
   // process working directory. Absolute paths are unaffected.
   const logical = path.resolve(root, targetPath)
 
-  if (!isInsideWorkspace(logical)) {
+  // Fast fail only across volumes: a path on another drive or UNC share
+  // can never canonicalize inside the workspace. Same-volume containment
+  // is decided after realpath below, because the caller may pass a valid
+  // non-canonical form (Windows 8.3 short names, junctions, case and
+  // separator variants) whose string form looks outside while its real
+  // path is inside.
+  if (!isSameVolume(root, logical)) {
     throw new Error('Path is outside the selected workspace.')
-  }
-
-  if (!allowRoot && logical === root) {
-    throw new Error('That operation cannot target the workspace root.')
   }
 
   let existing = logical
@@ -67,10 +71,10 @@ async function resolveWorkspacePath(targetPath, options = {}) {
       throw new Error('Symbolic links are not followed.')
     }
 
-    if (missing.length > 0 && !allowMissing) {
-      throw new Error('File or folder does not exist.')
-    }
-
+    // Canonicalize before any other decision: containment is judged on
+    // the real path so valid non-canonical forms (Windows 8.3 short
+    // names, junctions) are accepted, and escapes hiding behind a
+    // missing tail are still rejected as outside rather than missing.
     const realBase = await fs.realpath(existing)
 
     if (!isInsideWorkspace(realBase)) {
@@ -81,8 +85,16 @@ async function resolveWorkspacePath(targetPath, options = {}) {
       ? path.join(realBase, ...missing)
       : realBase
 
-    if (!isInsideWorkspace(resolved) || (!allowRoot && resolved === root)) {
+    if (!isInsideWorkspace(resolved)) {
       throw new Error('Path is outside the selected workspace.')
+    }
+
+    if (missing.length > 0 && !allowMissing) {
+      throw new Error('File or folder does not exist.')
+    }
+
+    if (!allowRoot && isSamePath(resolved, root)) {
+      throw new Error('That operation cannot target the workspace root.')
     }
 
     return {

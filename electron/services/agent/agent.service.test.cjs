@@ -58,7 +58,12 @@ describe('agent.service', () => {
       const plan = await planTask({ task: 'Add a file.' }, { provider })
 
       assert.equal(plan.edits.length, 1)
-      assert.equal(plan.edits[0].path, target)
+      // planTask returns the validated real path, which may differ in
+      // string form from the input on Windows (8.3 short names).
+      assert.equal(
+        plan.edits[0].path,
+        path.join(await fs.realpath(root), 'new.txt')
+      )
       assert.equal(plan.edits[0].preview, 'planned')
       assert.equal(plan.commands.length, 1)
       assert.equal(plan.model, 'muse-spark-1.3')
