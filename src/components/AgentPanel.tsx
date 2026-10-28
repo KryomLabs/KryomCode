@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { kryom, errorMessage } from '../api/kryom'
 import { diffLines } from '../utils/diff'
 import { baseName } from '../utils/paths'
@@ -9,6 +9,7 @@ export interface AgentPanelProps {
   defaultModel: string
   onFilesChanged: (changedPaths: string[]) => void
   onStatus: (status: string) => void
+  pendingTask?: { text: string; nonce: number } | null
 }
 
 const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
@@ -51,8 +52,38 @@ export function AgentPanel(props: AgentPanelProps) {
     setModel(props.defaultModel)
   }, [props.defaultModel])
 
+  const consumedTaskNonce = useRef<number | null>(null)
+
+  useEffect(() => {
+    const pending = props.pendingTask
+
+    if (!pending || pending.text.trim() === '') {
+      return
+    }
+
+    if (consumedTaskNonce.current === pending.nonce) {
+      return
+    }
+
+    consumedTaskNonce.current = pending.nonce
+    setTask(pending.text)
+
+    if (!props.workspaceRoot || planning) {
+      return
+    }
+
+    void requestPlanFor(pending.text)
+    // Consumes one welcome submit per nonce; planning/model come from
+    // this render's closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.pendingTask, props.workspaceRoot])
+
   async function requestPlan() {
-    const trimmed = task.trim()
+    await requestPlanFor(task)
+  }
+
+  async function requestPlanFor(taskText: string) {
+    const trimmed = taskText.trim()
 
     if (!trimmed || planning || !props.workspaceRoot) {
       return

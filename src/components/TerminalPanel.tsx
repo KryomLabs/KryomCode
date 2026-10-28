@@ -6,21 +6,42 @@ export interface TerminalPanelProps {
   onStatus: (status: string) => void
 }
 
-interface RunEntry {
+export interface TerminalRunEntry {
   id: number
   command: string
   result: KryomTerminalResult | null
 }
 
+// Shared terminal state and command execution. One controller instance owns
+// the input, history, and running flags, so exactly one mounted view drives
+// exactly one execution path no matter where the view is docked.
+export interface TerminalController {
+  command: string
+  setCommand: (value: string) => void
+  entries: TerminalRunEntry[]
+  running: boolean
+  runningList: KryomRunningProcess[]
+  error: string
+  runTerminalCommand: () => void
+  cancel: () => void
+  refreshStatus: () => void
+}
+
 let nextEntryId = 1
 
-export function TerminalPanel(props: TerminalPanelProps) {
+export function useTerminalController(
+  workspaceRoot: string | null,
+  onStatus: (status: string) => void
+): TerminalController {
   const [command, setCommand] = useState('npm run build')
-  const [entries, setEntries] = useState<RunEntry[]>([])
+  const [entries, setEntries] = useState<TerminalRunEntry[]>([])
   const [running, setRunning] = useState(false)
   const [runningList, setRunningList] = useState<KryomRunningProcess[]>([])
   const [error, setError] = useState('')
-  const bottomRef = useRef<HTMLDivElement | null>(null)
+  // Synchronous guard: state updates land after re-render, so two rapid
+  // Run activations could both pass a `running` state check. The ref
+  // closes that race so one controller never starts overlapping runs.
+  const runningRef = useRef(false)
 
   useEffect(() => {
     if (!running) {
@@ -37,16 +58,14 @@ export function TerminalPanel(props: TerminalPanelProps) {
     return () => clearInterval(timer)
   }, [running])
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [entries])
-
   async function runTerminalCommand() {
     const trimmed = command.trim()
 
-    if (!props.workspaceRoot || running || !trimmed) {
+    if (!workspaceRoot || runningRef.current || !trimmed) {
       return
     }
+
+    runningRef.current = true
 
     const id = nextEntryId
     nextEntryId += 1
@@ -66,7 +85,7 @@ export function TerminalPanel(props: TerminalPanelProps) {
         )
       )
       setRunningList([])
-      props.onStatus(
+      onStatus(
         result.exitCode === 0 && !result.timedOut
           ? 'Command completed'
           : 'Command failed'
@@ -74,20 +93,21 @@ export function TerminalPanel(props: TerminalPanelProps) {
     } catch (e) {
       setError(errorMessage(e))
       setEntries((previous) => previous.filter((entry) => entry.id !== id))
-      props.onStatus('Terminal error')
+      onStatus('Terminal error')
     } finally {
+      runningRef.current = false
       setRunning(false)
     }
   }
 
   async function cancel() {
-    if (!running) {
+    if (!runningRef.current) {
       return
     }
 
     try {
       const result = await kryom().cancelCommand()
-      props.onStatus(`Cancelled ${result.killed} running command(s)`)
+      onStatus(`Cancelled ${result.killed} running command(s)`)
     } catch (e) {
       setError(errorMessage(e))
     }
@@ -102,38 +122,68 @@ export function TerminalPanel(props: TerminalPanelProps) {
     }
   }
 
+  return {
+    command,
+    setCommand,
+    entries,
+    running,
+    runningList,
+    error,
+    runTerminalCommand: () => void runTerminalCommand(),
+    cancel: () => void cancel(),
+    refreshStatus: () => void refreshStatus(),
+  }
+}
+
+export interface TerminalPanelViewProps {
+  controller: TerminalController
+  workspaceRoot: string | null
+}
+
+export function TerminalPanelView(props: TerminalPanelViewProps) {
+  const { controller } = props
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [controller.entries])
+
   return (
     <section className="terminal-panel bottom-tab-panel">
       <form
         className="terminal-input"
         onSubmit={(event) => {
           event.preventDefault()
-          void runTerminalCommand()
+          controller.runTerminalCommand()
         }}
       >
         <span className="prompt-symbol">&gt;</span>
 
         <input
           aria-label="Terminal command"
-          value={command}
-          onChange={(event) => setCommand(event.target.value)}
+          value={controller.command}
+          onChange={(event) => controller.setCommand(event.target.value)}
           placeholder={
             props.workspaceRoot ? 'Enter a command…' : 'Open a project first…'
           }
-          disabled={!props.workspaceRoot || running}
+          disabled={!props.workspaceRoot || controller.running}
         />
 
         <button
           type="submit"
-          disabled={!props.workspaceRoot || running || !command.trim()}
+          disabled={
+            !props.workspaceRoot ||
+            controller.running ||
+            !controller.command.trim()
+          }
         >
-          {running ? 'Running…' : 'Run'}
+          {controller.running ? 'Running…' : 'Run'}
         </button>
 
         <button
           type="button"
-          onClick={() => void cancel()}
-          disabled={!running}
+          onClick={controller.cancel}
+          disabled={!controller.running}
           title="Cancel running commands"
         >
           Cancel
@@ -142,23 +192,26 @@ export function TerminalPanel(props: TerminalPanelProps) {
         <button
           type="button"
           className="secondary-button"
-          onClick={() => void refreshStatus()}
+          onClick={controller.refreshStatus}
           title="Refresh running processes"
         >
           Status
         </button>
       </form>
 
-      {runningList.length > 0 && (
+      {controller.runningList.length > 0 && (
         <p className="muted padded">
-          Running: {runningList.map((item) => item.command).join(' · ')}
+          Running:{' '}
+          {controller.runningList.map((item) => item.command).join(' · ')}
         </p>
       )}
 
-      {error && <p className="inline-error padded">{error}</p>}
+      {controller.error && (
+        <p className="inline-error padded">{controller.error}</p>
+      )}
 
       <div className="terminal-log">
-        {entries.length === 0 && (
+        {controller.entries.length === 0 && (
           <p className="muted padded">
             {props.workspaceRoot
               ? 'Enter a command to run it in the project folder.'
@@ -166,7 +219,7 @@ export function TerminalPanel(props: TerminalPanelProps) {
           </p>
         )}
 
-        {entries.map((entry) => (
+        {controller.entries.map((entry) => (
           <div key={entry.id} className="terminal-entry">
             <div className="terminal-command">&gt; {entry.command}</div>
 
@@ -203,5 +256,18 @@ export function TerminalPanel(props: TerminalPanelProps) {
         <div ref={bottomRef} />
       </div>
     </section>
+  )
+}
+
+// Self-contained terminal with its own controller. The app shell instead
+// mounts one shared controller's view in a single dock at a time.
+export function TerminalPanel(props: TerminalPanelProps) {
+  const controller = useTerminalController(props.workspaceRoot, props.onStatus)
+
+  return (
+    <TerminalPanelView
+      controller={controller}
+      workspaceRoot={props.workspaceRoot}
+    />
   )
 }

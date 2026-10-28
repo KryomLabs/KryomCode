@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { kryom, errorMessage } from '../api/kryom'
 
 interface ChatMessage {
@@ -16,6 +16,7 @@ export interface AiChatProps {
   defaultModel: string
   contextEnabled: boolean
   onStatus: (status: string) => void
+  pendingPrompt?: { text: string; nonce: number } | null
 }
 
 const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
@@ -63,15 +64,39 @@ export function AiChat(props: AiChatProps) {
     return ''
   }
 
-  async function sendMessage() {
-    const userPrompt = prompt.trim()
+  const consumedPromptNonce = useRef<number | null>(null)
 
+  useEffect(() => {
+    const pending = props.pendingPrompt
+
+    if (!pending || pending.text.trim() === '') {
+      return
+    }
+
+    if (consumedPromptNonce.current === pending.nonce) {
+      return
+    }
+
+    consumedPromptNonce.current = pending.nonce
+
+    if (loading) {
+      setPrompt(pending.text)
+      return
+    }
+
+    setPrompt('')
+    void sendWithText(pending.text.trim())
+    // Consumes one welcome submit per nonce; sendWithText reads the
+    // latest messages/model from this render's closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.pendingPrompt])
+
+  async function sendWithText(userPrompt: string) {
     if (!userPrompt || loading) {
       return
     }
 
     setError('')
-    setPrompt('')
     setLoading(true)
 
     const userMessage: ChatMessage = { role: 'user', content: userPrompt }
@@ -101,6 +126,17 @@ export function AiChat(props: AiChatProps) {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function sendMessage() {
+    const userPrompt = prompt.trim()
+
+    if (!userPrompt || loading) {
+      return
+    }
+
+    setPrompt('')
+    await sendWithText(userPrompt)
   }
 
   function clearChat() {

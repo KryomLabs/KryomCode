@@ -517,6 +517,170 @@ section.editor-panel > .welcome {
   }
 }
 
+/* Welcome redesign: spacious centered composer layout */
+.welcome-redesign {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 56px 24px 40px;
+  text-align: center;
+}
+
+.welcome-inner {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.welcome-redesign h1 {
+  margin: 0 0 8px;
+  font-size: 30px;
+  line-height: 1.25;
+  color: #fff;
+  text-wrap: balance;
+}
+
+.welcome-redesign .welcome-tagline {
+  margin: 0 0 20px;
+  max-width: 600px;
+}
+
+.welcome-modes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.welcome-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.welcome-mode.active {
+  background: #292936;
+  border-color: #8b7cff;
+  color: #fff;
+}
+
+.welcome-soon {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #2e2a4e;
+  color: #b9aefc;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.welcome-composer {
+  width: 100%;
+  padding: 12px;
+  background: #19191f;
+  border: 1px solid #30303a;
+  border-radius: 10px;
+  text-align: left;
+}
+
+.welcome-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 96px;
+  max-height: 200px;
+  resize: vertical;
+  border: 0;
+  background: transparent;
+  padding: 4px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.welcome-composer textarea:focus {
+  border-color: transparent;
+}
+
+.welcome-composer textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.welcome-composer-footer {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #26262e;
+}
+
+.welcome-notice {
+  margin: 12px 0 0;
+  max-width: 600px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.welcome-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  width: 100%;
+}
+
+.welcome-suggestion {
+  padding: 7px 12px;
+  font-size: 12px;
+  background: #1c1c23;
+  border-radius: 999px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.welcome-redesign .welcome-actions {
+  justify-content: center;
+  margin: 20px 0 12px;
+}
+
+.welcome-meta {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.welcome-meta strong {
+  color: #e4e4e7;
+  font-weight: 600;
+}
+
+.welcome-redesign .welcome-keys {
+  margin-top: 12px;
+  line-height: 2;
+}
+
+@media (max-width: 700px) {
+  .welcome-redesign {
+    padding: 32px 16px;
+  }
+
+  .welcome-redesign h1 {
+    font-size: 24px;
+  }
+
+  .welcome-suggestion {
+    white-space: normal;
+    border-radius: 8px;
+    text-align: left;
+  }
+}
+
 .statusbar {
   display: flex;
   justify-content: space-between;
@@ -607,7 +771,40 @@ section.editor-panel > .welcome {
   font: 12px/1.7 Consolas, monospace;
 }
 
-/* Right-side panel with AI Chat and Agent tabs */
+/* Right-side terminal dock (toggleable; AI lives in bottom tabs) */
+.dock-header {
+  height: 42px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px 5px 12px;
+  background: #17171c;
+  border-bottom: 1px solid #292930;
+}
+
+.dock-title {
+  color: #858592;
+  font-size: 11px;
+  letter-spacing: 0.8px;
+}
+
+.dock-close {
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 1;
+  color: #858592;
+  border-radius: 4px;
+}
+
+.dock-close:hover {
+  background: #3a3a48;
+  color: #fff;
+}
+
 .right-panel {
   width: 360px;
   min-width: 300px;
@@ -1050,7 +1247,7 @@ section.editor-panel > .welcome {
   font-size: 12px;
 }
 
-/* Bottom panel with terminal, problems, and git tabs */
+/* Bottom panel with terminal, problems, git, and AI tabs */
 .bottom-panel {
   height: 264px;
   flex-shrink: 0;
@@ -1071,6 +1268,18 @@ section.editor-panel > .welcome {
 .bottom-tabs .panel-tab {
   flex: 0 0 auto;
   padding: 6px 14px;
+}
+
+.bottom-tabs .bottom-collapse {
+  margin-left: auto;
+  padding: 6px 10px;
+}
+
+/* Keeps the bottom panel mounted while collapsed so AI conversations,
+   agent plans, and tool results survive; display:contents preserves the
+   flex layout, and [hidden] still hides it via !important. */
+.bottom-mounted {
+  display: contents;
 }
 
 .bottom-body {

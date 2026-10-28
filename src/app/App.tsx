@@ -21,15 +21,17 @@ import { SearchPanel } from '../components/SearchPanel'
 import { EditorPanel, type EditorApi } from '../components/EditorPanel'
 import { AiChat } from '../components/AiChat'
 import { AgentPanel } from '../components/AgentPanel'
-import { TerminalPanel } from '../components/TerminalPanel'
+import {
+  TerminalPanelView,
+  useTerminalController,
+} from '../components/TerminalPanel'
 import { ProblemsPanel } from '../components/ProblemsPanel'
 import { GitPanel } from '../components/GitPanel'
 import { SettingsModal } from '../components/SettingsModal'
 import { WelcomePage } from '../components/WelcomePage'
 
 type LeftTab = 'explorer' | 'search'
-type RightTab = 'ai' | 'agent'
-type BottomTab = 'terminal' | 'problems' | 'git'
+type BottomTab = 'terminal' | 'problems' | 'git' | 'ai' | 'agent'
 
 const FALLBACK_SETTINGS: KryomSettings = {
   defaultModel: 'muse-spark-1.3',
@@ -110,13 +112,26 @@ function AppShell() {
   const [summary, setSummary] = useState<KryomWorkspaceSummary | null>(null)
   const [status, setStatus] = useState('Ready')
   const [error, setError] = useState('')
+  // Single shared terminal controller for the whole shell. The terminal
+  // view renders in the right dock or the bottom area, never both, so
+  // output and running status survive dock moves and panel collapses.
+  const terminal = useTerminalController(workspace?.root ?? null, setStatus)
   const [leftTab, setLeftTab] = useState<LeftTab>('explorer')
-  const [rightTab, setRightTab] = useState<RightTab>('ai')
   const [bottomTab, setBottomTab] = useState<BottomTab>('terminal')
   const [bottomOpen, setBottomOpen] = useState(true)
+  const [rightOpen, setRightOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [opening, setOpening] = useState(false)
+  const [welcomeChatPrompt, setWelcomeChatPrompt] = useState<{
+    text: string
+    nonce: number
+  } | null>(null)
+  const [welcomeAgentTask, setWelcomeAgentTask] = useState<{
+    text: string
+    nonce: number
+  } | null>(null)
+  const welcomeNonce = useRef(0)
   const editorApi = useRef<EditorApi | null>(null)
 
   const activeTab = activePath ? findTab(tabs, activePath) : null
@@ -658,6 +673,50 @@ function AppShell() {
     }
   }
 
+  // The terminal view lives in exactly one dock at a time: it renders
+  // on the right when the right dock is open, otherwise in the bottom
+  // area when the bottom TERMINAL tab is selected. These helpers keep
+  // that invariant (rightOpen implies bottomTab !== 'terminal') so the
+  // two panels can never mount duplicate terminal views.
+  function selectBottomTab(tab: BottomTab) {
+    if (tab === 'terminal') {
+      setRightOpen(false)
+    }
+
+    setBottomTab(tab)
+    setBottomOpen(true)
+  }
+
+  function toggleRightTerminal() {
+    if (rightOpen) {
+      setRightOpen(false)
+      return
+    }
+
+    if (bottomTab === 'terminal') {
+      setBottomTab('problems')
+    }
+
+    setRightOpen(true)
+  }
+
+  function handleWelcomeChat(prompt: string) {
+    welcomeNonce.current += 1
+    setWelcomeChatPrompt({ text: prompt, nonce: welcomeNonce.current })
+    setBottomTab('ai')
+    setBottomOpen(true)
+    setStatus('AI request sent from welcome')
+  }
+
+  function handleWelcomeAgent(task: string) {
+    welcomeNonce.current += 1
+    setWelcomeAgentTask({ text: task, nonce: welcomeNonce.current })
+    setBottomTab('agent')
+    setBottomOpen(true)
+    setRightOpen(true)
+    setStatus('Agent task started — planning… Terminal open for commands.')
+  }
+
   const projectInfo = summary
     ? `${summary.projectType}${
         summary.frameworks.length > 0
@@ -677,6 +736,8 @@ function AppShell() {
         busy={opening || saving || explorerLoading}
         onOpenProject={() => void openProject()}
         onCloseProject={() => void closeProject()}
+        onToggleTerminal={() => toggleRightTerminal()}
+        terminalOpen={rightOpen}
         onSave={() => void saveEditor()}
         onOpenSettings={() => setSettingsOpen(true)}
       />
@@ -761,106 +822,112 @@ function AppShell() {
               workspaceRoot={workspace?.root ?? null}
               defaultModel={settings.defaultModel}
               onOpenProject={() => void openProject()}
-              onShowAiChat={() => setRightTab('ai')}
-              onShowTerminal={() => {
-                setBottomTab('terminal')
-                setBottomOpen(true)
-              }}
+              onShowAiChat={() => selectBottomTab('ai')}
+              onShowTerminal={() => selectBottomTab('terminal')}
+              onSubmitChat={handleWelcomeChat}
+              onSubmitAgent={handleWelcomeAgent}
             />
           </section>
         )}
 
-        <ResizeHandle
-          orientation="vertical"
-          direction={-1}
-          label="Resize AI panel"
-          value={rightWidth}
-          min={PANEL_LIMITS.right.min}
-          max={PANEL_LIMITS.right.max}
-          onResize={resizeRight}
-          onResizeEnd={persistPanels}
-        />
-
-        <aside className="right-panel" style={{ width: rightWidth }}>
-          <div className="right-panel-tabs">
-            <button
-              className={rightTab === 'ai' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => setRightTab('ai')}
-            >
-              AI CHAT
-            </button>
-            <button
-              className={rightTab === 'agent' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => setRightTab('agent')}
-            >
-              AGENT
-            </button>
-          </div>
-
-          <div hidden={rightTab !== 'ai'} className="tab-body">
-            <AiChat
-              workspaceRoot={workspace?.root ?? null}
-              activeFile={activeTab?.path ?? null}
-              fileName={activeTab ? baseName(activeTab.path) : ''}
-              fileContent={activeTab?.content ?? ''}
-              dirty={dirty}
-              defaultModel={settings.defaultModel}
-              contextEnabled={settings.aiContextEnabled}
-              onStatus={setStatus}
+        {rightOpen && (
+          <>
+            <ResizeHandle
+              orientation="vertical"
+              direction={-1}
+              label="Resize terminal panel"
+              value={rightWidth}
+              min={PANEL_LIMITS.right.min}
+              max={PANEL_LIMITS.right.max}
+              onResize={resizeRight}
+              onResizeEnd={persistPanels}
             />
-          </div>
 
-          <div hidden={rightTab !== 'agent'} className="tab-body">
-            <AgentPanel
-              workspaceRoot={workspace?.root ?? null}
-              defaultModel={settings.defaultModel}
-              onFilesChanged={(paths) => void handleAgentFilesChanged(paths)}
-              onStatus={setStatus}
-            />
-          </div>
-        </aside>
+            <aside className="right-panel" style={{ width: rightWidth }}>
+              <div className="dock-header">
+                <span className="dock-title">TERMINAL</span>
+                <button
+                  className="dock-close"
+                  onClick={() => setRightOpen(false)}
+                  title="Close right terminal (terminal stays available below)"
+                  aria-label="Close right terminal panel"
+                >
+                  ×
+                </button>
+              </div>
+
+              <TerminalPanelView
+                controller={terminal}
+                workspaceRoot={workspace?.root ?? null}
+              />
+            </aside>
+          </>
+        )}
       </section>
 
-      {bottomOpen && (
-        <>
-          <ResizeHandle
-            orientation="horizontal"
-            direction={-1}
-            label="Resize bottom panel"
-            value={bottomHeight}
-            min={PANEL_LIMITS.bottom.min}
-            max={PANEL_LIMITS.bottom.max}
-            onResize={resizeBottom}
-            onResizeEnd={persistPanels}
-          />
-          <section className="bottom-panel" style={{ height: bottomHeight }}>
+      {/* Always mounted (hidden when collapsed) so AI chat history,
+          agent plans, and tool results survive collapsing the panel. */}
+      <div hidden={!bottomOpen} className="bottom-mounted">
+        <ResizeHandle
+          orientation="horizontal"
+          direction={-1}
+          label="Resize bottom panel"
+          value={bottomHeight}
+          min={PANEL_LIMITS.bottom.min}
+          max={PANEL_LIMITS.bottom.max}
+          onResize={resizeBottom}
+          onResizeEnd={persistPanels}
+        />
+        <section className="bottom-panel" style={{ height: bottomHeight }}>
           <div className="bottom-tabs">
             <button
               className={bottomTab === 'terminal' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => setBottomTab('terminal')}
+              onClick={() => selectBottomTab('terminal')}
             >
               TERMINAL
             </button>
             <button
               className={bottomTab === 'problems' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => setBottomTab('problems')}
+              onClick={() => selectBottomTab('problems')}
             >
               PROBLEMS
             </button>
             <button
               className={bottomTab === 'git' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => setBottomTab('git')}
+              onClick={() => selectBottomTab('git')}
             >
               GIT
+            </button>
+            <button
+              className={bottomTab === 'ai' ? 'panel-tab active' : 'panel-tab'}
+              onClick={() => selectBottomTab('ai')}
+            >
+              AI CHAT
+            </button>
+            <button
+              className={bottomTab === 'agent' ? 'panel-tab active' : 'panel-tab'}
+              onClick={() => selectBottomTab('agent')}
+            >
+              AGENT
+            </button>
+            <button
+              className="panel-tab bottom-collapse"
+              onClick={() => setBottomOpen(false)}
+              title="Collapse bottom panel"
+              aria-label="Collapse bottom panel"
+            >
+              ×
             </button>
           </div>
 
           <div className="bottom-body">
             <div hidden={bottomTab !== 'terminal'} className="tab-body">
-              <TerminalPanel
-                workspaceRoot={workspace?.root ?? null}
-                onStatus={setStatus}
-              />
+              {!rightOpen && (
+                <TerminalPanelView
+                  controller={terminal}
+                  workspaceRoot={workspace?.root ?? null}
+                />
+              )}
             </div>
             <div hidden={bottomTab !== 'problems'} className="tab-body">
               <ProblemsPanel
@@ -876,10 +943,31 @@ function AppShell() {
                 onStatus={setStatus}
               />
             </div>
+            <div hidden={bottomTab !== 'ai'} className="tab-body">
+              <AiChat
+                workspaceRoot={workspace?.root ?? null}
+                activeFile={activeTab?.path ?? null}
+                fileName={activeTab ? baseName(activeTab.path) : ''}
+                fileContent={activeTab?.content ?? ''}
+                dirty={dirty}
+                defaultModel={settings.defaultModel}
+                contextEnabled={settings.aiContextEnabled}
+                onStatus={setStatus}
+                pendingPrompt={welcomeChatPrompt}
+              />
+            </div>
+            <div hidden={bottomTab !== 'agent'} className="tab-body">
+              <AgentPanel
+                workspaceRoot={workspace?.root ?? null}
+                defaultModel={settings.defaultModel}
+                onFilesChanged={(paths) => void handleAgentFilesChanged(paths)}
+                onStatus={setStatus}
+                pendingTask={welcomeAgentTask}
+              />
+            </div>
           </div>
         </section>
-        </>
-      )}
+      </div>
 
       <StatusBar
         status={status}

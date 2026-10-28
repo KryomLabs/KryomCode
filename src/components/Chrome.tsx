@@ -4,6 +4,8 @@ export interface TopBarProps {
   busy: boolean
   onOpenProject: () => void
   onCloseProject: () => void
+  onToggleTerminal: () => void
+  terminalOpen: boolean
   onSave: () => void
   onOpenSettings: () => void
 }
@@ -23,6 +25,18 @@ export function TopBar(props: TopBarProps) {
         title="Close the current project"
       >
         Close
+      </button>
+
+      <button
+        onClick={props.onToggleTerminal}
+        aria-pressed={props.terminalOpen}
+        title={
+          props.terminalOpen
+            ? 'Close the right-side terminal'
+            : 'Open the right-side terminal'
+        }
+      >
+        Terminal
       </button>
 
       <span className="muted">
