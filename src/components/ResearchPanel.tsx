@@ -6,6 +6,7 @@ export interface ResearchPanelProps {
   onStatus: (status: string) => void
   onImplement: (session: KryomResearchSession) => void
   onAsk: (session: KryomResearchSession) => void
+  pendingStart?: { objective: string; nonce: number } | null
 }
 
 function stepIcon(status: KryomResearchStep['status']): string {
@@ -103,8 +104,8 @@ export function ResearchPanel(props: ResearchPanelProps) {
     }
   }, [session?.id, session?.status, loadSession, refreshList, props])
 
-  async function start() {
-    const trimmed = objective.trim()
+  async function start(externalObjective?: string) {
+    const trimmed = (externalObjective ?? objective).trim()
 
     if (!trimmed || starting || !props.workspaceRoot) {
       return
@@ -126,6 +127,25 @@ export function ResearchPanel(props: ResearchPanelProps) {
       setStarting(false)
     }
   }
+
+  // Welcome-composer starts arrive with a fresh nonce per submission.
+  const consumedStartNonce = useRef<number | null>(null)
+
+  useEffect(() => {
+    const pending = props.pendingStart
+
+    if (
+      !pending ||
+      consumedStartNonce.current === pending.nonce ||
+      !props.workspaceRoot
+    ) {
+      return
+    }
+
+    consumedStartNonce.current = pending.nonce
+    void start(pending.objective)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.pendingStart, props.workspaceRoot])
 
   async function cancel() {
     if (!session || working) {

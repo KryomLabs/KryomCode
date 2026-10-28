@@ -31,6 +31,7 @@ const MODULES = [
   ['./services/project-intelligence/dependency-analyzer.service.cjs', ['analyzeDependencies']],
   ['./services/settings/settings.service.cjs', ['readSettings', 'updateSettings']],
   ['./services/settings/secrets.service.cjs', ['getSecret', 'isSecretKey']],
+  ['./services/ui/ui-state.service.cjs', ['readUIState', 'writeUIState', 'addRecent', 'clearRecent', 'removeRecent', 'setAutoSave']],
   ['./security/validate-path.cjs', ['resolveWorkspacePath']],
   ['./security/validate-input.cjs', ['assertPlainObject', 'assertNonEmptyString', 'assertOptionalString', 'assertStringArray', 'assertEnum', 'assertBoolean']],
   ['./security/trusted-sender.cjs', ['createTrustedSender']],
@@ -54,6 +55,7 @@ const IPC_MODULES = [
   './ipc/agent.ipc.cjs',
   './ipc/settings.ipc.cjs',
   './ipc/research.ipc.cjs',
+  './ipc/app.ipc.cjs',
   './ipc/register-handlers.cjs',
 ]
 

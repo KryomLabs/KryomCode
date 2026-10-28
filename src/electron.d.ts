@@ -210,6 +210,41 @@ interface KryomResearchSummary {
   createdAt: string
 }
 
+interface KryomOpenFileResult {
+  root: string
+  tree: KryomNode[]
+  filePath: string
+}
+
+interface KryomSaveAsResult {
+  path: string
+  content: string
+  mtimeMs: number
+}
+
+interface KryomAppVersion {
+  version: string
+  electron: string
+  chrome: string
+  node: string
+  platform: string
+}
+
+interface KryomAIStatus {
+  modelKeyConfigured: boolean
+  researchKeyConfigured: boolean
+}
+
+interface KryomUIState {
+  autoSave: boolean
+  recent: string[]
+}
+
+interface KryomCommand {
+  id: string
+  payload?: { path?: string }
+}
+
 interface KryomAPI {
   platform: string
 
@@ -220,6 +255,10 @@ interface KryomAPI {
   }
 
   openWorkspace: () => Promise<KryomWorkspace | null>
+
+  openFile: () => Promise<KryomOpenFileResult | null>
+
+  openPath: (dirPath: string) => Promise<KryomWorkspace>
 
   readFile: (filePath: string) => Promise<string>
 
@@ -249,6 +288,11 @@ interface KryomAPI {
     content: string,
     expectedMtimeMs?: number | null,
   ) => Promise<{ success: boolean; mtimeMs: number }>
+
+  saveAs: (
+    content: string,
+    suggestedName?: string,
+  ) => Promise<KryomSaveAsResult | null>
 
   createPath: (payload: {
     path: string
@@ -350,6 +394,26 @@ interface KryomAPI {
   selectResearch: (payload: {
     id: string
   }) => Promise<{ id: string }>
+
+  getAppVersion: () => Promise<KryomAppVersion>
+
+  getAIStatus: () => Promise<KryomAIStatus>
+
+  getUIState: () => Promise<KryomUIState>
+
+  setUIState: (patch: {
+    autoSave?: boolean
+    clearRecent?: boolean
+  }) => Promise<KryomUIState>
+
+  pushUIContext: (ctx: {
+    hasWorkspace: boolean
+    hasEditor: boolean
+  }) => Promise<{ success: boolean }>
+
+  onCommand: (handler: (command: KryomCommand) => void) => () => void
+
+  onUIState: (handler: (state: KryomUIState) => void) => () => void
 }
 
 interface Window {

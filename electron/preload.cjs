@@ -15,6 +15,11 @@ contextBridge.exposeInMainWorld('kryom', {
 
   openWorkspace: () => ipcRenderer.invoke('workspace:open'),
 
+  openFile: () => ipcRenderer.invoke('workspace:open-file'),
+
+  openPath: (dirPath) =>
+    ipcRenderer.invoke('workspace:open-path', dirPath),
+
   closeWorkspace: () => ipcRenderer.invoke('workspace:close'),
 
   refreshWorkspace: () => ipcRenderer.invoke('workspace:refresh'),
@@ -35,6 +40,9 @@ contextBridge.exposeInMainWorld('kryom', {
       content,
       expectedMtimeMs
     ),
+
+  saveAs: (content, suggestedName) =>
+    ipcRenderer.invoke('filesystem:save-as', content, suggestedName),
 
   createPath: (payload) =>
     ipcRenderer.invoke('filesystem:create', payload),
@@ -125,4 +133,37 @@ contextBridge.exposeInMainWorld('kryom', {
 
   selectResearch: (payload) =>
     ipcRenderer.invoke('research:select', payload),
+
+  getAppVersion: () =>
+    ipcRenderer.invoke('app:get-version'),
+
+  getAIStatus: () =>
+    ipcRenderer.invoke('app:get-ai-status'),
+
+  getUIState: () =>
+    ipcRenderer.invoke('ui:get'),
+
+  setUIState: (patch) =>
+    ipcRenderer.invoke('ui:set', patch),
+
+  pushUIContext: (ctx) =>
+    ipcRenderer.invoke('ui:context', ctx),
+
+  onCommand: (handler) => {
+    const listener = (_event, command) => handler(command)
+
+    ipcRenderer.on('kryom:command', listener)
+
+    return () =>
+      ipcRenderer.removeListener('kryom:command', listener)
+  },
+
+  onUIState: (handler) => {
+    const listener = (_event, state) => handler(state)
+
+    ipcRenderer.on('kryom:ui', listener)
+
+    return () =>
+      ipcRenderer.removeListener('kryom:ui', listener)
+  },
 })

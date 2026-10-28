@@ -25,6 +25,7 @@ export interface TerminalController {
   runTerminalCommand: () => void
   cancel: () => void
   refreshStatus: () => void
+  clear: () => void
 }
 
 let nextEntryId = 1
@@ -122,6 +123,11 @@ export function useTerminalController(
     }
   }
 
+  function clear() {
+    setEntries([])
+    setError('')
+  }
+
   return {
     command,
     setCommand,
@@ -132,6 +138,7 @@ export function useTerminalController(
     runTerminalCommand: () => void runTerminalCommand(),
     cancel: () => void cancel(),
     refreshStatus: () => void refreshStatus(),
+    clear,
   }
 }
 
@@ -196,6 +203,16 @@ export function TerminalPanelView(props: TerminalPanelViewProps) {
           title="Refresh running processes"
         >
           Status
+        </button>
+
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={controller.clear}
+          disabled={controller.entries.length === 0 && !controller.error}
+          title="Clear terminal output"
+        >
+          Clear
         </button>
       </form>
 

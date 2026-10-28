@@ -8,18 +8,25 @@ const registerIntelligenceIPC = require('./project-intelligence.ipc.cjs')
 const registerAgentIPC = require('./agent.ipc.cjs')
 const registerSettingsIPC = require('./settings.ipc.cjs')
 const registerResearchIPC = require('./research.ipc.cjs')
+const registerAppIPC = require('./app.ipc.cjs')
 
 module.exports = function registerHandlers({
   getMainWindow,
+  getWindows,
   isTrustedSender,
+  onUIStateChanged,
+  onUIContext,
+  onWorkspaceOpened,
 }) {
   registerWorkspaceIPC({
     getMainWindow,
     isTrustedSender,
+    onWorkspaceOpened,
   })
 
   registerFilesystemIPC({
     isTrustedSender,
+    getMainWindow,
   })
 
   registerTerminalIPC({
@@ -52,5 +59,12 @@ module.exports = function registerHandlers({
 
   registerResearchIPC({
     isTrustedSender,
+  })
+
+  registerAppIPC({
+    isTrustedSender,
+    onUIStateChanged,
+    onUIContext,
+    getWindows,
   })
 }

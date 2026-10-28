@@ -6,6 +6,10 @@ import type { TabState } from '../utils/tabs'
 
 export interface EditorApi {
   revealLine: (line: number) => void
+  find: () => void
+  replace: () => void
+  expandSelection: () => void
+  shrinkSelection: () => void
 }
 
 // Minimal structural types for the Monaco instance. The real editor is
@@ -16,6 +20,12 @@ interface MonacoEditorInstance {
   setPosition: (position: { lineNumber: number; column: number }) => void
   addCommand: (keybinding: number, handler: () => void) => void
   getModel: () => { getLineCount: () => number } | null
+  trigger: (source: string, handlerId: string, payload?: unknown) => void
+  onDidChangeCursorPosition: (
+    listener: (event: {
+      position: { lineNumber: number; column: number }
+    }) => void
+  ) => { dispose: () => void }
 }
 
 interface MonacoApi {
@@ -38,6 +48,8 @@ export interface EditorPanelProps {
   onSave: () => void
   onRevealConsumed: () => void
   registerApi: (api: EditorApi | null) => void
+  fontSize?: number
+  onCursorChange?: (line: number, column: number) => void
 }
 
 export function EditorPanel(props: EditorPanelProps) {
@@ -85,10 +97,19 @@ export function EditorPanel(props: EditorPanelProps) {
     )
   }
 
+  const cursorRef = useRef(props.onCursorChange)
+  cursorRef.current = props.onCursorChange
+
   const handleMount = (editor: MonacoEditorInstance, monaco: MonacoApi) => {
     editorRef.current = editor
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       saveRef.current()
+    })
+    editor.onDidChangeCursorPosition((event) => {
+      cursorRef.current?.(
+        event.position.lineNumber,
+        event.position.column
+      )
     })
     registerRef.current({
       revealLine: (line: number) => {
@@ -99,6 +120,12 @@ export function EditorPanel(props: EditorPanelProps) {
         editor.revealLineInCenter(safeLine)
         editor.setPosition({ lineNumber: safeLine, column: 1 })
       },
+      find: () => editor.trigger('menu', 'actions.find'),
+      replace: () => editor.trigger('menu', 'editor.action.startFindReplaceAction'),
+      expandSelection: () =>
+        editor.trigger('menu', 'editor.action.smartSelect.expand'),
+      shrinkSelection: () =>
+        editor.trigger('menu', 'editor.action.smartSelect.shrink'),
     })
   }
 
@@ -130,7 +157,7 @@ export function EditorPanel(props: EditorPanelProps) {
         onMount={handleMount}
         options={{
           minimap: { enabled: false },
-          fontSize: 14,
+          fontSize: props.fontSize ?? 14,
           automaticLayout: true,
           scrollBeyondLastLine: false,
           readOnly: false,

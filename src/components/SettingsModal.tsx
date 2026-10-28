@@ -6,9 +6,18 @@ export interface SettingsModalProps {
   initial: KryomSettings
   onClose: () => void
   onSaved: (settings: KryomSettings) => void
+  fontSize: number
+  onFontSizeChange: (size: number) => void
+  autoSave: boolean
+  onToggleAutoSave: () => void
+  panelLeftWidth: number
+  panelBottomHeight: number
+  onResetPanels: () => void
 }
 
 const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
+const FONT_MIN = 10
+const FONT_MAX = 24
 
 export function SettingsModal(props: SettingsModalProps) {
   const [defaultModel, setDefaultModel] = useState(props.initial.defaultModel)
@@ -73,7 +82,7 @@ export function SettingsModal(props: SettingsModalProps) {
         }
       }}
     >
-      <div className="dialog" role="dialog" aria-modal="true" aria-label="Settings">
+      <div className="dialog settings-dialog" role="dialog" aria-modal="true" aria-label="Settings">
         <h2>Settings</h2>
 
         <label className="field-label">
@@ -99,6 +108,83 @@ export function SettingsModal(props: SettingsModalProps) {
           />
           Include active file context in AI requests by default
         </label>
+
+        <div className="settings-row">
+          <span id="settings-autosave-label">Auto Save</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={props.autoSave}
+            aria-labelledby="settings-autosave-label"
+            className={props.autoSave ? 'switch on' : 'switch'}
+            onClick={props.onToggleAutoSave}
+          >
+            <span className="switch-knob" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <span id="settings-font-label">Editor font size</span>
+          <div
+            className="stepper"
+            role="group"
+            aria-labelledby="settings-font-label"
+          >
+            <button
+              type="button"
+              className="mini-btn"
+              onClick={() =>
+                props.onFontSizeChange(Math.max(FONT_MIN, props.fontSize - 1))
+              }
+              disabled={props.fontSize <= FONT_MIN}
+              aria-label="Decrease editor font size"
+            >
+              −
+            </button>
+            <span aria-live="polite">{props.fontSize}px</span>
+            <button
+              type="button"
+              className="mini-btn"
+              onClick={() =>
+                props.onFontSizeChange(Math.min(FONT_MAX, props.fontSize + 1))
+              }
+              disabled={props.fontSize >= FONT_MAX}
+              aria-label="Increase editor font size"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <span>Theme</span>
+          <select
+            value="dark"
+            disabled
+            title="Light theme is not implemented yet"
+            aria-label="Theme (dark only for now)"
+          >
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+        <p className="muted settings-note">Light theme — Coming soon.</p>
+
+        <div className="settings-row">
+          <span>Panel sizes</span>
+          <button
+            type="button"
+            className="mini-btn"
+            onClick={props.onResetPanels}
+            title="Reset sidebar and bottom panel to default sizes"
+          >
+            Reset to defaults
+          </button>
+        </div>
+        <p className="muted settings-note">
+          Sidebar {props.panelLeftWidth}px · Bottom panel{' '}
+          {props.panelBottomHeight}px. Drag the dividers to resize; sizes
+          persist automatically.
+        </p>
 
         <p className="muted">
           API credentials live in your local .env file and are never shown

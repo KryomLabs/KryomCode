@@ -84,6 +84,21 @@ describe('security guards', () => {
     assert.equal(gone(event), false)
   })
 
+  it('trusts any live app window sender in multi-window mode', () => {
+    const first = {}
+    const second = {}
+    const multi = createTrustedSender(() => [
+      { isDestroyed: () => false, webContents: first },
+      { isDestroyed: () => false, webContents: second },
+      { isDestroyed: () => true, webContents: {} },
+    ])
+
+    assert.equal(multi({ sender: first }), true)
+    assert.equal(multi({ sender: second }), true)
+    assert.equal(multi({ sender: {} }), false)
+    assert.equal(multi(null), false)
+  })
+
   it('resolves relative paths against the workspace root', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-secrel-'))
     await fs.writeFile(path.join(root, 'rel.txt'), 'r')

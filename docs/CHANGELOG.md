@@ -8,6 +8,26 @@ working tree, which has not been committed yet.
 
 ### Added
 
+- Desktop IDE shell: native File/Edit/Selection/View/Go/Run/Terminal/
+  Help menu, activity bar, contextual sidebar, center editor/AI stage,
+  bottom panel, and live status bar.
+- Dockable panels: Chat, Agent, and Research stage in the center with
+  full conversation state; Git and Problems move between the sidebar
+  and the bottom panel without remounting.
+- Go to File quick-open palette (Ctrl+P) with fuzzy matching over the
+  workspace tree; Go to Line, Back/Forward history, and Open Recent.
+- File menu operations: New Text File, New Window (multi-window),
+  Open File, Open Folder, Open Recent, Save, Save As, Auto Save,
+  Close Editor, Close Folder.
+- Connections, Extensions, Profile, and Output views; About dialog;
+  extended Settings (model, auto-save, editor font size, panel
+  sizes); status-bar diagnostics summary; terminal Clear.
+- Backend: `workspace:open-file`, `workspace:open-path`,
+  `filesystem:save-as`, `app:get-version`, `app:get-ai-status`,
+  `ui:get`/`ui:set`/`ui:context` channels; ui-state service with
+  auto-save and recent projects; multi-window trusted senders.
+- Recent projects prune entries whose folders no longer exist, with
+  the menu and welcome list updated.
 - Agent service and panel: JSON task plans with per-edit previews,
   selective apply, and atomic rollback (`agent:plan`, `agent:apply`).
 - Git service and panel: status, diff, changed files, stage, commit,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { kryom, errorMessage } from '../api/kryom'
 import { joinName } from '../utils/paths'
 
@@ -7,6 +7,8 @@ export interface ProblemsPanelProps {
   scripts: string[]
   onOpenFileAtLine: (path: string, line: number) => void
   onStatus: (status: string) => void
+  pendingRun?: { nonce: number } | null
+  onResult?: (count: number, success: boolean) => void
 }
 
 function suggestCommand(scripts: string[]): string {
@@ -42,8 +44,11 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
     return props.workspaceRoot ? joinName(props.workspaceRoot, file) : file
   }
 
-  async function run() {
-    const trimmed = command.trim()
+  const resultRef = useRef(props.onResult)
+  resultRef.current = props.onResult
+
+  async function run(override?: string) {
+    const trimmed = (override ?? command).trim()
 
     if (!props.workspaceRoot || running || !trimmed) {
       return
@@ -60,6 +65,7 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
           ? `Diagnostics passed (${next.diagnostics.length} problem(s))`
           : 'Diagnostics failed'
       )
+      resultRef.current?.(next.diagnostics.length, next.success)
     } catch (e) {
       setResult(null)
       setError(errorMessage(e))
@@ -67,6 +73,26 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
       setRunning(false)
     }
   }
+
+  // External runs (Run menu / F5) use the current command, falling
+  // back to the suggested command when the input is still empty.
+  const consumedRunNonce = useRef<number | null>(null)
+
+  useEffect(() => {
+    const pending = props.pendingRun
+
+    if (
+      !pending ||
+      consumedRunNonce.current === pending.nonce ||
+      !props.workspaceRoot
+    ) {
+      return
+    }
+
+    consumedRunNonce.current = pending.nonce
+    void run(command.trim() ? undefined : suggestCommand(props.scripts))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.pendingRun, props.workspaceRoot])
 
   return (
     <section className="problems-panel bottom-tab-panel">
