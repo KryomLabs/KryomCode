@@ -3,6 +3,7 @@ import { kryom, errorMessage } from '../api/kryom'
 import { diffLines } from '../utils/diff'
 import { baseName } from '../utils/paths'
 import { useDialogs } from './dialogs'
+import { AiKeyNotice } from './AiKeyNotice'
 
 export interface AgentPanelProps {
   workspaceRoot: string | null
@@ -10,6 +11,8 @@ export interface AgentPanelProps {
   onFilesChanged: (changedPaths: string[]) => void
   onStatus: (status: string) => void
   pendingTask?: { text: string; nonce: number; researchSessionId?: string } | null
+  onOpenConnections?: () => void
+  onOpenFile?: (path: string) => void
 }
 
 const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
@@ -47,6 +50,8 @@ export function AgentPanel(props: AgentPanelProps) {
   const [applying, setApplying] = useState(false)
   const [applyResult, setApplyResult] = useState<KryomAgentApplyResult | null>(null)
   const [error, setError] = useState('')
+  const [keyMissing, setKeyMissing] = useState(false)
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const [copied, setCopied] = useState<number | null>(null)
 
   useEffect(() => {
@@ -91,11 +96,25 @@ export function AgentPanel(props: AgentPanelProps) {
       return
     }
 
+    try {
+      const status = await kryom().getAIStatus()
+
+      if (!status.modelKeyConfigured) {
+        setKeyMissing(true)
+        props.onStatus('AI model is not configured')
+        return
+      }
+    } catch {
+      // Fall through to the planning path.
+    }
+
     setPlanning(true)
     setError('')
+    setKeyMissing(false)
     setPlan(null)
     setApplyResult(null)
     setOldContents({})
+    setExpanded(new Set())
 
     try {
       const next = await kryom().planAgentTask({
@@ -134,6 +153,20 @@ export function AgentPanel(props: AgentPanelProps) {
 
   function toggleApproval(index: number) {
     setApproved((previous) => {
+      const next = new Set(previous)
+
+      if (next.has(index)) {
+        next.delete(index)
+      } else {
+        next.add(index)
+      }
+
+      return next
+    })
+  }
+
+  function toggleExpanded(index: number) {
+    setExpanded((previous) => {
       const next = new Set(previous)
 
       if (next.has(index)) {
@@ -190,6 +223,7 @@ export function AgentPanel(props: AgentPanelProps) {
     setApplyResult(null)
     setError('')
     setOldContents({})
+    setExpanded(new Set())
     setResearchSessionId(null)
   }
 
@@ -271,6 +305,10 @@ export function AgentPanel(props: AgentPanelProps) {
             </div>
           )}
 
+          {keyMissing && !planning && (
+            <AiKeyNotice onOpenConnections={props.onOpenConnections} />
+          )}
+
           {researchSessionId && !plan && (
             <p className="muted padded">
               Research brief attached: {researchSessionId}
@@ -295,6 +333,8 @@ export function AgentPanel(props: AgentPanelProps) {
               {plan.edits.map((edit) => {
                 const key = edit.index ?? 0
                 const checked = approved.has(key)
+                const fullPreview = edit.preview ?? edit.content ?? ''
+                const showAll = expanded.has(key)
 
                 return (
                   <div key={key} className="plan-edit">
@@ -312,6 +352,22 @@ export function AgentPanel(props: AgentPanelProps) {
                       <span className="plan-path" title={edit.path}>
                         {baseName(edit.path)}
                       </span>
+                      {edit.action !== 'create' && props.onOpenFile && (
+                        <button
+                          type="button"
+                          className="mini-btn"
+                          title="Open the current file in the editor"
+                          onClick={(event) => {
+                            // The head is a label: stop the click from
+                            // toggling approval.
+                            event.preventDefault()
+                            event.stopPropagation()
+                            props.onOpenFile?.(edit.path)
+                          }}
+                        >
+                          Open
+                        </button>
+                      )}
                     </label>
 
                     {edit.action === 'delete' ? (
@@ -324,9 +380,24 @@ export function AgentPanel(props: AgentPanelProps) {
                         newText={edit.content ?? ''}
                       />
                     ) : (
-                      <pre className="plan-preview">
-                        {(edit.preview ?? edit.content ?? '').slice(0, 2000)}
-                      </pre>
+                      <>
+                        <pre className="plan-preview">
+                          {showAll
+                            ? fullPreview.slice(0, 20000)
+                            : fullPreview.slice(0, 2000)}
+                        </pre>
+                        {fullPreview.length > 2000 && (
+                          <button
+                            type="button"
+                            className="mini-btn"
+                            onClick={() => toggleExpanded(key)}
+                          >
+                            {showAll
+                              ? 'Show less'
+                              : `Show full preview (${fullPreview.length} chars)`}
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 )

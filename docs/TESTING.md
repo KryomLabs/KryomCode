@@ -68,6 +68,13 @@ works:
 5. `npm run pack` output launches, loads `dist/`, stores settings, and
    picks up `MODEL_API_KEY` from the user environment.
 6. The `npm run dist` installer installs and starts on a clean machine.
+7. Close the window with dirty tabs: Save persists all and closes,
+   Discard closes without saving, Cancel leaves the window open; a
+   clean window closes without a prompt.
+8. Run diagnostics: markers appear in the editor gutter, F8 cycles
+   them, and rerunning or switching projects clears stale markers.
+9. A research source Open button launches the system browser; chat
+   code blocks render with working Copy buttons.
 
 Record completed manual checks in
 [backend-limitations.md](backend-limitations.md) with the date.

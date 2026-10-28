@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react'
-import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { kryom, errorMessage, isWriteConflict } from '../api/kryom'
 import { baseName, joinName, parentDir } from '../utils/paths'
 import { detectLanguage } from '../utils/languages'
@@ -46,27 +39,17 @@ import { ProfilePanel } from '../components/ProfilePanel'
 import { OutputPanel } from '../components/OutputPanel'
 import { AboutDialog } from '../components/AboutDialog'
 import { QuickOpen } from '../components/QuickOpen'
+import { ShortcutsDialog } from '../components/ShortcutsDialog'
 
-type BottomTab =
-  | 'terminal'
-  | 'problems'
-  | 'output'
-  | 'git'
-  | 'ai'
-  | 'agent'
-  | 'research'
+type RightTab = 'terminal' | 'output'
 type CenterView = 'editor' | 'home' | 'chat' | 'agent' | 'research'
 type StageMode = 'chat' | 'agent' | 'research'
 
-// Dockable panels mount exactly once (state is never lost) and paint
-// into whichever region currently owns them. Git and Problems live in
-// the sidebar by default; Chat, Agent, and Research live on the center
-// stage. Any of them can be moved to the bottom panel instead.
-type DockableId = 'git' | 'problems' | 'ai' | 'agent' | 'research'
-type DockableLoc = Record<DockableId, 'primary' | 'bottom'>
-
-const DOCKABLE_IDS: DockableId[] = ['git', 'problems', 'ai', 'agent', 'research']
-
+// Fixed homes, single-mounted: Git and Problems live in the sidebar,
+// Chat/Agent/Research live on the center stage, Terminal and Output
+// live in the right panel. Regions hide with `hidden` instead of
+// unmounting, so conversations, plans, and research survive every
+// navigation move without portal machinery.
 const FALLBACK_SETTINGS: KryomSettings = {
   defaultModel: 'muse-spark-1.3',
   aiContextEnabled: true,
@@ -77,79 +60,27 @@ const FALLBACK_SETTINGS: KryomSettings = {
 
 const PANEL_LIMITS = {
   left: { min: 180, max: 420, fallback: 260 },
-  bottom: { min: 140, max: 640, fallback: 264 },
+  right: { min: 300, max: 560, fallback: 360 },
 } as const
 
 const FONT_LIMITS = { min: 10, max: 24, fallback: 14 } as const
 
-// Detached overflow nodes: when a dockable panel's current host is not
-// in the DOM (sidebar collapsed, stage showing something else), the
-// portal paints here instead of unmounting, so session state survives.
-const fallbackNodes: Record<string, HTMLElement> = {}
-
-function fallbackNode(id: string): HTMLElement {
-  if (!fallbackNodes[id]) {
-    fallbackNodes[id] = document.createElement('div')
-  }
-
-  return fallbackNodes[id]
-}
-
-function Docked(props: {
-  id: string
-  primary: HTMLElement | null
-  secondary: HTMLElement | null
-  usePrimary: boolean
-  children: ReactNode
-}) {
-  const node =
-    (props.usePrimary ? props.primary : props.secondary) ??
-    fallbackNode(props.id)
-
-  return createPortal(props.children, node)
-}
-
-function DockPlaceholder(props: {
-  title: string
-  where: string
-  actionLabel: string
-  onBringHere: () => void
-}) {
-  return (
-    <div className="dock-placeholder">
-      <p className="muted">
-        {props.title} is open in {props.where}.
-      </p>
-      <button
-        type="button"
-        className="secondary-button"
-        onClick={props.onBringHere}
-      >
-        {props.actionLabel}
-      </button>
-    </div>
-  )
-}
-
-function clampLeftWidth(value: number): number {
+function clampLeftWidth(value: number, rightTaken: number): number {
   const max = Math.max(
     PANEL_LIMITS.left.min,
-    Math.min(PANEL_LIMITS.left.max, window.innerWidth - 284)
+    Math.min(PANEL_LIMITS.left.max, window.innerWidth - rightTaken - 284)
   )
 
   return Math.min(max, Math.max(PANEL_LIMITS.left.min, Math.round(value)))
 }
 
-function clampBottomHeight(value: number): number {
+function clampRightWidth(value: number, leftTaken: number): number {
   const max = Math.max(
-    200,
-    Math.min(PANEL_LIMITS.bottom.max, window.innerHeight - 282)
+    PANEL_LIMITS.right.min,
+    Math.min(PANEL_LIMITS.right.max, window.innerWidth - leftTaken - 284)
   )
 
-  return Math.min(
-    max,
-    Math.max(PANEL_LIMITS.bottom.min, Math.round(value))
-  )
+  return Math.min(max, Math.max(PANEL_LIMITS.right.min, Math.round(value)))
 }
 
 function clampFontSize(value: number): number {
@@ -188,37 +119,6 @@ function readLocalFontSize(): number {
   return FONT_LIMITS.fallback
 }
 
-function readLocalDockableLoc(): DockableLoc {
-  const fallback: DockableLoc = {
-    git: 'primary',
-    problems: 'primary',
-    ai: 'primary',
-    agent: 'primary',
-    research: 'primary',
-  }
-
-  try {
-    const raw = window.localStorage.getItem('kryom.panelLoc')
-
-    if (!raw) {
-      return fallback
-    }
-
-    const parsed = JSON.parse(raw) as Partial<DockableLoc>
-    const next = { ...fallback }
-
-    for (const id of DOCKABLE_IDS) {
-      if (parsed[id] === 'bottom' || parsed[id] === 'primary') {
-        next[id] = parsed[id]
-      }
-    }
-
-    return next
-  } catch {
-    return fallback
-  }
-}
-
 function AppShell() {
   const dialogs = useDialogs()
   const [workspace, setWorkspace] = useState<KryomWorkspace | null>(null)
@@ -228,12 +128,12 @@ function AppShell() {
   const [pendingLine, setPendingLine] = useState<number | null>(null)
   const [settings, setSettings] = useState<KryomSettings>(FALLBACK_SETTINGS)
   const [leftWidth, setLeftWidth] = useState(FALLBACK_SETTINGS.panelLeftWidth)
-  const [bottomHeight, setBottomHeight] = useState(
-    FALLBACK_SETTINGS.panelBottomHeight
+  const [rightWidth, setRightWidth] = useState(
+    FALLBACK_SETTINGS.panelRightWidth
   )
   const panelsRef = useRef({
     left: FALLBACK_SETTINGS.panelLeftWidth,
-    bottom: FALLBACK_SETTINGS.panelBottomHeight,
+    right: FALLBACK_SETTINGS.panelRightWidth,
   })
   const [summary, setSummary] = useState<KryomWorkspaceSummary | null>(null)
   const [status, setStatus] = useState('Ready')
@@ -259,36 +159,24 @@ function AppShell() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
-  const [panelLoc, setPanelLoc] = useState<DockableLoc>(() =>
-    readLocalDockableLoc()
-  )
-  const [hosts, setHosts] = useState<Record<string, HTMLElement | null>>({})
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [diagSummary, setDiagSummary] = useState<{
     count: number
     success: boolean
   } | null>(null)
+  const [diagnostics, setDiagnostics] = useState<KryomDiagnostic[]>([])
   const [diagnosticsRun, setDiagnosticsRun] = useState<{
     nonce: number
   } | null>(null)
   const runNonce = useRef(0)
-
-  // Stable per-key ref callbacks: a fresh closure every render would
-  // detach/reattach the ref on each commit and loop setHosts forever.
-  const hostCallbacks = useRef<
-    Record<string, (el: HTMLElement | null) => void>
-  >({})
-
-  const hostRef = useCallback((key: string) => {
-    if (!hostCallbacks.current[key]) {
-      hostCallbacks.current[key] = (el: HTMLElement | null) => {
-        setHosts((previous) =>
-          previous[key] === el ? previous : { ...previous, [key]: el }
-        )
-      }
-    }
-
-    return hostCallbacks.current[key]
-  }, [])
+  // Live mirrors: tabsRef keeps async flows (save-all) on fresh state,
+  // saveInflight coalesces concurrent saves of the same tab (e.g. a
+  // Monaco keybinding plus the matching native-menu accelerator).
+  const tabsRef = useRef<TabState[]>([])
+  tabsRef.current = tabs
+  const activePathRef = useRef<string | null>(null)
+  activePathRef.current = activePath
+  const saveInflight = useRef(new Map<string, Promise<boolean>>())
 
   // Status and error reporters double as Output log writers so the
   // Output tab shows real milestones without touching every panel.
@@ -308,9 +196,9 @@ function AppShell() {
     workspace?.root ?? null,
     reportStatus
   )
-  const [bottomTab, setBottomTab] = useState<BottomTab>('terminal')
-  const [bottomOpen, setBottomOpen] = useState(
-    () => window.localStorage.getItem('kryom.bottomOpen') !== '0'
+  const [rightTab, setRightTab] = useState<RightTab>('terminal')
+  const [rightOpen, setRightOpen] = useState(
+    () => window.localStorage.getItem('kryom.rightOpen') !== '0'
   )
   const [saving, setSaving] = useState(false)
   const [opening, setOpening] = useState(false)
@@ -340,6 +228,8 @@ function AppShell() {
 
   const activeTab = activePath ? findTab(tabs, activePath) : null
   const dirty = activeTab !== null && isDirty(activeTab)
+  const dirtyCount = dirtyTabs(tabs).length
+  const windowTitle = `${dirty ? '• ' : ''}${activeTab ? `${baseName(activeTab.path)} — ` : ''}${workspace ? `${baseName(workspace.root)} — ` : ''}KryomCode`
   const showEditor = centerView === 'editor' && activeTab !== null
   const staged: StageMode | null =
     centerView === 'chat' || centerView === 'agent' || centerView === 'research'
@@ -349,17 +239,21 @@ function AppShell() {
   useEffect(() => {
     logOutput('app', 'KryomCode started')
 
+    // Retired bottom-dock layout keys from earlier shells.
+    window.localStorage.removeItem('kryom.bottomOpen')
+    window.localStorage.removeItem('kryom.panelLoc')
+
     kryom()
       .getSettings()
       .then((loaded) => {
         setSettings(loaded)
 
-        const left = clampLeftWidth(loaded.panelLeftWidth)
-        const bottom = clampBottomHeight(loaded.panelBottomHeight)
+        const right = clampRightWidth(loaded.panelRightWidth, loaded.panelLeftWidth)
+        const left = clampLeftWidth(loaded.panelLeftWidth, right)
 
-        panelsRef.current = { left, bottom }
+        panelsRef.current = { left, right }
         setLeftWidth(left)
-        setBottomHeight(bottom)
+        setRightWidth(right)
       })
       .catch(() => undefined)
 
@@ -386,36 +280,32 @@ function AppShell() {
   }, [sidebarVisible])
 
   useEffect(() => {
-    window.localStorage.setItem('kryom.bottomOpen', bottomOpen ? '1' : '0')
-  }, [bottomOpen])
+    window.localStorage.setItem('kryom.rightOpen', rightOpen ? '1' : '0')
+  }, [rightOpen])
 
   useEffect(() => {
     window.localStorage.setItem('kryom.editorFontSize', String(fontSize))
   }, [fontSize])
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('kryom.panelLoc', JSON.stringify(panelLoc))
-    } catch {
-      // Layout persistence is best-effort.
-    }
-  }, [panelLoc])
-
   // Keep the layout valid when the Electron window itself is resized.
+  // Hidden sidebars release their width; visible ones keep the editor
+  // at 280px plus the divider handles.
   useEffect(() => {
     const onWindowResize = () => {
-      const left = clampLeftWidth(panelsRef.current.left)
-      const bottom = clampBottomHeight(panelsRef.current.bottom)
+      const leftTaken = sidebarVisible ? panelsRef.current.left : 0
+      const rightTaken = rightOpen ? panelsRef.current.right : 0
+      const right = clampRightWidth(panelsRef.current.right, leftTaken)
+      const left = clampLeftWidth(panelsRef.current.left, rightTaken)
 
-      panelsRef.current = { left, bottom }
+      panelsRef.current = { left, right }
       setLeftWidth(left)
-      setBottomHeight(bottom)
+      setRightWidth(right)
     }
 
     window.addEventListener('resize', onWindowResize)
 
     return () => window.removeEventListener('resize', onWindowResize)
-  }, [])
+  }, [sidebarVisible, rightOpen])
 
   const persistPanels = useCallback(() => {
     const panels = panelsRef.current
@@ -423,35 +313,43 @@ function AppShell() {
     kryom()
       .updateSettings({
         panelLeftWidth: panels.left,
-        panelBottomHeight: panels.bottom,
+        panelRightWidth: panels.right,
       })
       .catch(() => undefined)
   }, [])
 
-  const resizeLeft = useCallback((value: number) => {
-    const next = clampLeftWidth(value)
+  const resizeLeft = useCallback(
+    (value: number) => {
+      const rightTaken = rightOpen ? panelsRef.current.right : 0
+      const next = clampLeftWidth(value, rightTaken)
 
-    panelsRef.current.left = next
-    setLeftWidth(next)
-  }, [])
+      panelsRef.current.left = next
+      setLeftWidth(next)
+    },
+    [rightOpen]
+  )
 
-  const resizeBottom = useCallback((value: number) => {
-    const next = clampBottomHeight(value)
+  const resizeRight = useCallback(
+    (value: number) => {
+      const leftTaken = sidebarVisible ? panelsRef.current.left : 0
+      const next = clampRightWidth(value, leftTaken)
 
-    panelsRef.current.bottom = next
-    setBottomHeight(next)
-  }, [])
+      panelsRef.current.right = next
+      setRightWidth(next)
+    },
+    [sidebarVisible]
+  )
 
   function resetPanels() {
     const left = PANEL_LIMITS.left.fallback
-    const bottom = PANEL_LIMITS.bottom.fallback
+    const right = PANEL_LIMITS.right.fallback
 
-    panelsRef.current = { left, bottom }
+    panelsRef.current = { left, right }
     setLeftWidth(left)
-    setBottomHeight(bottom)
+    setRightWidth(right)
 
     kryom()
-      .updateSettings({ panelLeftWidth: left, panelBottomHeight: bottom })
+      .updateSettings({ panelLeftWidth: left, panelRightWidth: right })
       .then(() => reportStatus('Panel sizes reset to defaults'))
       .catch((e) => reportError(e))
   }
@@ -488,15 +386,38 @@ function AppShell() {
   }, [refreshGitBranch])
 
   // Push coarse capability state so the native menu can enable and
-  // disable workspace/editor commands accurately.
+  // disable workspace/editor/terminal commands accurately. The dirty
+  // count also drives the main-process close guard, and the title
+  // keeps the OS window label in sync with project/file context.
   useEffect(() => {
     kryom()
       .pushUIContext({
         hasWorkspace: workspace !== null,
         hasEditor: activeTab !== null,
+        terminalRunning: terminal.running,
+        dirtyCount,
+        title: windowTitle,
       })
       .catch(() => undefined)
-  }, [workspace, activeTab])
+  }, [workspace, activeTab, terminal.running, dirtyCount, windowTitle])
+
+  // Reload guard (Ctrl+R and friends). Window close takes the richer
+  // main-process Save/Discard/Cancel path instead; the main process
+  // destroys approved windows so this never double-prompts there.
+  // Covers editor buffers only: chat and agent sessions are in-memory.
+  useEffect(() => {
+    if (dirtyCount === 0) {
+      return
+    }
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+    }
+
+    window.addEventListener('beforeunload', onBeforeUnload)
+
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirtyCount])
 
   // Track opened files for Go Back/Forward. History-driven activations
   // set the navigating flag so the effect does not re-record them.
@@ -565,6 +486,7 @@ function AppShell() {
     setCenterView('home')
     setCursor({ line: 1, column: 1 })
     setDiagSummary(null)
+    setDiagnostics([])
     historyRef.current = { entries: [], index: -1 }
 
     if (!next) {
@@ -653,6 +575,168 @@ function AppShell() {
     }
   }
 
+  async function cloneRepository(url: string) {
+    if (!(await confirmDiscardTabs())) {
+      return
+    }
+
+    setError('')
+
+    try {
+      const result = await kryom().gitClone({ url })
+
+      if (!result) {
+        reportStatus('Clone cancelled')
+        return
+      }
+
+      resetForWorkspace({ root: result.root, tree: result.tree })
+      setActivity('explorer')
+      setSidebarVisible(true)
+      reportStatus('Repository cloned and opened')
+    } catch (e) {
+      reportError(e)
+    }
+  }
+
+  // Creates base.ext, base-2.ext, ... until the backend accepts one.
+  async function createUniqueFile(
+    dir: string,
+    base: string,
+    ext: string,
+    content: string
+  ): Promise<string> {
+    const safeBase =
+      base.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') ||
+      'document'
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const name =
+        attempt === 0
+          ? `${safeBase}.${ext}`
+          : `${safeBase}-${attempt + 1}.${ext}`
+
+      try {
+        const created = await kryom().createPath({
+          path: joinName(dir, name),
+          type: 'file',
+          content,
+        })
+
+        return created.path
+      } catch (e) {
+        if (!/exists|EEXIST/i.test(errorMessage(e)) || attempt === 9) {
+          throw e
+        }
+      }
+    }
+
+    throw new Error('Could not find a free file name.')
+  }
+
+  function reportScaffold(template: string): string {
+    const date = new Date().toISOString().slice(0, 10)
+    const technical = template === 'technical'
+
+    return [
+      `# Report — ${date}`,
+      '',
+      '## Objective',
+      '',
+      'What question does this report answer?',
+      '',
+      technical ? '## Design' : '## Findings',
+      '',
+      technical
+        ? 'Architecture, components, and trade-offs.'
+        : 'Key findings with evidence, one per bullet.',
+      '',
+      '- ',
+      '',
+      technical ? '## Verification' : '## Next steps',
+      '',
+      technical
+        ? 'How was this tested? Commands and results.'
+        : 'Follow-up actions and owners.',
+      '',
+      '## Sources',
+      '',
+      '1. ',
+      '',
+    ].join('\n')
+  }
+
+  async function createReport(template: string) {
+    if (!workspace) {
+      reportStatus('Open a project first')
+      return
+    }
+
+    setError('')
+
+    try {
+      const created = await createUniqueFile(
+        workspace.root,
+        'report',
+        'md',
+        reportScaffold(template)
+      )
+      await refreshExplorer()
+      await openEditorFile(created)
+      reportStatus('Report created')
+    } catch (e) {
+      reportError(e)
+    }
+  }
+
+  async function exportActiveFile(template: string) {
+    if (!activeTab) {
+      reportStatus('Open a file first')
+      return
+    }
+
+    setError('')
+
+    try {
+      const title = baseName(activeTab.path).replace(/\.[^.]+$/, '') || 'document'
+      const result = await kryom().exportTextDocx({
+        title,
+        markdown: activeTab.content,
+        template,
+      })
+
+      if (!result) {
+        reportStatus('Export cancelled')
+        return
+      }
+
+      await refreshExplorer()
+      reportStatus(`Exported ${baseName(result.path)}`)
+    } catch (e) {
+      reportError(e)
+    }
+  }
+
+  async function importSave(text: string, fileName: string) {
+    if (!workspace) {
+      reportStatus('Open a project first')
+      return
+    }
+
+    setError('')
+
+    try {
+      const base = fileName.replace(/\.docx$/i, '') || 'imported'
+      const created = await createUniqueFile(workspace.root, base, 'md', text)
+
+      await refreshExplorer()
+      await openEditorFile(created)
+      reportStatus('Imported document saved and opened')
+    } catch (e) {
+      reportError(e)
+    }
+  }
+
   async function closeProject() {
     if (!workspace || !(await confirmDiscardTabs())) {
       return
@@ -719,6 +803,51 @@ function AppShell() {
     }
   }
 
+  // Ctrl+Tab / Ctrl+Shift+Tab cycle through open tabs in strip order.
+  // No native accelerator is registered for these, so the window
+  // keydown listener below is the single handler.
+  const cycleTab = useCallback((delta: 1 | -1) => {
+    const list = tabsRef.current
+
+    if (list.length < 2) {
+      return
+    }
+
+    const index = list.findIndex(
+      (tab) => tab.path === activePathRef.current
+    )
+    const base = index < 0 ? (delta > 0 ? -1 : 0) : index
+    const next = list[(base + delta + list.length) % list.length]
+
+    setActivePath(next.path)
+    setCenterView('editor')
+    setCursor({ line: 1, column: 1 })
+  }, [])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        !event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.key !== 'Tab'
+      ) {
+        return
+      }
+
+      if (tabsRef.current.length < 2) {
+        return
+      }
+
+      event.preventDefault()
+      cycleTab(event.shiftKey ? -1 : 1)
+    }
+
+    window.addEventListener('keydown', onKey)
+
+    return () => window.removeEventListener('keydown', onKey)
+  }, [cycleTab])
+
   function navigateHistory(delta: -1 | 1) {
     const history = historyRef.current
     const next = history.index + delta
@@ -782,7 +911,27 @@ function AppShell() {
 
   // Saves one tab by path. Returns true when the tab no longer holds
   // unsaved work (saved, reloaded after a conflict, or already clean).
+  // Concurrent callers share one in-flight save per path, so a Monaco
+  // keybinding plus its native-menu accelerator can never double-save.
   async function saveTab(targetPath: string): Promise<boolean> {
+    const inflight = saveInflight.current.get(targetPath)
+
+    if (inflight) {
+      return inflight
+    }
+
+    const run = saveTabInner(targetPath)
+
+    saveInflight.current.set(targetPath, run)
+
+    try {
+      return await run
+    } finally {
+      saveInflight.current.delete(targetPath)
+    }
+  }
+
+  async function saveTabInner(targetPath: string): Promise<boolean> {
     const tab = findTab(tabs, targetPath)
 
     if (!tab || saving) {
@@ -867,6 +1016,41 @@ function AppShell() {
     if (activePath) {
       await saveTab(activePath)
     }
+  }
+
+  // Sequential save-all for the main-process close guard. Conflict
+  // dialogs surface per tab; a cancel or failure keeps that tab dirty
+  // and the reported count aborts the close. The nonce echo lets the
+  // main process settle promptly instead of waiting out its deadline.
+  async function saveAllTabs(nonce: number) {
+    const snapshot = dirtyTabs(tabsRef.current)
+    let failed = 0
+
+    for (const tab of snapshot) {
+      const settled = await saveTabRef.current(tab.path)
+
+      if (!settled) {
+        failed += 1
+      }
+    }
+
+    // Let React flush the tab updates, then report the live count so
+    // buffers dirtied mid-save still block the close. Fail-safe: any
+    // doubt reports dirty and the close is retried, never forced.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const count = Math.max(dirtyTabs(tabsRef.current).length, failed)
+
+    kryom()
+      .pushUIContext({
+        hasWorkspace: workspace !== null,
+        hasEditor: activePath !== null,
+        terminalRunning: terminal.running,
+        dirtyCount: count,
+        title: windowTitle,
+        saveAllNonce: nonce,
+      })
+      .catch(() => undefined)
   }
 
   async function saveAs() {
@@ -1161,12 +1345,6 @@ function AppShell() {
     }
   }
 
-  function movePanel(id: DockableId, loc: 'primary' | 'bottom') {
-    setPanelLoc((previous) =>
-      previous[id] === loc ? previous : { ...previous, [id]: loc }
-    )
-  }
-
   function selectActivity(id: ActivityId) {
     // Re-selecting the visible view collapses the sidebar, VS Code style.
     if (id === activity && sidebarVisible) {
@@ -1178,12 +1356,7 @@ function AppShell() {
     setSidebarVisible(true)
 
     if (id === 'git') {
-      movePanel('git', 'primary')
       void refreshGitBranch()
-    }
-
-    if (id === 'run') {
-      movePanel('problems', 'primary')
     }
 
     if (id === 'home') {
@@ -1196,30 +1369,13 @@ function AppShell() {
     setSidebarVisible(true)
 
     if (id === 'git') {
-      movePanel('git', 'primary')
       void refreshGitBranch()
-    }
-
-    if (id === 'run') {
-      movePanel('problems', 'primary')
     }
   }
 
-  function selectBottomTab(tab: BottomTab) {
-    // Selecting a dockable bottom tab moves that panel here; the
-    // sidebar or stage it came from shows a way back.
-    if (
-      tab === 'git' ||
-      tab === 'problems' ||
-      tab === 'ai' ||
-      tab === 'agent' ||
-      tab === 'research'
-    ) {
-      movePanel(tab, 'bottom')
-    }
-
-    setBottomTab(tab)
-    setBottomOpen(true)
+  function showRight(tab: RightTab) {
+    setRightTab(tab)
+    setRightOpen(true)
   }
 
   function showHome() {
@@ -1227,7 +1383,6 @@ function AppShell() {
   }
 
   function stageCenter(mode: StageMode) {
-    movePanel(mode === 'chat' ? 'ai' : mode, 'primary')
     setCenterView(mode)
   }
 
@@ -1365,6 +1520,9 @@ function AppShell() {
         case 'file.saveAs':
           void saveAs()
           break
+        case 'file.saveAll':
+          void saveAllTabs(command.payload?.nonce ?? 0)
+          break
         case 'file.toggleAutoSave':
           void toggleAutoSave()
           break
@@ -1440,20 +1598,20 @@ function AppShell() {
           }
           break
         case 'view.terminal':
-          if (bottomTab === 'terminal' && bottomOpen) {
-            setBottomOpen(false)
+          if (rightTab === 'terminal' && rightOpen) {
+            setRightOpen(false)
           } else {
-            selectBottomTab('terminal')
+            showRight('terminal')
           }
           break
         case 'view.output':
-          selectBottomTab('output')
+          showRight('output')
           break
         case 'view.toggleSidebar':
           setSidebarVisible((visible) => !visible)
           break
-        case 'view.toggleBottom':
-          setBottomOpen((open) => !open)
+        case 'view.toggleRight':
+          setRightOpen((open) => !open)
           break
         case 'editor.fontLarger':
           changeFontSize(1)
@@ -1481,11 +1639,14 @@ function AppShell() {
           break
         case 'terminal.clear':
           terminal.clear()
-          selectBottomTab('terminal')
+          showRight('terminal')
           reportStatus('Terminal cleared')
           break
         case 'terminal.focus':
-          selectBottomTab('terminal')
+          showRight('terminal')
+          break
+        case 'help.shortcuts':
+          setShortcutsOpen(true)
           break
         default:
           reportStatus(`Unknown command: ${command.id}`)
@@ -1500,8 +1661,8 @@ function AppShell() {
       activePath,
       activeTab,
       workspace,
-      bottomTab,
-      bottomOpen,
+      rightTab,
+      rightOpen,
       autoSave,
       saving,
       dialogs,
@@ -1565,14 +1726,14 @@ function AppShell() {
           onOpenSettings={() => setSettingsOpen(true)}
         />
 
-        {sidebarVisible && (
-          <>
-            <aside className="sidebar" style={{ width: leftWidth }}>
-              {sidebarTitle[activity] && (
-                <div className="side-header">
-                  <span className="side-title">{sidebarTitle[activity]}</span>
-                </div>
-              )}
+        {/* Always mounted (hidden when collapsed) so Git and
+            Problems state survives collapsing the sidebar. */}
+        <aside hidden={!sidebarVisible} className="sidebar" style={{ width: leftWidth }}>
+          {sidebarTitle[activity] && (
+            <div className="side-header">
+              <span className="side-title">{sidebarTitle[activity]}</span>
+            </div>
+          )}
 
               <div hidden={activity !== 'explorer'} className="tab-body">
                 <Explorer
@@ -1596,31 +1757,26 @@ function AppShell() {
                 />
               </div>
 
-              <div hidden={activity !== 'git'} className="tab-body">
-                {panelLoc.git === 'primary' ? (
-                  <div ref={hostRef('git-side')} className="dock-host" />
-                ) : (
-                  <DockPlaceholder
-                    title="Source Control"
-                    where="the bottom panel"
-                    actionLabel="Show here"
-                    onBringHere={() => movePanel('git', 'primary')}
-                  />
-                )}
-              </div>
+          <div hidden={activity !== 'git'} className="tab-body">
+            <GitPanel
+              workspaceRoot={workspace?.root ?? null}
+              onStatus={reportStatus}
+            />
+          </div>
 
-              <div hidden={activity !== 'run'} className="tab-body">
-                {panelLoc.problems === 'primary' ? (
-                  <div ref={hostRef('problems-side')} className="dock-host" />
-                ) : (
-                  <DockPlaceholder
-                    title="Run and Diagnostics"
-                    where="the bottom panel"
-                    actionLabel="Show here"
-                    onBringHere={() => movePanel('problems', 'primary')}
-                  />
-                )}
-              </div>
+          <div hidden={activity !== 'run'} className="tab-body">
+            <ProblemsPanel
+              workspaceRoot={workspace?.root ?? null}
+              scripts={scripts}
+              onOpenFileAtLine={(path, line) => void openEditorFile(path, line)}
+              onStatus={reportStatus}
+              pendingRun={diagnosticsRun}
+              onResult={(count, success) => setDiagSummary({ count, success })}
+              onDiagnostics={(result) =>
+                setDiagnostics(result ? result.diagnostics : [])
+              }
+            />
+          </div>
 
               <div hidden={activity !== 'extensions'} className="tab-body">
                 <ExtensionsPanel
@@ -1634,8 +1790,14 @@ function AppShell() {
                 <ConnectionsPanel
                   workspaceRoot={workspace?.root ?? null}
                   defaultModel={settings.defaultModel}
+                  activeFileName={activeTab ? baseName(activeTab.path) : ''}
+                  activeFileContent={activeTab?.content ?? ''}
                   onStatus={reportStatus}
                   onOpenSourceControl={() => showSidebar('git')}
+                  onCloneRepository={(url) => void cloneRepository(url)}
+                  onCreateReport={(template) => void createReport(template)}
+                  onExportActiveFile={(template) => void exportActiveFile(template)}
+                  onImportSave={(text, fileName) => void importSave(text, fileName)}
                 />
               </div>
 
@@ -1693,23 +1855,23 @@ function AppShell() {
                   onOpenAbout={() => setAboutOpen(true)}
                 />
               </div>
-            </aside>
+        </aside>
 
-            <ResizeHandle
-              orientation="vertical"
-              direction={1}
-              label="Resize sidebar"
-              value={leftWidth}
-              min={PANEL_LIMITS.left.min}
-              max={PANEL_LIMITS.left.max}
-              onResize={resizeLeft}
-              onResizeEnd={persistPanels}
-            />
-          </>
+        {sidebarVisible && (
+          <ResizeHandle
+            orientation="vertical"
+            direction={1}
+            label="Resize sidebar"
+            value={leftWidth}
+            min={PANEL_LIMITS.left.min}
+            max={PANEL_LIMITS.left.max}
+            onResize={resizeLeft}
+            onResizeEnd={persistPanels}
+          />
         )}
 
         <section className="center">
-          {showEditor && activeTab ? (
+          {showEditor && activeTab && (
             <EditorPanel
               tabs={tabs}
               activeTabPath={activeTab.path}
@@ -1733,59 +1895,80 @@ function AppShell() {
               }}
               fontSize={fontSize}
               onCursorChange={(line, column) => setCursor({ line, column })}
+              workspaceRoot={workspace?.root ?? null}
+              markers={diagnostics}
             />
-          ) : staged ? (
-            <section className="editor-panel stage">
-              <div className="stage-tabs" role="tablist" aria-label="AI workspace">
-                {STAGE_TABS.map((tab) => (
-                  <button
-                    key={tab.id}
-                    role="tab"
-                    aria-selected={staged === tab.id}
-                    className={
-                      staged === tab.id ? 'panel-tab active' : 'panel-tab'
-                    }
-                    onClick={() => stageCenter(tab.id)}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-                <span className="spacer" />
-                <button
-                  className="panel-tab stage-close"
-                  onClick={unstageCenter}
-                  title="Back to editor or home"
-                  aria-label="Close AI stage"
-                >
-                  ×
-                </button>
-              </div>
+          )}
 
-              <div className="stage-body">
-                {panelLoc[staged === 'chat' ? 'ai' : staged] === 'primary' ? (
-                  <div
-                    ref={hostRef(`${staged}-center`)}
-                    className="dock-host"
-                  />
-                ) : (
-                  <DockPlaceholder
-                    title={
-                      staged === 'chat'
-                        ? 'AI Chat'
-                        : staged === 'agent'
-                          ? 'Agent'
-                          : 'Research'
-                    }
-                    where="the bottom panel"
-                    actionLabel="Bring to center stage"
-                    onBringHere={() =>
-                      movePanel(staged === 'chat' ? 'ai' : staged, 'primary')
-                    }
-                  />
-                )}
+          {/* Always mounted (hidden unless staged) so the Chat, Agent,
+              and Research sessions survive editor and home visits. */}
+          <section hidden={!staged} className="editor-panel stage">
+            <div className="stage-tabs" role="tablist" aria-label="AI workspace">
+              {STAGE_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  aria-selected={staged === tab.id}
+                  className={
+                    staged === tab.id ? 'panel-tab active' : 'panel-tab'
+                  }
+                  onClick={() => stageCenter(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+              <span className="spacer" />
+              <button
+                className="panel-tab stage-close"
+                onClick={unstageCenter}
+                title="Back to editor or home"
+                aria-label="Close AI stage"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="stage-body">
+              <div hidden={staged !== 'chat'} className="tab-body">
+                <AiChat
+                  workspaceRoot={workspace?.root ?? null}
+                  activeFile={activeTab?.path ?? null}
+                  fileName={activeTab ? baseName(activeTab.path) : ''}
+                  fileContent={activeTab?.content ?? ''}
+                  dirty={dirty}
+                  defaultModel={settings.defaultModel}
+                  contextEnabled={settings.aiContextEnabled}
+                  onStatus={reportStatus}
+                  pendingPrompt={welcomeChatPrompt}
+                  researchSessionId={chatResearchId}
+                  onDetachResearch={() => setChatResearchId(null)}
+                  onOpenConnections={() => showSidebar('connections')}
+                />
               </div>
-            </section>
-          ) : (
+              <div hidden={staged !== 'agent'} className="tab-body">
+                <AgentPanel
+                  workspaceRoot={workspace?.root ?? null}
+                  defaultModel={settings.defaultModel}
+                  onFilesChanged={(paths) => void handleAgentFilesChanged(paths)}
+                  onStatus={reportStatus}
+                  pendingTask={welcomeAgentTask}
+                  onOpenConnections={() => showSidebar('connections')}
+                  onOpenFile={(path) => void openEditorFile(path)}
+                />
+              </div>
+              <div hidden={staged !== 'research'} className="tab-body">
+                <ResearchPanel
+                  workspaceRoot={workspace?.root ?? null}
+                  onStatus={reportStatus}
+                  onImplement={handleResearchImplement}
+                  onAsk={handleResearchAsk}
+                  pendingStart={welcomeResearchStart}
+                />
+              </div>
+            </div>
+          </section>
+
+          {!showEditor && !staged && (
             <section className="editor-panel">
               {tabs.length > 0 && (
                 <div className="tabbar home-tabbar">
@@ -1807,238 +1990,77 @@ function AppShell() {
                 onClearRecent={() => void clearRecent()}
                 onShowAiChat={() => stageCenter('chat')}
                 onShowResearch={() => stageCenter('research')}
-                onShowTerminal={() => selectBottomTab('terminal')}
+                onShowTerminal={() => showRight('terminal')}
                 onSubmitChat={handleWelcomeChat}
                 onSubmitAgent={handleWelcomeAgent}
                 onSubmitResearch={handleWelcomeResearch}
+                onOpenConnections={() => showSidebar('connections')}
               />
             </section>
           )}
         </section>
+
+        {rightOpen && (
+          <>
+            <ResizeHandle
+              orientation="vertical"
+              direction={-1}
+              label="Resize right panel"
+              value={rightWidth}
+              min={PANEL_LIMITS.right.min}
+              max={PANEL_LIMITS.right.max}
+              onResize={resizeRight}
+              onResizeEnd={persistPanels}
+            />
+
+            <aside className="right-panel" style={{ width: rightWidth }}>
+              <div className="right-tabs" role="tablist" aria-label="Right panel">
+                <button
+                  role="tab"
+                  aria-selected={rightTab === 'terminal'}
+                  className={
+                    rightTab === 'terminal' ? 'panel-tab active' : 'panel-tab'
+                  }
+                  onClick={() => showRight('terminal')}
+                >
+                  TERMINAL
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={rightTab === 'output'}
+                  className={
+                    rightTab === 'output' ? 'panel-tab active' : 'panel-tab'
+                  }
+                  onClick={() => showRight('output')}
+                >
+                  OUTPUT
+                </button>
+                <span className="spacer" />
+                <button
+                  className="panel-tab right-collapse"
+                  onClick={() => setRightOpen(false)}
+                  title="Close right panel (Ctrl+J toggles)"
+                  aria-label="Close right panel"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="right-body">
+                <div hidden={rightTab !== 'terminal'} className="tab-body">
+                  <TerminalPanelView
+                    controller={terminal}
+                    workspaceRoot={workspace?.root ?? null}
+                  />
+                </div>
+                <div hidden={rightTab !== 'output'} className="tab-body">
+                  <OutputPanel />
+                </div>
+              </div>
+            </aside>
+          </>
+        )}
       </div>
-
-      {/* Always mounted (hidden when collapsed) so terminal history,
-          output, and docked panels survive collapsing the panel. */}
-      <div hidden={!bottomOpen} className="bottom-mounted">
-        <ResizeHandle
-          orientation="horizontal"
-          direction={-1}
-          label="Resize bottom panel"
-          value={bottomHeight}
-          min={PANEL_LIMITS.bottom.min}
-          max={PANEL_LIMITS.bottom.max}
-          onResize={resizeBottom}
-          onResizeEnd={persistPanels}
-        />
-        <section className="bottom-panel" style={{ height: bottomHeight }}>
-          <div className="bottom-tabs">
-            <button
-              className={bottomTab === 'terminal' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => selectBottomTab('terminal')}
-            >
-              TERMINAL
-            </button>
-            <button
-              className={bottomTab === 'problems' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => selectBottomTab('problems')}
-            >
-              PROBLEMS
-            </button>
-            <button
-              className={bottomTab === 'output' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => selectBottomTab('output')}
-            >
-              OUTPUT
-            </button>
-            <button
-              className={bottomTab === 'git' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => selectBottomTab('git')}
-            >
-              GIT
-            </button>
-            <button
-              className={bottomTab === 'ai' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => selectBottomTab('ai')}
-            >
-              AI CHAT
-            </button>
-            <button
-              className={bottomTab === 'agent' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => selectBottomTab('agent')}
-            >
-              AGENT
-            </button>
-            <button
-              className={bottomTab === 'research' ? 'panel-tab active' : 'panel-tab'}
-              onClick={() => selectBottomTab('research')}
-            >
-              RESEARCH
-            </button>
-            <button
-              className="panel-tab bottom-collapse"
-              onClick={() => setBottomOpen(false)}
-              title="Collapse bottom panel"
-              aria-label="Collapse bottom panel"
-            >
-              ×
-            </button>
-          </div>
-
-          <div className="bottom-body">
-            <div hidden={bottomTab !== 'terminal'} className="tab-body">
-              <TerminalPanelView
-                controller={terminal}
-                workspaceRoot={workspace?.root ?? null}
-              />
-            </div>
-            <div hidden={bottomTab !== 'problems'} className="tab-body">
-              {panelLoc.problems === 'bottom' ? (
-                <div ref={hostRef('problems-bottom')} className="dock-host" />
-              ) : (
-                <DockPlaceholder
-                  title="Problems"
-                  where="the Run and Diagnostics sidebar"
-                  actionLabel="Show here"
-                  onBringHere={() => movePanel('problems', 'bottom')}
-                />
-              )}
-            </div>
-            <div hidden={bottomTab !== 'output'} className="tab-body">
-              <OutputPanel />
-            </div>
-            <div hidden={bottomTab !== 'git'} className="tab-body">
-              {panelLoc.git === 'bottom' ? (
-                <div ref={hostRef('git-bottom')} className="dock-host" />
-              ) : (
-                <DockPlaceholder
-                  title="Source Control"
-                  where="the sidebar"
-                  actionLabel="Show here"
-                  onBringHere={() => movePanel('git', 'bottom')}
-                />
-              )}
-            </div>
-            <div hidden={bottomTab !== 'ai'} className="tab-body">
-              {panelLoc.ai === 'bottom' ? (
-                <div ref={hostRef('ai-bottom')} className="dock-host" />
-              ) : (
-                <DockPlaceholder
-                  title="AI Chat"
-                  where="the center stage"
-                  actionLabel="Show here"
-                  onBringHere={() => movePanel('ai', 'bottom')}
-                />
-              )}
-            </div>
-            <div hidden={bottomTab !== 'agent'} className="tab-body">
-              {panelLoc.agent === 'bottom' ? (
-                <div ref={hostRef('agent-bottom')} className="dock-host" />
-              ) : (
-                <DockPlaceholder
-                  title="Agent"
-                  where="the center stage"
-                  actionLabel="Show here"
-                  onBringHere={() => movePanel('agent', 'bottom')}
-                />
-              )}
-            </div>
-            <div hidden={bottomTab !== 'research'} className="tab-body">
-              {panelLoc.research === 'bottom' ? (
-                <div ref={hostRef('research-bottom')} className="dock-host" />
-              ) : (
-                <DockPlaceholder
-                  title="Research"
-                  where="the center stage"
-                  actionLabel="Show here"
-                  onBringHere={() => movePanel('research', 'bottom')}
-                />
-              )}
-            </div>
-          </div>
-        </section>
-      </div>
-
-      {/* Single-mounted dockable panels. Each portal paints into its
-          current host (sidebar, stage, or bottom) without remounting,
-          so conversations, plans, and research survive every move. */}
-      <Docked
-        id="git"
-        primary={hosts['git-side'] ?? null}
-        secondary={hosts['git-bottom'] ?? null}
-        usePrimary={panelLoc.git === 'primary'}
-      >
-        <GitPanel
-          workspaceRoot={workspace?.root ?? null}
-          onStatus={reportStatus}
-        />
-      </Docked>
-
-      <Docked
-        id="problems"
-        primary={hosts['problems-side'] ?? null}
-        secondary={hosts['problems-bottom'] ?? null}
-        usePrimary={panelLoc.problems === 'primary'}
-      >
-        <ProblemsPanel
-          workspaceRoot={workspace?.root ?? null}
-          scripts={scripts}
-          onOpenFileAtLine={(path, line) => void openEditorFile(path, line)}
-          onStatus={reportStatus}
-          pendingRun={diagnosticsRun}
-          onResult={(count, success) => setDiagSummary({ count, success })}
-        />
-      </Docked>
-
-      <Docked
-        id="ai"
-        primary={hosts['chat-center'] ?? null}
-        secondary={hosts['ai-bottom'] ?? null}
-        usePrimary={panelLoc.ai === 'primary'}
-      >
-        <AiChat
-          workspaceRoot={workspace?.root ?? null}
-          activeFile={activeTab?.path ?? null}
-          fileName={activeTab ? baseName(activeTab.path) : ''}
-          fileContent={activeTab?.content ?? ''}
-          dirty={dirty}
-          defaultModel={settings.defaultModel}
-          contextEnabled={settings.aiContextEnabled}
-          onStatus={reportStatus}
-          pendingPrompt={welcomeChatPrompt}
-          researchSessionId={chatResearchId}
-          onDetachResearch={() => setChatResearchId(null)}
-        />
-      </Docked>
-
-      <Docked
-        id="agent"
-        primary={hosts['agent-center'] ?? null}
-        secondary={hosts['agent-bottom'] ?? null}
-        usePrimary={panelLoc.agent === 'primary'}
-      >
-        <AgentPanel
-          workspaceRoot={workspace?.root ?? null}
-          defaultModel={settings.defaultModel}
-          onFilesChanged={(paths) => void handleAgentFilesChanged(paths)}
-          onStatus={reportStatus}
-          pendingTask={welcomeAgentTask}
-        />
-      </Docked>
-
-      <Docked
-        id="research"
-        primary={hosts['research-center'] ?? null}
-        secondary={hosts['research-bottom'] ?? null}
-        usePrimary={panelLoc.research === 'primary'}
-      >
-        <ResearchPanel
-          workspaceRoot={workspace?.root ?? null}
-          onStatus={reportStatus}
-          onImplement={handleResearchImplement}
-          onAsk={handleResearchAsk}
-          pendingStart={welcomeResearchStart}
-        />
-      </Docked>
 
       <StatusBar
         status={status}
@@ -2056,8 +2078,8 @@ function AppShell() {
         terminalRunning={terminal.running}
         diagnostics={diagSummary}
         onShowDiagnostics={() => showSidebar('run')}
-        bottomOpen={bottomOpen}
-        onToggleBottom={() => setBottomOpen((open) => !open)}
+        rightOpen={rightOpen}
+        onToggleRight={() => setRightOpen((open) => !open)}
       />
 
       {error && (
@@ -2088,11 +2110,16 @@ function AppShell() {
         autoSave={autoSave}
         onToggleAutoSave={() => void toggleAutoSave()}
         panelLeftWidth={leftWidth}
-        panelBottomHeight={bottomHeight}
+        panelRightWidth={rightWidth}
         onResetPanels={resetPanels}
       />
 
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+
+      <ShortcutsDialog
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
     </main>
   )
 }

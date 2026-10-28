@@ -23,7 +23,7 @@ const MODULES = [
   ['./services/ai/providers/meta-muse.provider.cjs', ['MetaMuseProvider']],
   ['./services/ai/providers/mock.provider.cjs', ['MockProvider']],
   ['./services/agent/agent.service.cjs', ['planTask', 'applyEdits']],
-  ['./services/git/git.service.cjs', ['runGit', 'ensureRepository', 'getStatus', 'stageFiles', 'commitChanges', 'pushChanges', 'killAllActiveProcesses']],
+  ['./services/git/git.service.cjs', ['runGit', 'ensureRepository', 'getStatus', 'getRemotes', 'verifyRemote', 'cloneRepository', 'stageFiles', 'commitChanges', 'pushChanges', 'pullChanges', 'killAllActiveProcesses']],
   ['./services/git/git-diff.service.cjs', ['getDiff', 'getChangedFiles']],
   ['./services/diagnostics/diagnostics.service.cjs', ['runDiagnostics']],
   ['./services/diagnostics/problem-parser.cjs', ['parseOutput']],
@@ -42,6 +42,7 @@ const MODULES = [
   ['./services/research/session-store.cjs', ['createSession', 'readSession', 'writeSession', 'listSessions', 'getActiveSession']],
   ['./services/research/brief.service.cjs', ['validateBrief', 'buildExtractiveBrief', 'buildResearchContext', 'loadResearchContext']],
   ['./services/research/research.service.cjs', ['startResearch', 'getStatus', 'cancelResearch', 'resumeResearch']],
+  ['./services/documents/document.service.cjs', ['exportBriefDocx', 'exportTextDocx', 'importDocxFile']],
 ]
 
 const IPC_MODULES = [
@@ -56,6 +57,7 @@ const IPC_MODULES = [
   './ipc/settings.ipc.cjs',
   './ipc/research.ipc.cjs',
   './ipc/app.ipc.cjs',
+  './ipc/documents.ipc.cjs',
   './ipc/register-handlers.cjs',
 ]
 

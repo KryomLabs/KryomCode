@@ -11,7 +11,7 @@ export interface SettingsModalProps {
   autoSave: boolean
   onToggleAutoSave: () => void
   panelLeftWidth: number
-  panelBottomHeight: number
+  panelRightWidth: number
   onResetPanels: () => void
 }
 
@@ -175,14 +175,14 @@ export function SettingsModal(props: SettingsModalProps) {
             type="button"
             className="mini-btn"
             onClick={props.onResetPanels}
-            title="Reset sidebar and bottom panel to default sizes"
+            title="Reset sidebar and right panel to default sizes"
           >
             Reset to defaults
           </button>
         </div>
         <p className="muted settings-note">
-          Sidebar {props.panelLeftWidth}px · Bottom panel{' '}
-          {props.panelBottomHeight}px. Drag the dividers to resize; sizes
+          Sidebar {props.panelLeftWidth}px · Right panel{' '}
+          {props.panelRightWidth}px. Drag the dividers to resize; sizes
           persist automatically.
         </p>
 

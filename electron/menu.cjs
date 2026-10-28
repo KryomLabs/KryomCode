@@ -46,8 +46,8 @@ function buildRecentSubmenu(recent, onClear) {
 // Deps:
 // - recent: string[] recent workspace roots (most recent first)
 // - autoSave: boolean for the File checkbox
-// - ctx: { hasWorkspace: boolean, hasEditor: boolean } pushed by the
-//   renderer; unknown states leave destructive items disabled.
+// - ctx: { hasWorkspace, hasEditor, terminalRunning } pushed by the
+//   renderer; unknown states leave guarded items disabled.
 // - actions: { newWindow, openAbout, openDocs } main-process callbacks.
 function buildMenuTemplate(deps) {
   const recent = Array.isArray(deps.recent) ? deps.recent : []
@@ -55,6 +55,7 @@ function buildMenuTemplate(deps) {
   const ctx = deps.ctx || {}
   const hasWorkspace = ctx.hasWorkspace === true
   const hasEditor = ctx.hasEditor === true
+  const terminalRunning = ctx.terminalRunning === true
   const actions = deps.actions || {}
   const noop = () => undefined
 
@@ -68,9 +69,11 @@ function buildMenuTemplate(deps) {
           enabled: hasWorkspace,
         }),
         {
-          label: 'New Window',
-          accelerator: 'CmdOrCtrl+Shift+N',
-          click: () => (actions.newWindow || noop)(),
+          // Disabled: the backend workspace root is a process-wide
+          // singleton, so a second window would silently re-root the
+          // first. Re-enable once roots are scoped per window.
+          label: 'New Window (unavailable in single-window mode)',
+          enabled: false,
         },
         { type: 'separator' },
         commandItem('file.openFile', {
@@ -207,8 +210,8 @@ function buildMenuTemplate(deps) {
           label: 'Toggle Sidebar',
           accelerator: 'CmdOrCtrl+B',
         }),
-        commandItem('view.toggleBottom', {
-          label: 'Toggle Bottom Panel',
+        commandItem('view.toggleRight', {
+          label: 'Toggle Right Panel',
           accelerator: 'CmdOrCtrl+J',
         }),
         { type: 'separator' },
@@ -258,18 +261,15 @@ function buildMenuTemplate(deps) {
           accelerator: 'F5',
           enabled: hasWorkspace,
         }),
-        { type: 'separator' },
-        commandItem('terminal.cancel', {
-          label: 'Cancel Terminal Command',
-        }),
       ],
     },
     {
       label: 'Terminal',
       submenu: [
+        // Same command as View > Terminal Panel (which owns the
+        // CmdOrCtrl+` accelerator); no duplicate registration here.
         commandItem('view.terminal', {
           label: 'Toggle Terminal Panel',
-          accelerator: 'CmdOrCtrl+`',
         }),
         commandItem('terminal.focus', {
           label: 'Show Terminal',
@@ -280,12 +280,16 @@ function buildMenuTemplate(deps) {
         { type: 'separator' },
         commandItem('terminal.cancel', {
           label: 'Cancel Running Command',
+          enabled: terminalRunning,
         }),
       ],
     },
     {
       label: 'Help',
       submenu: [
+        commandItem('help.shortcuts', {
+          label: 'Keyboard Shortcuts…',
+        }),
         {
           label: 'Open Documentation Folder',
           click: () => (actions.openDocs || noop)(),

@@ -242,7 +242,44 @@ interface KryomUIState {
 
 interface KryomCommand {
   id: string
-  payload?: { path?: string }
+  payload?: { path?: string; nonce?: number }
+}
+
+interface KryomGitRemote {
+  name: string
+  fetchUrl: string | null
+  pushUrl: string | null
+}
+
+interface KryomVerifyResult {
+  ok: boolean
+  kind: 'github' | 'local'
+  url: string
+  refs: string[]
+}
+
+interface KryomCloneResult {
+  root: string
+  tree: KryomNode[]
+  path: string
+}
+
+interface KryomPullResult {
+  success: boolean
+  remote: string
+  branch: string
+  summary: string
+}
+
+interface KryomDocxExport {
+  path: string
+  bytes: number
+}
+
+interface KryomDocxImport {
+  text: string
+  truncated: boolean
+  fileName: string
 }
 
 interface KryomAPI {
@@ -340,6 +377,10 @@ interface KryomAPI {
 
   gitStage: (paths: string[]) => Promise<{ success: boolean; staged: number }>
 
+  gitUnstage: (paths: string[]) => Promise<{ success: boolean; unstaged: number }>
+
+  gitDiscard: (paths: string[]) => Promise<{ success: boolean; discarded: number }>
+
   gitCommit: (payload: {
     message: string
   }) => Promise<{ success: boolean }>
@@ -348,6 +389,35 @@ interface KryomAPI {
     remote?: string
     branch?: string
   }) => Promise<{ success: boolean; remote: string; branch: string }>
+
+  gitPull: (payload?: {
+    remote?: string
+    branch?: string
+  }) => Promise<KryomPullResult>
+
+  gitRemotes: () => Promise<{ remotes: KryomGitRemote[] }>
+
+  gitVerify: (payload: {
+    url: string
+  }) => Promise<KryomVerifyResult>
+
+  gitClone: (payload: {
+    url: string
+    name?: string
+  }) => Promise<KryomCloneResult | null>
+
+  exportBriefDocx: (payload: {
+    sessionId: string
+    template: string
+  }) => Promise<KryomDocxExport | null>
+
+  exportTextDocx: (payload: {
+    title: string
+    markdown: string
+    template: string
+  }) => Promise<KryomDocxExport | null>
+
+  importDocx: () => Promise<KryomDocxImport | null>
 
   runDiagnostics: (payload: {
     command: string
@@ -397,6 +467,8 @@ interface KryomAPI {
 
   getAppVersion: () => Promise<KryomAppVersion>
 
+  openExternal: (url: string) => Promise<{ success: boolean }>
+
   getAIStatus: () => Promise<KryomAIStatus>
 
   getUIState: () => Promise<KryomUIState>
@@ -409,6 +481,10 @@ interface KryomAPI {
   pushUIContext: (ctx: {
     hasWorkspace: boolean
     hasEditor: boolean
+    terminalRunning?: boolean
+    dirtyCount?: number
+    title?: string
+    saveAllNonce?: number
   }) => Promise<{ success: boolean }>
 
   onCommand: (handler: (command: KryomCommand) => void) => () => void

@@ -1,5 +1,5 @@
 :root {
-  font-family: Inter, system-ui, sans-serif;
+  font-family: system-ui, 'Segoe UI', sans-serif;
   color: #e4e4e7;
   background: #101114;
   font-synthesis: none;
@@ -71,21 +71,6 @@ textarea:focus {
   overflow: hidden;
 }
 
-.topbar {
-  height: 52px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 16px;
-  border-bottom: 1px solid #292930;
-  background: #17171c;
-}
-
-.brand {
-  color: #fff;
-  margin-right: 10px;
-}
-
 .muted {
   color: #858592;
   font-size: 12px;
@@ -102,12 +87,6 @@ textarea:focus {
   flex: 1;
 }
 
-.workspace {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
 .sidebar {
   width: 260px;
   flex-shrink: 0;
@@ -116,14 +95,6 @@ textarea:focus {
   min-height: 0;
   background: #151519;
   border-right: 1px solid #292930;
-}
-
-.side-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 8px;
-  border-bottom: 1px solid #292930;
-  background: #17171c;
 }
 
 .tab-body {
@@ -140,13 +111,6 @@ textarea:focus {
   min-height: 0;
   overflow-y: auto;
   padding: 16px 8px;
-}
-
-.section-title {
-  font-size: 11px;
-  letter-spacing: 1.5px;
-  color: #9b9ba7;
-  margin: 4px 8px 18px;
 }
 
 .root-name {
@@ -176,6 +140,30 @@ textarea:focus {
 
 .tree {
   padding-bottom: 16px;
+}
+
+.tree-icon {
+  display: inline-flex;
+  vertical-align: -2px;
+  color: #9b9ba7;
+}
+
+.tree-icon svg {
+  display: block;
+}
+
+.tab-file-icon {
+  display: inline-flex;
+  color: #9b9ba7;
+}
+
+.tab-file-icon svg {
+  display: block;
+}
+
+.row-actions button {
+  display: inline-flex;
+  align-items: center;
 }
 
 .tree-row {
@@ -394,6 +382,12 @@ summary.tree-row.selected {
   cursor: pointer;
 }
 
+.tab-label:focus-visible {
+  outline: 2px solid #8b7cff;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .tab-name-text {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -455,36 +449,6 @@ summary.tree-row.selected {
   flex-wrap: wrap;
   gap: 8px;
   margin: 20px 0 28px;
-}
-
-.welcome-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  max-width: 860px;
-}
-
-.welcome-card {
-  flex: 1 1 220px;
-  min-width: 0;
-  padding: 14px 16px;
-  background: #19191f;
-  border: 1px solid #30303a;
-  border-radius: 8px;
-}
-
-.welcome-card h2 {
-  margin: 0 0 8px;
-  color: #f4f4f5;
-  font-size: 13px;
-}
-
-.welcome-card ul {
-  margin: 0;
-  padding-left: 18px;
-  color: #bdbdc8;
-  font-size: 12px;
-  line-height: 1.8;
 }
 
 .welcome-keys {
@@ -571,16 +535,6 @@ section.editor-panel > .welcome {
   color: #fff;
 }
 
-.welcome-soon {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: #2e2a4e;
-  color: #b9aefc;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
 .welcome-composer {
   width: 100%;
   padding: 12px;
@@ -623,6 +577,17 @@ section.editor-panel > .welcome {
   max-width: 600px;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.welcome-key-notice {
+  width: 100%;
+  max-width: 600px;
+  margin-top: 12px;
+  text-align: left;
+}
+
+.welcome-key-notice .ai-error {
+  margin: 0;
 }
 
 .welcome-suggestions {
@@ -712,13 +677,20 @@ section.editor-panel > .welcome {
 }
 
 .error-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 26px;
+  z-index: 40;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 12px;
+  padding: 10px 12px;
   background: #4b2025;
+  border-top: 1px solid #93333f;
   color: #fff;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
@@ -731,28 +703,32 @@ section.editor-panel > .welcome {
   border-left: 1px solid #292930;
 }
 
-.terminal-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  border-bottom: 1px solid #292930;
-  font-size: 11px;
-  letter-spacing: 1px;
-}
-
 .terminal-input {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px;
   border-bottom: 1px solid #292930;
 }
 
 .terminal-input input {
-  width: 100%;
+  flex: 1 1 160px;
   min-width: 0;
+}
+
+.terminal-autoscroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 0;
+  color: #858592;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.terminal-autoscroll input {
+  accent-color: #8b7cff;
 }
 
 .prompt-symbol {
@@ -771,40 +747,7 @@ section.editor-panel > .welcome {
   font: 12px/1.7 Consolas, monospace;
 }
 
-/* Right-side terminal dock (toggleable; AI lives in bottom tabs) */
-.dock-header {
-  height: 42px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 5px 8px 5px 12px;
-  background: #17171c;
-  border-bottom: 1px solid #292930;
-}
-
-.dock-title {
-  color: #858592;
-  font-size: 11px;
-  letter-spacing: 0.8px;
-}
-
-.dock-close {
-  border: 0;
-  background: transparent;
-  padding: 4px 8px;
-  font-size: 14px;
-  line-height: 1;
-  color: #858592;
-  border-radius: 4px;
-}
-
-.dock-close:hover {
-  background: #3a3a48;
-  color: #fff;
-}
-
+/* Right-side panel with Terminal and Output tabs */
 .right-panel {
   width: 360px;
   min-width: 300px;
@@ -812,19 +755,35 @@ section.editor-panel > .welcome {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: #111116;
-  border-left: 1px solid #292930;
+  background: var(--kc-panel-deep, #111116);
+  border-left: 1px solid var(--kc-border, #292930);
 }
 
-.right-panel-tabs {
-  height: 42px;
+.right-tabs {
   flex-shrink: 0;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 4px;
   padding: 5px 8px;
-  background: #17171c;
-  border-bottom: 1px solid #292930;
+  background: var(--kc-panel-alt, #17171c);
+  border-bottom: 1px solid var(--kc-border, #292930);
+}
+
+.right-tabs .panel-tab {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+}
+
+.right-tabs .right-collapse {
+  padding: 6px 10px;
+}
+
+.right-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .panel-tab {
@@ -969,6 +928,10 @@ section.editor-panel > .welcome {
 }
 
 .message-role {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 8px;
   color: #a99cff;
   font-size: 10px;
@@ -976,10 +939,105 @@ section.editor-panel > .welcome {
   letter-spacing: 1px;
 }
 
+.md-para {
+  margin: 0 0 8px;
+  color: #e4e4eb;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.md-para:last-child {
+  margin-bottom: 0;
+}
+
+.md-heading {
+  margin: 10px 0 6px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.md-heading:first-child {
+  margin-top: 0;
+}
+
+.md-list {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  color: #e4e4eb;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.md-list li {
+  margin-bottom: 2px;
+  overflow-wrap: anywhere;
+}
+
+.md-quote {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 2px solid #4a4a58;
+  color: #bdbdc8;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.md-code {
+  padding: 1px 5px;
+  background: #101014;
+  border: 1px solid #30303a;
+  border-radius: 4px;
+  color: #d6d6e0;
+  font: 11px Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.md-codeblock {
+  margin: 0 0 8px;
+  background: #101014;
+  border: 1px solid #30303a;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.md-codeblock-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #26262e;
+}
+
+.md-pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  color: #d6d6e0;
+  font: 11px/1.6 Consolas, monospace;
+  white-space: pre;
+}
+
+.brief-body {
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: #101014;
+  border: 1px solid #30303a;
+  border-radius: 6px;
+}
+
 .chat-message pre {
   margin: 0;
   color: #e4e4eb;
-  font: 12px/1.65 Inter, system-ui, sans-serif;
+  font: 12px/1.65 system-ui, 'Segoe UI', sans-serif;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -1033,6 +1091,19 @@ section.editor-panel > .welcome {
   line-height: 1.5;
 }
 
+.ai-error code {
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: #fff;
+}
+
+.notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .ai-composer {
   flex-shrink: 0;
   padding: 10px;
@@ -1047,7 +1118,7 @@ section.editor-panel > .welcome {
   max-height: 180px;
   resize: vertical;
   padding: 10px;
-  font: 12px/1.6 Inter, system-ui, sans-serif;
+  font: 12px/1.6 system-ui, 'Segoe UI', sans-serif;
 }
 
 .ai-composer textarea:disabled {
@@ -1238,6 +1309,32 @@ section.editor-panel > .welcome {
   overflow-wrap: anywhere;
 }
 
+.finding-row {
+  align-items: flex-start;
+}
+
+.source-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.finding-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #c9cad5;
+  overflow-wrap: anywhere;
+}
+
+.finding-body .muted {
+  white-space: normal;
+}
+
 .apply-result {
   margin: 10px 12px 0;
   padding: 10px;
@@ -1247,49 +1344,8 @@ section.editor-panel > .welcome {
   font-size: 12px;
 }
 
-/* Bottom panel with terminal, problems, git, and AI tabs */
-.bottom-panel {
-  height: 264px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  background: #111116;
-  border-top: 1px solid #292930;
-}
-
-.bottom-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 5px 8px;
-  background: #17171c;
-  border-bottom: 1px solid #292930;
-}
-
-.bottom-tabs .panel-tab {
-  flex: 0 0 auto;
-  padding: 6px 14px;
-}
-
-.bottom-tabs .bottom-collapse {
-  margin-left: auto;
-  padding: 6px 10px;
-}
-
-/* Keeps the bottom panel mounted while collapsed so AI conversations,
-   agent plans, and tool results survive; display:contents preserves the
-   flex layout, and [hidden] still hides it via !important. */
-.bottom-mounted {
-  display: contents;
-}
-
-.bottom-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
+/* Shared flex column for full-height panels (terminal, problems,
+   git, output); the name is historical, there is no bottom dock. */
 .bottom-tab-panel {
   flex: 1;
   min-height: 0;
@@ -1448,18 +1504,19 @@ section.bottom-tab-panel {
   cursor: pointer;
 }
 
-.git-columns {
+.git-stack {
   flex: 1;
   min-height: 0;
   display: flex;
+  flex-direction: column;
   gap: 12px;
   padding: 10px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .git-list {
-  flex: 1;
-  min-width: 180px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1479,7 +1536,9 @@ section.bottom-tab-panel {
   border-radius: 4px;
   color: #bdbdc8;
   font-size: 12px;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .git-file:hover {
@@ -1503,6 +1562,7 @@ section.bottom-tab-panel {
 
 .git-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
 }
@@ -1526,7 +1586,7 @@ section.bottom-tab-panel {
 .git-diff .terminal-output {
   border: 1px solid #30303a;
   border-radius: 6px;
-  max-height: 150px;
+  max-height: 220px;
 }
 
 /* Modal dialogs */
@@ -1609,11 +1669,6 @@ section.bottom-tab-panel {
     width: 320px;
     min-width: 280px;
   }
-
-  .topbar {
-    gap: 8px;
-    padding: 0 10px;
-  }
 }
 
 /* Draggable panel resize handles */
@@ -1692,8 +1747,8 @@ html.kryom-resizing .resize-handle::after {
   --kc-text: #e4e4e7;
   --kc-text-dim: #bdbdc8;
   --kc-text-faint: #858592;
-  --kc-accent: #4aa8ff;
-  --kc-accent-dim: #2b6ea8;
+  --kc-accent: #8b7cff;
+  --kc-accent-dim: #6556c8;
   --kc-ok: #7ee2a8;
   --kc-ok-bg: #1d3a2a;
   --kc-warn: #e8c874;
@@ -1910,6 +1965,32 @@ html.kryom-resizing .resize-handle::after {
   border-top: 1px dashed var(--kc-btn-border);
   padding-top: 8px;
   margin: 8px 0 0;
+}
+
+.connect-verify-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.connect-verify-form input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.import-preview {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.import-preview .terminal-output {
+  max-height: 140px;
+  overflow-y: auto;
+  font-size: 11px;
 }
 
 /* ---- Connections / profile cards ---- */
@@ -2278,6 +2359,57 @@ html.kryom-resizing .resize-handle::after {
   margin: 0 !important;
 }
 
+.shortcuts-dialog {
+  width: 520px;
+}
+
+.shortcuts-section h3 {
+  margin: 14px 0 6px;
+  color: #e4e4e7;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.shortcuts-section:first-of-type h3 {
+  margin-top: 4px;
+}
+
+.shortcuts-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shortcuts-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.shortcuts-row dt {
+  margin: 0;
+  min-width: 150px;
+  flex-shrink: 0;
+}
+
+.shortcuts-row kbd {
+  padding: 1px 6px;
+  background: #24242c;
+  border: 1px solid #3b3b46;
+  border-radius: 4px;
+  color: #e4e4e7;
+  font: 11px Consolas, monospace;
+  white-space: nowrap;
+}
+
+.shortcuts-row dd {
+  margin: 0;
+  color: #bdbdc8;
+}
+
 .about-brand .muted {
   margin: 2px 0 0;
 }
@@ -2296,26 +2428,6 @@ html.kryom-resizing .resize-handle::after {
   .status-msg {
     max-width: 30vw;
   }
-}
-
-/* ---- Dockable panel hosts ---- */
-.dock-host {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.dock-placeholder {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 24px;
-  text-align: center;
 }
 
 /* ---- Center AI stage ---- */

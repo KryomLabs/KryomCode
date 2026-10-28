@@ -45,7 +45,7 @@ are verified statements, not guesses.
   ones, and `success` still reflects the real exit code.
 - File tree, search, and intelligence indexes are bounded (2000 entries,
   depth 8, result caps) and report truncation instead of silently cutting.
-- The UI edits one file at a time; files are capped at 1 MB.
+- The UI edits multiple files in tabs; files are capped at 1 MB.
 
 ## Phase 3 cleanup record
 
@@ -63,3 +63,16 @@ found no hardcoded keys (only `test-key` fixtures and env plumbing).
 `C:\Users\LENOVO` (the user profile) is itself a git repository on this
 machine. Verify whether that is intentional (dotfiles) or a stray init:
 every folder currently reports git membership through ancestor discovery.
+
+## UI/UX maturity sprint (2026-10-28, uncommitted)
+
+Implemented but not yet runtime-verified in this headless session (no
+shell, no Electron launch): window close guard with save-all nonce
+settlement, Monaco marker mapping, `git:unstage` / `git:discard`
+channels, `app:open-external` URL validation, research
+findings/evidence rendering, dependency-free chat/brief rendering,
+AI key pre-flight, terminal history, tab keyboard navigation, and
+the Keyboard Shortcuts dialog. New unit coverage: unstage/discard
+service tests and external-URL guard tests. Still manual-only:
+TESTING.md checks 1–6 plus close-with-dirty-tabs, source opening,
+and marker navigation.

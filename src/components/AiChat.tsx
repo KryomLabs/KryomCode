@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { kryom, errorMessage } from '../api/kryom'
+import { AiKeyNotice } from './AiKeyNotice'
+import { MarkdownLite } from './MarkdownLite'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -19,6 +21,7 @@ export interface AiChatProps {
   pendingPrompt?: { text: string; nonce: number } | null
   researchSessionId?: string | null
   onDetachResearch?: () => void
+  onOpenConnections?: () => void
 }
 
 const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
@@ -33,6 +36,8 @@ export function AiChat(props: AiChatProps) {
     props.contextEnabled
   )
   const [includeResearch, setIncludeResearch] = useState(true)
+  const [keyMissing, setKeyMissing] = useState(false)
+  const [copiedMessage, setCopiedMessage] = useState<number | null>(null)
 
   useEffect(() => {
     setModel(props.defaultModel)
@@ -99,7 +104,23 @@ export function AiChat(props: AiChatProps) {
       return
     }
 
+    // Pre-flight: guide key setup instead of failing the request. A
+    // status-check failure itself never blocks; the request reports
+    // its own error in that case.
+    try {
+      const status = await kryom().getAIStatus()
+
+      if (!status.modelKeyConfigured) {
+        setKeyMissing(true)
+        props.onStatus('AI model is not configured')
+        return
+      }
+    } catch {
+      // Fall through to the request path.
+    }
+
     setError('')
+    setKeyMissing(false)
     setLoading(true)
 
     const userMessage: ChatMessage = { role: 'user', content: userPrompt }
@@ -158,6 +179,16 @@ export function AiChat(props: AiChatProps) {
     props.onStatus('AI chat cleared')
   }
 
+  async function copyMessage(content: string, index: number) {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopiedMessage(index)
+      setTimeout(() => setCopiedMessage(null), 1500)
+    } catch {
+      setError('Copy is unavailable in this context.')
+    }
+  }
+
   return (
     <section className="ai-panel">
       <div className="ai-heading">
@@ -190,7 +221,10 @@ export function AiChat(props: AiChatProps) {
         </select>
       </label>
 
-      <label className="context-toggle">
+      <label
+        className="context-toggle"
+        title="Sends the active file (first ~18,000 characters, unsaved edits included) with each request"
+      >
         <input
           type="checkbox"
           checked={includeFileContext}
@@ -201,10 +235,10 @@ export function AiChat(props: AiChatProps) {
 
       <div className="context-file">
         {includeFileContext && props.activeFile
-          ? `Context: ${props.fileName}${props.dirty ? ' (unsaved edits)' : ''}`
+          ? `Context: ${props.fileName}${props.dirty ? ' (unsaved edits included)' : ''}`
           : includeFileContext
-            ? 'No active file. Workspace context will be used.'
-            : 'File context is disabled.'}
+            ? 'No active file. A short workspace summary (~4,000 chars) is used instead.'
+            : 'File context is disabled. Only your prompt and recent messages are sent.'}
       </div>
 
       {props.researchSessionId && (
@@ -248,11 +282,25 @@ export function AiChat(props: AiChatProps) {
             key={`${index}-${message.role}`}
           >
             <div className="message-role">
-              {message.role === 'user'
-                ? 'YOU'
-                : `KRYOM AI${message.model ? ` · ${message.model}` : ''}`}
+              <span>
+                {message.role === 'user'
+                  ? 'YOU'
+                  : `KRYOM AI${message.model ? ` · ${message.model}` : ''}`}
+              </span>
+              <button
+                type="button"
+                className="mini-btn"
+                onClick={() => void copyMessage(message.content, index)}
+                title="Copy message text"
+              >
+                {copiedMessage === index ? 'Copied' : 'Copy'}
+              </button>
             </div>
-            <pre>{message.content}</pre>
+            {message.role === 'user' ? (
+              <p className="md-para">{message.content}</p>
+            ) : (
+              <MarkdownLite text={message.content} />
+            )}
           </article>
         ))}
 
@@ -272,6 +320,10 @@ export function AiChat(props: AiChatProps) {
             Dismiss
           </button>
         </div>
+      )}
+
+      {keyMissing && !loading && (
+        <AiKeyNotice onOpenConnections={props.onOpenConnections} />
       )}
 
       <form

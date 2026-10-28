@@ -1,4 +1,7 @@
 const { spawn } = require('node:child_process')
+const fs = require('node:fs/promises')
+const os = require('node:os')
+const path = require('node:path')
 
 const {
   getWorkspaceRoot,
@@ -35,13 +38,7 @@ function killAllActiveProcesses() {
   activeChildren.clear()
 }
 
-function runGit(args, { timeoutMs = TIMEOUT_MS } = {}) {
-  const workspaceRoot = getWorkspaceRoot()
-
-  if (!workspaceRoot) {
-    throw new Error('Open a project folder first.')
-  }
-
+function spawnGit(cwd, args, { timeoutMs = TIMEOUT_MS, extraEnv = {} } = {}) {
   return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
@@ -50,7 +47,7 @@ function runGit(args, { timeoutMs = TIMEOUT_MS } = {}) {
 
     let child = null
 
-    const childEnv = buildChildEnv()
+    const childEnv = { ...buildChildEnv(), ...extraEnv }
     delete childEnv.GIT_DIR
     delete childEnv.GIT_WORK_TREE
     delete childEnv.GIT_PREFIX
@@ -58,7 +55,7 @@ function runGit(args, { timeoutMs = TIMEOUT_MS } = {}) {
 
     try {
       child = spawn('git', args, {
-        cwd: workspaceRoot,
+        cwd,
         shell: false,
         windowsHide: true,
         env: childEnv,
@@ -141,6 +138,16 @@ function runGit(args, { timeoutMs = TIMEOUT_MS } = {}) {
       })
     })
   })
+}
+
+function runGit(args, options = {}) {
+  const workspaceRoot = getWorkspaceRoot()
+
+  if (!workspaceRoot) {
+    throw new Error('Open a project folder first.')
+  }
+
+  return spawnGit(workspaceRoot, args, options)
 }
 
 async function ensureRepository() {
@@ -248,6 +255,68 @@ async function stageFiles(paths) {
   return { success: true, staged: relative.length }
 }
 
+// Moves staged entries back to unstaged without touching worktree
+// contents. Never defaults to "everything": an empty selection is an
+// error, because bare `git reset` would unstage the whole index.
+async function unstageFiles(paths) {
+  assertStringArray(paths, 'paths', { maxItems: 200 })
+
+  if (paths.length === 0) {
+    throw new Error('Select at least one staged file to unstage.')
+  }
+
+  await ensureRepository()
+
+  const root = getWorkspaceRoot()
+  const relative = []
+
+  for (const entry of paths) {
+    const { path: resolved } = await resolveWorkspacePath(entry)
+    relative.push(path.relative(root, resolved))
+  }
+
+  const result = await runGit(['reset', 'HEAD', '--', ...relative])
+
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || 'Git unstage failed.')
+  }
+
+  log.info(`Unstaged ${relative.length} path(s).`)
+
+  return { success: true, unstaged: relative.length }
+}
+
+// Restores tracked worktree files to their HEAD contents. Untracked
+// files are refused (they have nothing to restore to); the renderer
+// deletes those through the normal file flow with confirmation.
+async function discardChanges(paths) {
+  assertStringArray(paths, 'paths', { maxItems: 200 })
+
+  if (paths.length === 0) {
+    throw new Error('Select at least one changed file to discard.')
+  }
+
+  await ensureRepository()
+
+  const root = getWorkspaceRoot()
+  const relative = []
+
+  for (const entry of paths) {
+    const { path: resolved } = await resolveWorkspacePath(entry)
+    relative.push(path.relative(root, resolved))
+  }
+
+  const result = await runGit(['checkout', '--', ...relative])
+
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || 'Git discard failed.')
+  }
+
+  log.info(`Discarded changes in ${relative.length} path(s).`)
+
+  return { success: true, discarded: relative.length }
+}
+
 async function commitChanges(message) {
   assertNonEmptyString(message, 'commit message', 2000)
   await ensureRepository()
@@ -313,12 +382,261 @@ async function pushChanges(remote, branch) {
   return { success: true, remote: safeRemote, branch: safeBranch }
 }
 
+async function getRemotes() {
+  await ensureRepository()
+
+  const result = await runGit(['remote', '-v'])
+
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || 'Git remote lookup failed.')
+  }
+
+  const byName = new Map()
+
+  for (const line of result.stdout.split('\n')) {
+    const match = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/)
+
+    if (!match) {
+      continue
+    }
+
+    const [, name, url, kind] = match
+    const entry = byName.get(name) || { name, fetchUrl: null, pushUrl: null }
+
+    if (kind === 'fetch') {
+      entry.fetchUrl = url
+    } else {
+      entry.pushUrl = url
+    }
+
+    byName.set(name, entry)
+  }
+
+  return { remotes: [...byName.values()] }
+}
+
+const GITHUB_HTTPS_PATTERN =
+  /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(\.git)?$/
+const GITHUB_SSH_PATTERN =
+  /^git@github\.com:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(\.git)?$/
+const CLONE_NAME_PATTERN = /^[A-Za-z0-9._-]{1,100}$/
+
+function assertSegment(value) {
+  return (
+    typeof value === 'string' &&
+    CLONE_NAME_PATTERN.test(value) &&
+    !value.includes('..') &&
+    value !== '.' &&
+    value !== '..'
+  )
+}
+
+// Single choke point for clone/verify targets. Only GitHub HTTPS/SSH
+// repository URLs and existing local directories are accepted. In
+// particular, ext::, file::, ssh:// with options, and URLs carrying
+// userinfo (a classic token-leak shape) are all rejected.
+async function assertCloneTarget(rawUrl) {
+  assertNonEmptyString(rawUrl, 'repository URL', 2000)
+
+  const url = rawUrl.trim()
+
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f<>|&;$`]/.test(url)) {
+    throw new Error('Invalid repository URL: unsafe characters rejected.')
+  }
+
+  const https = url.match(GITHUB_HTTPS_PATTERN)
+  const ssh = url.match(GITHUB_SSH_PATTERN)
+
+  if (https || ssh) {
+    const [, owner, repo] = https || ssh
+
+    if (!assertSegment(owner) || !assertSegment(repo)) {
+      throw new Error('Invalid repository URL.')
+    }
+
+    return { kind: 'github', url, name: repo }
+  }
+
+  // Anything with a scheme or scp-like syntax that is not an accepted
+  // GitHub form is rejected here (ext::, file://, ssh://, userinfo).
+  // Single-letter prefixes are drive letters (C:\...), not schemes.
+  if (
+    /^[A-Za-z][A-Za-z0-9+.-]{1,}:/.test(url) ||
+    /^[^@\s]+@[^:\s]+:/.test(url)
+  ) {
+    throw new Error(
+      'Invalid repository URL: only GitHub HTTPS/SSH or a local folder.'
+    )
+  }
+
+  if (!path.isAbsolute(url)) {
+    throw new Error(
+      'Invalid repository URL: expected a GitHub repository or a local folder.'
+    )
+  }
+
+  let stat = null
+
+  try {
+    stat = await fs.stat(url)
+  } catch {
+    throw new Error('Local clone source does not exist.')
+  }
+
+  if (!stat.isDirectory()) {
+    throw new Error('Local clone source is not a folder.')
+  }
+
+  return { kind: 'local', url: await fs.realpath(url), name: path.basename(url) }
+}
+
+function assertCloneName(rawName) {
+  assertNonEmptyString(rawName, 'folder name', 100)
+
+  const name = rawName.trim()
+
+  if (!assertSegment(name)) {
+    throw new Error('Invalid folder name.')
+  }
+
+  return name
+}
+
+// Verifies read access without cloning: lists remote branch heads.
+// Prompts are disabled so missing credentials fail fast with git's
+// own error instead of hanging. Nothing is stored.
+async function verifyRemote(rawUrl) {
+  const target = await assertCloneTarget(rawUrl)
+
+  const result = await spawnGit(os.tmpdir(), ['ls-remote', '--heads', '--', target.url], {
+    timeoutMs: 60000,
+    extraEnv: { GIT_TERMINAL_PROMPT: '0' },
+  })
+
+  if (result.exitCode !== 0) {
+    const detail = (result.stdout + '\n' + result.stderr).trim()
+
+    throw new Error(detail.slice(0, 2000) || 'Remote verification failed.')
+  }
+
+  const refs = []
+
+  for (const line of result.stdout.split('\n')) {
+    const match = line.match(/^[0-9a-f]+\s+refs\/heads\/(.+)$/)
+
+    if (match) {
+      refs.push(match[1])
+    }
+  }
+
+  return { ok: true, kind: target.kind, url: target.url, refs: refs.slice(0, 50) }
+}
+
+async function cloneRepository(rawUrl, parentDir, rawName) {
+  const target = await assertCloneTarget(rawUrl)
+
+  if (typeof parentDir !== 'string' || !path.isAbsolute(parentDir)) {
+    throw new Error('Invalid destination: an absolute folder is required.')
+  }
+
+  let parentStat = null
+
+  try {
+    parentStat = await fs.stat(parentDir)
+  } catch {
+    throw new Error('Destination folder does not exist.')
+  }
+
+  if (!parentStat.isDirectory()) {
+    throw new Error('Destination is not a folder.')
+  }
+
+  const name = assertCloneName(rawName ?? target.name)
+  const destination = path.join(await fs.realpath(parentDir), name)
+
+  try {
+    await fs.lstat(destination)
+    throw new Error(
+      `"${name}" already exists in the destination folder. Remove it or pick another location.`
+    )
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error
+    }
+  }
+
+  const result = await spawnGit(
+    parentDir,
+    ['clone', '--', target.url, destination],
+    {
+      timeoutMs: 300000,
+      extraEnv: { GIT_TERMINAL_PROMPT: '0' },
+    }
+  )
+
+  if (result.exitCode !== 0) {
+    const detail = (result.stdout + '\n' + result.stderr).trim()
+
+    throw new Error(detail.slice(0, 2000) || 'Git clone failed.')
+  }
+
+  return { success: true, path: destination }
+}
+
+async function pullChanges(remote, branch) {
+  const safeRemote = assertRef(
+    assertOptionalString(remote, 'remote', 200) || 'origin',
+    'remote'
+  )
+  await ensureRepository()
+
+  let safeBranch = assertOptionalString(branch, 'branch', 200)
+
+  if (!safeBranch) {
+    const branchResult = await runGit(['branch', '--show-current'])
+    safeBranch = branchResult.stdout.trim()
+
+    if (!safeBranch) {
+      throw new Error('Cannot determine the current branch.')
+    }
+  }
+
+  assertRef(safeBranch, 'branch')
+
+  const result = await runGit(
+    ['pull', '--ff-only', safeRemote, safeBranch],
+    { timeoutMs: 120000 }
+  )
+
+  if (result.exitCode !== 0) {
+    const detail = (result.stdout + '\n' + result.stderr).trim()
+
+    throw new Error(detail.slice(0, 2000) || 'Git pull failed.')
+  }
+
+  log.info(`Pulled ${safeBranch} from ${safeRemote}.`)
+
+  return {
+    success: true,
+    remote: safeRemote,
+    branch: safeBranch,
+    summary: result.stdout.trim().slice(0, 500),
+  }
+}
+
 module.exports = {
   runGit,
   ensureRepository,
   getStatus,
+  getRemotes,
+  verifyRemote,
+  cloneRepository,
   stageFiles,
+  unstageFiles,
+  discardChanges,
   commitChanges,
   pushChanges,
+  pullChanges,
   killAllActiveProcesses,
 }

@@ -34,8 +34,6 @@ export function SearchPanel(props: SearchPanelProps) {
 
   return (
     <div className="search-panel">
-      <div className="section-title">SEARCH</div>
-
       {!props.workspaceRoot ? (
         <p className="muted padded">Open a project to search it.</p>
       ) : (

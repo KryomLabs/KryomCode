@@ -8,24 +8,56 @@ working tree, which has not been committed yet.
 
 ### Added
 
+- Close guard: dirty editor tabs prompt Save/Discard/Cancel on window
+  close (native dialog, sequential save-all with nonce settlement) and
+  a generic prompt on reload; clean windows close without prompts
+  (`file.saveAll` command, `dirtyCount` in `ui:context`).
+- Monaco inline diagnostics: Problems results map to gutter markers
+  with F8/Shift+F8 navigation and stale-marker cleanup.
+- Git unstage (`git:unstage`) and discard-tracked (`git:discard`)
+  operations with tests; Git panel reflowed to a single sidebar
+  column with per-section selection.
+- Research findings, evidence, decisions, verification, and
+  implementation tasks rendered with source citations; sources open
+  in the system browser via validated `app:open-external`.
+- Safe dependency-free message rendering: fenced code blocks with
+  Copy, headings, lists, quotes, inline code; message Copy buttons;
+  brief shown as structured content instead of raw text.
+- AI key pre-flight: Welcome, Chat, and Agent show inline setup
+  guidance with a Connections shortcut instead of failing blind.
+- Terminal command history (Up/Down, deduped) and an auto-scroll
+  toggle; input row wraps at narrow widths.
+- Editor tabs: roving-tabindex arrow/Home/End navigation, focus
+  restore on close, scroll-into-view, Ctrl+Tab cycling.
+- Keyboard Shortcuts dialog (Help menu) listing only wired commands.
+- Right-side Terminal/Output panel (resizable, persisted, Ctrl+`)
+  replacing the bottom dock; Chat/Agent/Research stay on the center
+  stage, Git/Problems in the sidebar.
+- GitHub Connections: verified remote checks, remote listing,
+  clone-and-open, fast-forward pull (`git:remotes`, `git:verify`,
+  `git:clone`, `git:pull`).
+- Local Word workflows: research-brief and text export to .docx with
+  numbered citations, .docx import, report scaffolds
+  (`documents:*` channels; `docx`, `mammoth`).
 - Desktop IDE shell: native File/Edit/Selection/View/Go/Run/Terminal/
   Help menu, activity bar, contextual sidebar, center editor/AI stage,
-  bottom panel, and live status bar.
-- Dockable panels: Chat, Agent, and Research stage in the center with
-  full conversation state; Git and Problems move between the sidebar
-  and the bottom panel without remounting.
+  right-side Terminal/Output panel, and live status bar.
+- Center staging: Chat, Agent, and Research stay mounted on the
+  center stage with full session state; Git and Problems live in the
+  sidebar without remounting.
 - Go to File quick-open palette (Ctrl+P) with fuzzy matching over the
   workspace tree; Go to Line, Back/Forward history, and Open Recent.
-- File menu operations: New Text File, New Window (multi-window),
-  Open File, Open Folder, Open Recent, Save, Save As, Auto Save,
-  Close Editor, Close Folder.
+- File menu operations: New Text File, Open File, Open Folder,
+  Open Recent, Save, Save As, Auto Save, Close Editor, Close
+  Folder. New Window is disabled: the backend workspace root is a
+  process-wide singleton until roots are scoped per window.
 - Connections, Extensions, Profile, and Output views; About dialog;
   extended Settings (model, auto-save, editor font size, panel
   sizes); status-bar diagnostics summary; terminal Clear.
 - Backend: `workspace:open-file`, `workspace:open-path`,
   `filesystem:save-as`, `app:get-version`, `app:get-ai-status`,
-  `ui:get`/`ui:set`/`ui:context` channels; ui-state service with
-  auto-save and recent projects; multi-window trusted senders.
+  `app:open-external`, `ui:get`/`ui:set`/`ui:context` channels;
+  ui-state service with auto-save and recent projects.
 - Recent projects prune entries whose folders no longer exist, with
   the menu and welcome list updated.
 - Agent service and panel: JSON task plans with per-edit previews,

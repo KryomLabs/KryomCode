@@ -73,6 +73,41 @@ function assertBoolean(value, name) {
   return value
 }
 
+// Single choke point for URLs the app may open in an external
+// browser. Only http(s) with a real host pass; javascript:, file:,
+// custom protocols, malformed input, and credential-carrying URLs
+// are rejected. Plain http is allowed deliberately: some cited
+// research venues still serve http, and the browser itself warns
+// about insecure pages. Returns the canonical URL string.
+function assertExternalUrl(value, name) {
+  assertNonEmptyString(value, name, 2000)
+
+  const raw = value.trim()
+  let parsed = null
+
+  try {
+    parsed = new URL(raw)
+  } catch {
+    throw new Error(`Invalid ${name}: malformed URL rejected.`)
+  }
+
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`Invalid ${name}: only http(s) URLs may be opened.`)
+  }
+
+  if (!parsed.hostname) {
+    throw new Error(`Invalid ${name}: URL host is missing.`)
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new Error(
+      `Invalid ${name}: URLs carrying credentials are rejected.`
+    )
+  }
+
+  return parsed.toString()
+}
+
 module.exports = {
   assertPlainObject,
   assertNonEmptyString,
@@ -80,4 +115,5 @@ module.exports = {
   assertStringArray,
   assertEnum,
   assertBoolean,
+  assertExternalUrl,
 }

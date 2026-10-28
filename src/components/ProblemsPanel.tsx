@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { kryom, errorMessage } from '../api/kryom'
-import { joinName } from '../utils/paths'
+import { resolveAgainstRoot } from '../utils/paths'
 
 export interface ProblemsPanelProps {
   workspaceRoot: string | null
@@ -9,6 +9,7 @@ export interface ProblemsPanelProps {
   onStatus: (status: string) => void
   pendingRun?: { nonce: number } | null
   onResult?: (count: number, success: boolean) => void
+  onDiagnostics?: (result: KryomDiagnosticsResult | null) => void
 }
 
 function suggestCommand(scripts: string[]): string {
@@ -37,15 +38,19 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
   }, [props.scripts])
 
   function resolvePath(file: string): string {
-    if (/^[A-Za-z]:[/\\]/.test(file) || file.startsWith('/')) {
-      return file
-    }
-
-    return props.workspaceRoot ? joinName(props.workspaceRoot, file) : file
+    return resolveAgainstRoot(props.workspaceRoot, file)
   }
 
   const resultRef = useRef(props.onResult)
   resultRef.current = props.onResult
+  const diagnosticsRef = useRef(props.onDiagnostics)
+  diagnosticsRef.current = props.onDiagnostics
+
+  useEffect(() => {
+    setResult(null)
+    setError('')
+    diagnosticsRef.current?.(null)
+  }, [props.workspaceRoot])
 
   async function run(override?: string) {
     const trimmed = (override ?? command).trim()
@@ -66,9 +71,11 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
           : 'Diagnostics failed'
       )
       resultRef.current?.(next.diagnostics.length, next.success)
+      diagnosticsRef.current?.(next)
     } catch (e) {
       setResult(null)
       setError(errorMessage(e))
+      diagnosticsRef.current?.(null)
     } finally {
       setRunning(false)
     }

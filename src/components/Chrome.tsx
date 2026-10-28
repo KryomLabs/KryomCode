@@ -91,8 +91,8 @@ export interface StatusBarProps {
   terminalRunning: boolean
   diagnostics: { count: number; success: boolean } | null
   onShowDiagnostics: () => void
-  bottomOpen: boolean
-  onToggleBottom: () => void
+  rightOpen: boolean
+  onToggleRight: () => void
 }
 
 // Compact status bar. Every segment is verified live state: no fake
@@ -103,15 +103,15 @@ export function StatusBar(props: StatusBarProps) {
       <span className="status-left">
         <button
           className="status-toggle"
-          onClick={props.onToggleBottom}
+          onClick={props.onToggleRight}
           title={
-            props.bottomOpen
-              ? 'Hide bottom panel (Ctrl+J)'
-              : 'Show bottom panel (Ctrl+J)'
+            props.rightOpen
+              ? 'Hide right panel (Ctrl+J)'
+              : 'Show right panel (Ctrl+J)'
           }
-          aria-label={props.bottomOpen ? 'Hide bottom panel' : 'Show bottom panel'}
+          aria-label={props.rightOpen ? 'Hide right panel' : 'Show right panel'}
         >
-          {props.bottomOpen ? '▾ Panel' : '▸ Panel'}
+          {props.rightOpen ? '▾ Terminal' : '▸ Terminal'}
         </button>
         <span className="status-msg" title={props.status}>
           {props.status}

@@ -86,11 +86,38 @@ contextBridge.exposeInMainWorld('kryom', {
   gitStage: (paths) =>
     ipcRenderer.invoke('git:stage', paths),
 
+  gitUnstage: (paths) =>
+    ipcRenderer.invoke('git:unstage', paths),
+
+  gitDiscard: (paths) =>
+    ipcRenderer.invoke('git:discard', paths),
+
   gitCommit: (payload) =>
     ipcRenderer.invoke('git:commit', payload),
 
   gitPush: (payload) =>
     ipcRenderer.invoke('git:push', payload),
+
+  gitPull: (payload) =>
+    ipcRenderer.invoke('git:pull', payload),
+
+  gitRemotes: () =>
+    ipcRenderer.invoke('git:remotes'),
+
+  gitVerify: (payload) =>
+    ipcRenderer.invoke('git:verify', payload),
+
+  gitClone: (payload) =>
+    ipcRenderer.invoke('git:clone', payload),
+
+  exportBriefDocx: (payload) =>
+    ipcRenderer.invoke('documents:export-brief', payload),
+
+  exportTextDocx: (payload) =>
+    ipcRenderer.invoke('documents:export-text', payload),
+
+  importDocx: () =>
+    ipcRenderer.invoke('documents:import'),
 
   runDiagnostics: (payload) =>
     ipcRenderer.invoke('diagnostics:run', payload),
@@ -136,6 +163,9 @@ contextBridge.exposeInMainWorld('kryom', {
 
   getAppVersion: () =>
     ipcRenderer.invoke('app:get-version'),
+
+  openExternal: (url) =>
+    ipcRenderer.invoke('app:open-external', url),
 
   getAIStatus: () =>
     ipcRenderer.invoke('app:get-ai-status'),

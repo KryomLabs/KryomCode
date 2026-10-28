@@ -23,6 +23,7 @@ export interface TerminalController {
   runningList: KryomRunningProcess[]
   error: string
   runTerminalCommand: () => void
+  recallCommand: (direction: -1 | 1) => void
   cancel: () => void
   refreshStatus: () => void
   clear: () => void
@@ -43,6 +44,11 @@ export function useTerminalController(
   // Run activations could both pass a `running` state check. The ref
   // closes that race so one controller never starts overlapping runs.
   const runningRef = useRef(false)
+  // Command history for Up/Down recall. Position -1 means "current
+  // draft", which is preserved while browsing history.
+  const historyRef = useRef<string[]>([])
+  const historyPos = useRef(-1)
+  const draftRef = useRef('')
 
   useEffect(() => {
     if (!running) {
@@ -59,6 +65,38 @@ export function useTerminalController(
     return () => clearInterval(timer)
   }, [running])
 
+  function recallCommand(direction: -1 | 1) {
+    const history = historyRef.current
+
+    if (history.length === 0) {
+      return
+    }
+
+    if (historyPos.current === -1) {
+      if (direction > 0) {
+        return
+      }
+
+      draftRef.current = command
+      historyPos.current = history.length - 1
+    } else {
+      historyPos.current += direction
+
+      if (historyPos.current < 0) {
+        historyPos.current = -1
+        setCommand(draftRef.current)
+        return
+      }
+
+      if (historyPos.current >= history.length) {
+        historyPos.current = history.length - 1
+        return
+      }
+    }
+
+    setCommand(history[historyPos.current])
+  }
+
   async function runTerminalCommand() {
     const trimmed = command.trim()
 
@@ -66,6 +104,11 @@ export function useTerminalController(
       return
     }
 
+    if (historyRef.current[historyRef.current.length - 1] !== trimmed) {
+      historyRef.current = [...historyRef.current, trimmed].slice(-50)
+    }
+
+    historyPos.current = -1
     runningRef.current = true
 
     const id = nextEntryId
@@ -136,6 +179,7 @@ export function useTerminalController(
     runningList,
     error,
     runTerminalCommand: () => void runTerminalCommand(),
+    recallCommand,
     cancel: () => void cancel(),
     refreshStatus: () => void refreshStatus(),
     clear,
@@ -150,10 +194,13 @@ export interface TerminalPanelViewProps {
 export function TerminalPanelView(props: TerminalPanelViewProps) {
   const { controller } = props
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const [autoScroll, setAutoScroll] = useState(true)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [controller.entries])
+    if (autoScroll) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+  }, [controller.entries, autoScroll])
 
   return (
     <section className="terminal-panel bottom-tab-panel">
@@ -170,6 +217,15 @@ export function TerminalPanelView(props: TerminalPanelViewProps) {
           aria-label="Terminal command"
           value={controller.command}
           onChange={(event) => controller.setCommand(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              controller.recallCommand(-1)
+            } else if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              controller.recallCommand(1)
+            }
+          }}
           placeholder={
             props.workspaceRoot ? 'Enter a command…' : 'Open a project first…'
           }
@@ -215,6 +271,15 @@ export function TerminalPanelView(props: TerminalPanelViewProps) {
           Clear
         </button>
       </form>
+
+      <label className="terminal-autoscroll">
+        <input
+          type="checkbox"
+          checked={autoScroll}
+          onChange={(event) => setAutoScroll(event.target.checked)}
+        />
+        Auto-scroll to latest output
+      </label>
 
       {controller.runningList.length > 0 && (
         <p className="muted padded">

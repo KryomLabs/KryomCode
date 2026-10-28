@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { kryom } from '../api/kryom'
 import { baseName } from '../utils/paths'
 import { modelDisplayName } from '../utils/models'
+import { AiKeyNotice } from './AiKeyNotice'
 
 export interface WelcomePageProps {
   workspaceRoot: string | null
@@ -15,6 +17,7 @@ export interface WelcomePageProps {
   onSubmitChat: (prompt: string) => void
   onSubmitAgent: (task: string) => void
   onSubmitResearch: (objective: string) => void
+  onOpenConnections?: () => void
 }
 
 type WelcomeMode = 'chat' | 'agent' | 'research'
@@ -68,6 +71,7 @@ export function WelcomePage(props: WelcomePageProps) {
     research: '',
   })
   const [notice, setNotice] = useState('')
+  const [keyMissing, setKeyMissing] = useState(false)
   const hasWorkspace = props.workspaceRoot !== null
   const maxLength = MAX_LENGTHS[mode]
   const prompt = drafts[mode]
@@ -94,17 +98,32 @@ export function WelcomePage(props: WelcomePageProps) {
     setDrafts((previous) => ({ ...previous, [mode]: '' }))
   }
 
-  function submitText(text: string) {
+  async function submitText(text: string) {
     const trimmed = text.trim()
 
     if (trimmed === '') {
       return
     }
 
+    try {
+      const status = await kryom().getAIStatus()
+
+      if (!status.modelKeyConfigured) {
+        setDrafts((previous) => ({ ...previous, [mode]: trimmed }))
+        setKeyMissing(true)
+        setNotice('Configure the AI model key first. Your text is kept above.')
+        return
+      }
+    } catch {
+      // Fall through to the submit path.
+    }
+
+    setKeyMissing(false)
+
     if (mode === 'chat') {
       props.onSubmitChat(trimmed)
       clearPrompt()
-      setNotice('Sent to Kryom AI. See the AI Chat panel for the response.')
+      setNotice('Sent to Kryom AI. See the AI Chat mode for the response.')
       return
     }
 
@@ -122,7 +141,7 @@ export function WelcomePage(props: WelcomePageProps) {
       props.onSubmitResearch(trimmed)
       clearPrompt()
       setNotice(
-        'Research started. Follow progress in the Research panel; the brief is cited and saved.'
+        'Research started. Follow progress in the Research mode; the brief is cited and saved.'
       )
       return
     }
@@ -130,7 +149,7 @@ export function WelcomePage(props: WelcomePageProps) {
     props.onSubmitAgent(trimmed)
     clearPrompt()
     setNotice(
-      'Task sent to the Coding agent. Review the plan in the Agent panel before anything is applied.'
+      'Task sent to the Coding agent. Review the plan in the Agent mode before anything is applied.'
     )
   }
 
@@ -189,7 +208,7 @@ export function WelcomePage(props: WelcomePageProps) {
           className="welcome-composer"
           onSubmit={(event) => {
             event.preventDefault()
-            submitText(prompt)
+            void submitText(prompt)
           }}
         >
           <textarea
@@ -205,7 +224,7 @@ export function WelcomePage(props: WelcomePageProps) {
             onKeyDown={(event) => {
               if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
                 event.preventDefault()
-                submitText(prompt)
+                void submitText(prompt)
               }
             }}
             placeholder={composerPlaceholder(mode, hasWorkspace)}
@@ -221,6 +240,12 @@ export function WelcomePage(props: WelcomePageProps) {
             </button>
           </div>
         </form>
+
+        {keyMissing && (
+          <div className="welcome-key-notice">
+            <AiKeyNotice onOpenConnections={props.onOpenConnections} />
+          </div>
+        )}
 
         {notice ? (
           <p className="welcome-notice" role="status">
@@ -239,7 +264,7 @@ export function WelcomePage(props: WelcomePageProps) {
               key={suggestion}
               type="button"
               className="welcome-suggestion"
-              onClick={() => submitText(suggestion)}
+              onClick={() => void submitText(suggestion)}
               title={`Run: ${suggestion}`}
             >
               {suggestion}

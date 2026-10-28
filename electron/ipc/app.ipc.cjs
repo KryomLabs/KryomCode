@@ -1,4 +1,4 @@
-const { ipcMain, app } = require('electron')
+const { ipcMain, app, shell } = require('electron')
 
 const {
   readUIState,
@@ -9,6 +9,7 @@ const { getSecret } = require('../services/settings/secrets.service.cjs')
 const {
   assertPlainObject,
   assertBoolean,
+  assertExternalUrl,
 } = require('../security/validate-input.cjs')
 
 module.exports = function registerAppIPC({
@@ -43,6 +44,21 @@ module.exports = function registerAppIPC({
     }
   })
 
+  // Opens one validated http(s) URL in the system browser (research
+  // sources). The renderer can never reach shell.openExternal with an
+  // unvalidated value; in-app navigation stays restricted.
+  ipcMain.handle('app:open-external', async (event, url) => {
+    if (!isTrustedSender(event)) {
+      throw new Error('Unauthorized app request.')
+    }
+
+    const safe = assertExternalUrl(url, 'URL')
+
+    await shell.openExternal(safe)
+
+    return { success: true }
+  })
+
   ipcMain.handle('ui:get', async (event) => {
     if (!isTrustedSender(event)) {
       throw new Error('Unauthorized UI request.')
@@ -75,17 +91,37 @@ module.exports = function registerAppIPC({
     return state
   })
 
-  // Renderer capability push for native-menu enabled states. Plain
-  // booleans; unknown or malformed input disables guarded items.
+  // Renderer capability push for native-menu enabled states and the
+  // close guard. Plain scalars only; unknown or malformed input
+  // disables guarded items and reports a clean editor.
   ipcMain.handle('ui:context', async (event, ctx) => {
     if (!isTrustedSender(event)) {
       throw new Error('Unauthorized UI request.')
     }
 
     if (typeof onUIContext === 'function' && ctx && typeof ctx === 'object') {
+      const dirtyCount =
+        typeof ctx.dirtyCount === 'number' &&
+        Number.isInteger(ctx.dirtyCount) &&
+        ctx.dirtyCount >= 0
+          ? ctx.dirtyCount
+          : 0
+      const title =
+        typeof ctx.title === 'string' ? ctx.title.slice(0, 300) : ''
+      const saveAllNonce =
+        typeof ctx.saveAllNonce === 'number' &&
+        Number.isInteger(ctx.saveAllNonce) &&
+        ctx.saveAllNonce > 0
+          ? ctx.saveAllNonce
+          : 0
+
       onUIContext({
         hasWorkspace: ctx.hasWorkspace === true,
         hasEditor: ctx.hasEditor === true,
+        terminalRunning: ctx.terminalRunning === true,
+        dirtyCount,
+        title,
+        saveAllNonce,
       })
     }
 

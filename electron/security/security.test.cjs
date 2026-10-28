@@ -15,6 +15,7 @@ const {
   assertStringArray,
   assertEnum,
   assertPlainObject,
+  assertExternalUrl,
 } = require('./validate-input.cjs')
 const { createTrustedSender } = require('./trusted-sender.cjs')
 
@@ -63,6 +64,38 @@ describe('security guards', () => {
     assert.equal(assertEnum('a', 'choice', ['a', 'b']), 'a')
     assert.throws(() => assertEnum('z', 'choice', ['a']), /Invalid choice/)
     assert.throws(() => assertPlainObject([], 'payload'), /Invalid payload/)
+  })
+
+  it('opens only safe external URLs', () => {
+    assert.equal(
+      assertExternalUrl('https://arxiv.org/abs/1234.5678', 'url'),
+      'https://arxiv.org/abs/1234.5678'
+    )
+    assert.equal(
+      assertExternalUrl('http://example.com/paper', 'url'),
+      'http://example.com/paper'
+    )
+    assert.throws(
+      () => assertExternalUrl('javascript:alert(1)', 'url'),
+      /only http/
+    )
+    assert.throws(
+      () => assertExternalUrl('file:///etc/passwd', 'url'),
+      /only http/
+    )
+    assert.throws(
+      () => assertExternalUrl('kryom://open?x=1', 'url'),
+      /only http/
+    )
+    assert.throws(
+      () => assertExternalUrl('https://user:pass@example.com/', 'url'),
+      /credentials/
+    )
+    assert.throws(
+      () => assertExternalUrl('not a url', 'url'),
+      /malformed/
+    )
+    assert.throws(() => assertExternalUrl('', 'url'), /Invalid url/)
   })
 
   it('trusts only the live main window sender', () => {

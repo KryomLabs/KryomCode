@@ -22,13 +22,19 @@ promised. Nothing under Planned should be treated as a commitment.
 
 ## Done — Phase 2: frontend
 
-- IDE shell: top bar, Explorer/Search sidebar, Monaco center, AI
-  Chat/Agent panel, Terminal/Problems/Git bottom panel, status bar.
-- Editor state with dirty tracking, save-conflict dialog, and
-  discard-changes confirmation.
-- AI chat with history, workspace context toggle, and model override.
-- Agent panel with plan preview diffs and selective apply.
-- Terminal, Problems, Git, Search, and Settings UI wired to the bridge.
+- IDE shell: title bar, activity bar, contextual sidebar, Monaco
+  center, Chat/Agent/Research center stage, right-side
+  Terminal/Output panel, status bar. No bottom dock.
+- Multi-file editor tabs with dirty tracking, save-conflict dialog,
+  discard-changes confirmation, and keyboard navigation.
+- AI chat with history, code rendering, workspace context toggle,
+  model override, and key-setup guidance.
+- Agent panel with plan preview diffs, open-in-editor, full
+  previews, selective apply, and rollback.
+- Terminal (history, auto-scroll), Problems (Monaco markers), Git
+  (unstage, discard), Search, and Settings UI wired to the bridge.
+- Research findings/evidence/decisions rendered with citations and
+  browser opening for sources.
 
 ## Done — Phase 3: supporting files (this working tree, uncommitted)
 
@@ -41,9 +47,11 @@ promised. Nothing under Planned should be treated as a commitment.
 ## Planned — future ideas (not committed)
 
 - Live verification of the packaged app and both Meta models.
-- Multi-file editor tabs.
 - Streaming terminal and diagnostics output.
-- Mid-plan agent cancellation in the UI.
+- Mid-plan agent cancellation in the UI (needs an IPC cancel
+  path; the provider accepts an AbortSignal but nothing wires it).
+- Chat streaming, stop/cancel, and session persistence (needs new
+  provider and storage contracts; the provider is single-shot).
 - Additional diagnostics parsers (ESLint output, more test runners).
 - macOS and Linux packaging.
 - Renderer unit tests.

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { kryom, errorMessage } from '../api/kryom'
+import { MarkdownLite } from './MarkdownLite'
 
 export interface ResearchPanelProps {
   workspaceRoot: string | null
@@ -33,6 +34,8 @@ export function ResearchPanel(props: ResearchPanelProps) {
   const [error, setError] = useState('')
   const [copied, setCopied] = useState<number | null>(null)
   const [showBrief, setShowBrief] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportTemplate, setExportTemplate] = useState('report')
   const pollRef = useRef<number | null>(null)
 
   const refreshList = useCallback(async () => {
@@ -103,6 +106,33 @@ export function ResearchPanel(props: ResearchPanelProps) {
       }
     }
   }, [session?.id, session?.status, loadSession, refreshList, props])
+
+  async function exportBrief(id: string) {
+    if (exporting) {
+      return
+    }
+
+    setExporting(true)
+    setError('')
+
+    try {
+      const result = await kryom().exportBriefDocx({
+        sessionId: id,
+        template: exportTemplate,
+      })
+
+      if (!result) {
+        props.onStatus('Brief export cancelled')
+        return
+      }
+
+      props.onStatus(`Brief exported (${Math.round(result.bytes / 1024)} KB)`)
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setExporting(false)
+    }
+  }
 
   async function start(externalObjective?: string) {
     const trimmed = (externalObjective ?? objective).trim()
@@ -212,6 +242,21 @@ export function ResearchPanel(props: ResearchPanelProps) {
       setTimeout(() => setCopied(null), 1500)
     } catch {
       setError('Copy is unavailable in this context.')
+    }
+  }
+
+  function isOpenableUrl(url: string): boolean {
+    return /^https?:\/\//i.test(url.trim())
+  }
+
+  async function openSource(url: string) {
+    setError('')
+
+    try {
+      await kryom().openExternal(url)
+      props.onStatus('Source opened in browser')
+    } catch (e) {
+      setError(errorMessage(e))
     }
   }
 
@@ -369,16 +414,124 @@ export function ResearchPanel(props: ResearchPanelProps) {
                         [{index + 1}] {source.title} [{source.sourceType}] (
                         {source.accessStatus}) — {source.url}
                       </code>
-                      <button
-                        className="secondary-button"
-                        onClick={() => void copyText(source.url, index)}
-                      >
-                        {copied === index ? 'Copied' : 'Copy'}
-                      </button>
+                      <span className="source-actions">
+                        {isOpenableUrl(source.url) && (
+                          <button
+                            className="secondary-button"
+                            onClick={() => void openSource(source.url)}
+                            title="Open in your browser"
+                          >
+                            Open
+                          </button>
+                        )}
+                        <button
+                          className="secondary-button"
+                          onClick={() => void copyText(source.url, index)}
+                        >
+                          {copied === index ? 'Copied' : 'Copy'}
+                        </button>
+                      </span>
                     </div>
                   ))
                 )}
               </div>
+
+              <div className="plan-commands">
+                <strong>Findings ({session.findings.length})</strong>
+                {session.findings.length === 0 ? (
+                  <p className="muted">
+                    {running
+                      ? 'Findings appear here once synthesis completes.'
+                      : 'No findings were recorded for this session.'}
+                  </p>
+                ) : (
+                  session.findings.map((finding, index) => {
+                    const cited = finding.sourceIndexes
+                      .map((sourceIndex) => {
+                        const source = session.sources[sourceIndex]
+
+                        return source
+                          ? `[${sourceIndex + 1}] ${source.title}`
+                          : null
+                      })
+                      .filter((entry): entry is string => entry !== null)
+                    const missing = finding.sourceIndexes.length - cited.length
+
+                    return (
+                      <div key={index} className="command-row finding-row">
+                        <div className="finding-body">
+                          <span>{finding.claim}</span>
+                          <span className="muted">
+                            Confidence: {finding.confidence}
+                            {finding.note ? ` · ${finding.note}` : ''}
+                          </span>
+                          <span className="muted">
+                            {cited.length > 0
+                              ? cited.join(' · ')
+                              : 'No sources cited'}
+                            {missing > 0
+                              ? ` · ${missing} reference(s) unavailable`
+                              : ''}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+
+              {session.evidence.length > 0 && (
+                <div className="plan-commands">
+                  <strong>Evidence ({session.evidence.length})</strong>
+                  {session.evidence.slice(0, 12).map((entry, index) => (
+                    <div key={index} className="command-row finding-row">
+                      <div className="finding-body">
+                        <span className="muted">{entry.sourceUrl}</span>
+                        <span>{entry.excerpt.slice(0, 400)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {session.implementationTasks.length > 0 && (
+                <div className="plan-commands">
+                  <strong>
+                    Implementation tasks ({session.implementationTasks.length})
+                  </strong>
+                  {session.implementationTasks.map((task, index) => (
+                    <div key={index} className="command-row">
+                      <code>
+                        {index + 1}. {task}
+                      </code>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {session.verification.length > 0 && (
+                <div className="plan-commands">
+                  <strong>Verification ({session.verification.length})</strong>
+                  {session.verification.map((check, index) => (
+                    <div key={index} className="command-row">
+                      <code>
+                        {index + 1}. {check}
+                      </code>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {session.decisions.length > 0 && (
+                <div className="plan-commands">
+                  <strong>Decisions ({session.decisions.length})</strong>
+                  {session.decisions.map((decision, index) => (
+                    <div key={index} className="command-row">
+                      <code>{decision.text}</code>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {session.brief.version > 0 && (
                 <div className="plan-commands">
@@ -398,10 +551,31 @@ export function ResearchPanel(props: ResearchPanelProps) {
                       {showBrief ? 'Hide brief' : 'Show brief'}
                     </button>
                   </div>
+                  <div className="composer-footer">
+                    <select
+                      value={exportTemplate}
+                      onChange={(event) => setExportTemplate(event.target.value)}
+                      aria-label="Brief export template"
+                      disabled={exporting}
+                    >
+                      <option value="report">Report template</option>
+                      <option value="technical">Technical template</option>
+                    </select>
+                    <button
+                      className="secondary-button"
+                      disabled={exporting}
+                      onClick={() => void exportBrief(session.id)}
+                      title="Export this brief with its cited sources to a .docx file"
+                    >
+                      {exporting ? 'Exporting…' : 'Export .docx'}
+                    </button>
+                  </div>
                   {showBrief && (
-                    <pre className="plan-preview">
-                      {session.brief.markdown.slice(0, 12000)}
-                    </pre>
+                    <div className="brief-body">
+                      <MarkdownLite
+                        text={session.brief.markdown.slice(0, 12000)}
+                      />
+                    </div>
                   )}
                 </div>
               )}

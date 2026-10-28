@@ -9,6 +9,7 @@ const registerAgentIPC = require('./agent.ipc.cjs')
 const registerSettingsIPC = require('./settings.ipc.cjs')
 const registerResearchIPC = require('./research.ipc.cjs')
 const registerAppIPC = require('./app.ipc.cjs')
+const registerDocumentsIPC = require('./documents.ipc.cjs')
 
 module.exports = function registerHandlers({
   getMainWindow,
@@ -39,6 +40,8 @@ module.exports = function registerHandlers({
 
   registerGitIPC({
     isTrustedSender,
+    getMainWindow,
+    onWorkspaceOpened,
   })
 
   registerDiagnosticsIPC({
@@ -66,5 +69,10 @@ module.exports = function registerHandlers({
     onUIStateChanged,
     onUIContext,
     getWindows,
+  })
+
+  registerDocumentsIPC({
+    isTrustedSender,
+    getMainWindow,
   })
 }

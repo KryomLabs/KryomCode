@@ -28,7 +28,24 @@ const windows = new Set()
 const menuState = {
   recent: [],
   autoSave: false,
-  ctx: { hasWorkspace: false, hasEditor: false },
+  ctx: { hasWorkspace: false, hasEditor: false, dirtyCount: 0 },
+}
+
+// Pending save-all settlement for the close guard. The renderer echoes
+// the nonce it was asked to save with; the waiter resolves once the
+// matching push arrives or the deadline passes.
+let saveAllNonce = 0
+let pendingSaveAll = null
+
+function settleSaveAll(mayClose) {
+  if (!pendingSaveAll) {
+    return
+  }
+
+  const pending = pendingSaveAll
+  pendingSaveAll = null
+  clearTimeout(pending.timer)
+  pending.resolve(mayClose)
 }
 
 const isTrustedSender = createTrustedSender(() => [...windows])
@@ -163,6 +180,56 @@ async function loadApp(window) {
   await window.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
 }
 
+async function resolveDirtyClose(window) {
+  const dirtyCount = menuState.ctx.dirtyCount ?? 0
+
+  const choice = await dialog.showMessageBox(window, {
+    type: 'question',
+    title: 'Unsaved changes',
+    message:
+      dirtyCount === 1
+        ? '1 file has unsaved changes.'
+        : `${dirtyCount} files have unsaved changes.`,
+    detail:
+      'Save them before closing? Chat and agent sessions are not saved.',
+    buttons: ['Save', 'Discard changes', 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  })
+
+  if (choice.response === 2) {
+    return false
+  }
+
+  if (choice.response === 1) {
+    return true
+  }
+
+  if (window.isDestroyed()) {
+    return false
+  }
+
+  saveAllNonce += 1
+  const nonce = saveAllNonce
+
+  window.webContents.send('kryom:command', {
+    id: 'file.saveAll',
+    payload: { nonce },
+  })
+
+  return new Promise((resolve) => {
+    pendingSaveAll = {
+      nonce,
+      resolve,
+      timer: setTimeout(() => {
+        pendingSaveAll = null
+        resolve(false)
+      }, 120000),
+    }
+  })
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440,
@@ -183,6 +250,43 @@ function createWindow() {
 
   window.on('closed', () => {
     windows.delete(window)
+  })
+
+  // Close guard: dirty editor buffers get a native Save/Discard/Cancel
+  // prompt. Save delegates to the renderer (which owns conflict
+  // dialogs) and the window is destroyed only after the renderer
+  // reports a clean state. destroy() intentionally bypasses
+  // beforeunload so Discard never double-prompts; reload paths keep
+  // the renderer's generic beforeunload prompt instead.
+  let closeRunning = false
+
+  window.on('close', (event) => {
+    const dirtyCount = menuState.ctx.dirtyCount ?? 0
+
+    if (dirtyCount <= 0) {
+      return
+    }
+
+    event.preventDefault()
+
+    if (closeRunning) {
+      return
+    }
+
+    closeRunning = true
+
+    void resolveDirtyClose(window)
+      .then((mayClose) => {
+        closeRunning = false
+
+        if (mayClose && !window.isDestroyed()) {
+          window.destroy()
+        }
+      })
+      .catch((error) => {
+        closeRunning = false
+        log.error(`Close guard failed: ${error.message}`)
+      })
   })
 
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -228,7 +332,34 @@ app.whenReady().then(() => {
       menuState.ctx = {
         hasWorkspace: ctx.hasWorkspace === true,
         hasEditor: ctx.hasEditor === true,
+        terminalRunning: ctx.terminalRunning === true,
+        dirtyCount:
+          typeof ctx.dirtyCount === 'number' && ctx.dirtyCount >= 0
+            ? Math.floor(ctx.dirtyCount)
+            : 0,
       }
+
+      if (
+        pendingSaveAll &&
+        typeof ctx.saveAllNonce === 'number' &&
+        ctx.saveAllNonce === pendingSaveAll.nonce
+      ) {
+        settleSaveAll(menuState.ctx.dirtyCount === 0)
+      } else if (pendingSaveAll && menuState.ctx.dirtyCount === 0) {
+        // Belt and braces: any clean push settles a pending save-all.
+        settleSaveAll(true)
+      }
+
+      const target = getMainWindow()
+
+      if (target && !target.isDestroyed()) {
+        target.setTitle(
+          typeof ctx.title === 'string' && ctx.title
+            ? ctx.title
+            : 'KryomCode'
+        )
+      }
+
       rebuildMenu()
     },
     onWorkspaceOpened: () => {

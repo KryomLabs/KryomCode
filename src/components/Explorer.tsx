@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { baseName, parentDir } from '../utils/paths'
+import { FileIcon, FolderIcon, PencilIcon, TrashIcon } from './FileIcons'
 
 export interface ExplorerProps {
   workspace: KryomWorkspace | null
@@ -39,7 +40,10 @@ function ExplorerRow(props: RowProps) {
             style={{ paddingLeft: 12 + props.depth * 14 }}
             onClick={() => props.onSelect(node.path)}
           >
-            📁 {node.name}
+            <span className="tree-icon" aria-hidden="true">
+              <FolderIcon />
+            </span>{' '}
+            {node.name}
           </summary>
 
           {(node.children ?? []).map((child) => (
@@ -74,7 +78,10 @@ function ExplorerRow(props: RowProps) {
         }}
         title={node.path}
       >
-        📄 {node.name}
+        <span className="tree-icon" aria-hidden="true">
+          <FileIcon />
+        </span>{' '}
+        {node.name}
       </button>
 
       {isSelected && (
@@ -84,14 +91,14 @@ function ExplorerRow(props: RowProps) {
             aria-label={`Rename ${node.name}`}
             onClick={() => props.onRename(node)}
           >
-            ✎
+            <PencilIcon />
           </button>
           <button
             title={`Delete ${node.name}`}
             aria-label={`Delete ${node.name}`}
             onClick={() => props.onDelete(node)}
           >
-            🗑
+            <TrashIcon />
           </button>
         </span>
       )}
@@ -156,14 +163,15 @@ export function Explorer(props: ExplorerProps) {
 
   return (
     <div className="explorer">
-      <div className="section-title">EXPLORER</div>
-
       {!props.workspace ? (
         <p className="muted padded">Open a folder to get started.</p>
       ) : (
         <>
           <div className="root-name">
-            📁 {baseName(props.workspace.root)}
+            <span className="tree-icon" aria-hidden="true">
+              <FolderIcon />
+            </span>{' '}
+            {baseName(props.workspace.root)}
           </div>
 
           {props.projectInfo && (

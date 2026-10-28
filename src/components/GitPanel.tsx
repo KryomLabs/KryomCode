@@ -13,12 +13,18 @@ interface DiffView {
   truncated: boolean
 }
 
+// Single-column source-control view sized for the 260px sidebar:
+// staged, changes, then commit. Staged entries can be unstaged;
+// tracked modifications can be discarded after confirmation.
+// Untracked files are staged or deleted from the Explorer, never
+// silently discarded here.
 export function GitPanel(props: GitPanelProps) {
   const dialogs = useDialogs()
   const [status, setStatus] = useState<KryomGitStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [stagedSelected, setStagedSelected] = useState<Set<string>>(new Set())
   const [diff, setDiff] = useState<DiffView | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
   const [showStaged, setShowStaged] = useState(false)
@@ -47,6 +53,7 @@ export function GitPanel(props: GitPanelProps) {
   useEffect(() => {
     setDiff(null)
     setSelected(new Set())
+    setStagedSelected(new Set())
     setCommitMessage('')
 
     if (props.workspaceRoot) {
@@ -60,6 +67,20 @@ export function GitPanel(props: GitPanelProps) {
 
   function toggleSelected(file: string) {
     setSelected((previous) => {
+      const next = new Set(previous)
+
+      if (next.has(file)) {
+        next.delete(file)
+      } else {
+        next.add(file)
+      }
+
+      return next
+    })
+  }
+
+  function toggleStagedSelected(file: string) {
+    setStagedSelected((previous) => {
       const next = new Set(previous)
 
       if (next.has(file)) {
@@ -88,9 +109,10 @@ export function GitPanel(props: GitPanelProps) {
   }
 
   const pathBase = status?.toplevel || props.workspaceRoot || ''
+  const absoluteOf = (file: string) => `${pathBase}/${file}`
 
   async function stageSelected() {
-    if (selected.size === 0 || operating) {
+    if (selected.size === 0 || operating || !pathBase) {
       return
     }
 
@@ -98,15 +120,76 @@ export function GitPanel(props: GitPanelProps) {
     setError('')
 
     try {
-      if (!pathBase) {
-        return
-      }
-
-      const absolute = [...selected].map((file) => `${pathBase}/${file}`)
-      await kryom().gitStage(absolute)
+      await kryom().gitStage([...selected].map(absoluteOf))
       setSelected(new Set())
       await loadStatus()
       props.onStatus('Git changes staged')
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setOperating(null)
+    }
+  }
+
+  async function unstageSelected() {
+    if (stagedSelected.size === 0 || operating || !pathBase) {
+      return
+    }
+
+    setOperating('unstage')
+    setError('')
+
+    try {
+      await kryom().gitUnstage([...stagedSelected].map(absoluteOf))
+      setStagedSelected(new Set())
+      await loadStatus()
+      props.onStatus('Git changes unstaged')
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setOperating(null)
+    }
+  }
+
+  async function discardSelected() {
+    if (!status || selected.size === 0 || operating || !pathBase) {
+      return
+    }
+
+    const tracked = [...selected].filter((file) =>
+      status.unstaged.includes(file)
+    )
+    const skipped = selected.size - tracked.length
+
+    if (tracked.length === 0) {
+      setError(
+        'Only tracked modifications can be discarded here. Delete untracked files from the Explorer.'
+      )
+      return
+    }
+
+    const confirmed = await dialogs.confirm({
+      title: 'Discard changes?',
+      message:
+        `${tracked.length} file(s) will be restored to their committed ` +
+        `contents. This cannot be undone.` +
+        (skipped > 0 ? ` ${skipped} untracked file(s) are left alone.` : ''),
+      confirmLabel: 'Discard changes',
+      danger: true,
+    })
+
+    if (!confirmed) {
+      return
+    }
+
+    setOperating('discard')
+    setError('')
+
+    try {
+      await kryom().gitDiscard(tracked.map(absoluteOf))
+      setSelected(new Set())
+      await loadStatus()
+      props.onStatus('Git changes discarded')
     } catch (e) {
       setError(errorMessage(e))
     } finally {
@@ -177,6 +260,37 @@ export function GitPanel(props: GitPanelProps) {
     }
   }
 
+  async function pull() {
+    if (operating) {
+      return
+    }
+
+    const confirmed = await dialogs.confirm({
+      title: 'Pull from remote?',
+      message:
+        'This fast-forwards the current branch from its remote. ' +
+        'Local commits that have diverged are left untouched with an error.',
+      confirmLabel: 'Pull',
+    })
+
+    if (!confirmed) {
+      return
+    }
+
+    setOperating('pull')
+    setError('')
+
+    try {
+      const result = await kryom().gitPull({})
+      await loadStatus()
+      props.onStatus(`Pulled ${result.branch} from ${result.remote}`)
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setOperating(null)
+    }
+  }
+
   const busy = loading || operating !== null || diffLoading
 
   return (
@@ -218,27 +332,46 @@ export function GitPanel(props: GitPanelProps) {
           {error && <p className="inline-error padded">{error}</p>}
 
           {status && (
-            <div className="git-columns">
+            <div className="git-stack">
               <div className="git-list">
                 <strong>Staged ({status.staged.length})</strong>
                 {status.staged.length === 0 && (
                   <p className="muted">Nothing staged.</p>
                 )}
                 {status.staged.map((file) => (
-                  <button
-                    key={`s-${file}`}
-                    className="git-file"
-                    onClick={() => void loadDiff(file, true, `${pathBase}/${file}`)}
-                    title="View staged diff"
-                  >
-                    {file}
-                  </button>
+                  <label key={`s-${file}`} className="git-file-check">
+                    <input
+                      type="checkbox"
+                      checked={stagedSelected.has(file)}
+                      onChange={() => toggleStagedSelected(file)}
+                      aria-label={`Select staged ${file}`}
+                    />
+                    <button
+                      type="button"
+                      className="git-file link-button"
+                      onClick={() => void loadDiff(file, true, absoluteOf(file))}
+                      title="View staged diff"
+                    >
+                      {file}
+                    </button>
+                  </label>
                 ))}
+
+                <div className="git-actions">
+                  <button
+                    onClick={() => void unstageSelected()}
+                    disabled={stagedSelected.size === 0 || busy}
+                  >
+                    {operating === 'unstage'
+                      ? 'Unstaging…'
+                      : `Unstage selected (${stagedSelected.size})`}
+                  </button>
+                </div>
               </div>
 
               <div className="git-list">
                 <strong>
-                  Unstaged ({status.unstaged.length}) · Untracked (
+                  Changes · unstaged ({status.unstaged.length}) · untracked (
                   {status.untracked.length})
                 </strong>
                 {status.unstaged.length === 0 &&
@@ -254,7 +387,9 @@ export function GitPanel(props: GitPanelProps) {
                     <button
                       type="button"
                       className="git-file link-button"
-                      onClick={() => void loadDiff(file, showStaged, `${pathBase}/${file}`)}
+                      onClick={() =>
+                        void loadDiff(file, showStaged, absoluteOf(file))
+                      }
                       title="View diff"
                     >
                       {file}
@@ -267,7 +402,17 @@ export function GitPanel(props: GitPanelProps) {
                     onClick={() => void stageSelected()}
                     disabled={selected.size === 0 || busy}
                   >
-                    Stage selected ({selected.size})
+                    {operating === 'stage'
+                      ? 'Staging…'
+                      : `Stage selected (${selected.size})`}
+                  </button>
+                  <button
+                    onClick={() => void discardSelected()}
+                    disabled={selected.size === 0 || busy}
+                  >
+                    {operating === 'discard'
+                      ? 'Discarding…'
+                      : 'Discard tracked'}
                   </button>
                 </div>
               </div>
@@ -291,6 +436,9 @@ export function GitPanel(props: GitPanelProps) {
                   </button>
                   <button onClick={() => void push()} disabled={busy}>
                     {operating === 'push' ? 'Pushing…' : 'Push'}
+                  </button>
+                  <button onClick={() => void pull()} disabled={busy}>
+                    {operating === 'pull' ? 'Pulling…' : 'Pull'}
                   </button>
                 </div>
               </div>

@@ -36,10 +36,11 @@ windows are refused.
 
 ## IPC contract
 
-Nine modules under `electron/ipc/`, one per domain. Every handler runs
-`isTrustedSender(event)` (sender must be the app's own window, see
-`electron/security/trusted-sender.cjs`) and then validates arguments
-with `electron/security/validate-input.cjs` before calling a service.
+Twelve domain modules under `electron/ipc/` (plus registration).
+Every handler runs `isTrustedSender(event)` (sender must be the app's
+own window, see `electron/security/trusted-sender.cjs`) and then
+validates arguments with `electron/security/validate-input.cjs`
+before calling a service.
 
 | Channel | Direction summary |
 |---|---|
@@ -51,11 +52,13 @@ with `electron/security/validate-input.cjs` before calling a service.
 | `terminal:run/cancel/status` | One command per call, kill-all, list |
 | `ai:chat` | Single chat completion |
 | `agent:plan/apply` | Plan proposal, approved-edits apply |
-| `git:status/diff/changed-files/stage/commit/push` | One channel per operation |
+| `git:status/diff/changed-files/stage/unstage/discard/commit/push` | One channel per operation |
 | `diagnostics:run` | One build/test command + parsed problems |
 | `intelligence:summary/context` | Project summary + bounded context |
 | `settings:get/update` | Validated preference store |
 | `research:start/status/active/list/get/brief/cancel/resume/select` | Background research runs, persisted sessions, cited briefs |
+| `app:get-version/get-ai-status/open-external` | Version info, key presence, validated browser opening |
+| `ui:get/set/context` | UI state store; renderer capability/dirty-count pushes |
 
 The preload bridge (`electron/preload.cjs`) exposes one method per
 channel plus read-only `platform` and `versions`. No channel accepts a

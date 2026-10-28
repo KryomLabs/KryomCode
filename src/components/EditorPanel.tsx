@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import { detectLanguage } from '../utils/languages'
+import { resolveAgainstRoot, samePath } from '../utils/paths'
 import { EditorTabs } from './EditorTabs'
 import type { TabState } from '../utils/tabs'
 
@@ -15,11 +16,25 @@ export interface EditorApi {
 // Minimal structural types for the Monaco instance. The real editor is
 // a supertype of these, so mounting stays type-safe without importing
 // the whole Monaco API surface.
+interface MonacoTextModel {
+  getLineCount: () => number
+}
+
+interface MonacoMarkerData {
+  severity: number
+  message: string
+  startLineNumber: number
+  startColumn: number
+  endLineNumber: number
+  endColumn: number
+  source?: string
+}
+
 interface MonacoEditorInstance {
   revealLineInCenter: (line: number) => void
   setPosition: (position: { lineNumber: number; column: number }) => void
   addCommand: (keybinding: number, handler: () => void) => void
-  getModel: () => { getLineCount: () => number } | null
+  getModel: () => MonacoTextModel | null
   trigger: (source: string, handlerId: string, payload?: unknown) => void
   onDidChangeCursorPosition: (
     listener: (event: {
@@ -29,8 +44,16 @@ interface MonacoEditorInstance {
 }
 
 interface MonacoApi {
-  KeyMod: { CtrlCmd: number }
-  KeyCode: { KeyS: number }
+  KeyMod: { CtrlCmd: number; Shift: number }
+  KeyCode: { KeyS: number; F8: number }
+  MarkerSeverity: { Error: number; Warning: number }
+  editor: {
+    setModelMarkers: (
+      model: MonacoTextModel,
+      owner: string,
+      markers: MonacoMarkerData[]
+    ) => void
+  }
 }
 
 export interface EditorPanelProps {
@@ -50,18 +73,85 @@ export interface EditorPanelProps {
   registerApi: (api: EditorApi | null) => void
   fontSize?: number
   onCursorChange?: (line: number, column: number) => void
+  workspaceRoot?: string | null
+  markers?: KryomDiagnostic[]
 }
 
 export function EditorPanel(props: EditorPanelProps) {
   const editorRef = useRef<MonacoEditorInstance | null>(null)
+  const monacoRef = useRef<MonacoApi | null>(null)
   const saveRef = useRef(props.onSave)
   saveRef.current = props.onSave
   const registerRef = useRef(props.registerApi)
   registerRef.current = props.registerApi
+  // Live mirrors so marker application (triggered from mount and
+  // effects) always sees the latest diagnostics and file identity.
+  const markersRef = useRef(props.markers)
+  markersRef.current = props.markers
+  const fileRef = useRef({
+    path: props.filePath,
+    root: props.workspaceRoot ?? null,
+  })
+  fileRef.current = {
+    path: props.filePath,
+    root: props.workspaceRoot ?? null,
+  }
 
   useEffect(() => {
     return () => registerRef.current(null)
   }, [])
+
+  // Applies the diagnostics that belong to the open file as gutter
+  // markers. Positions are clamped into the model; an empty set
+  // clears stale markers. Monaco's built-in F8/Shift+F8 marker
+  // navigation picks these up with no extra wiring.
+  function applyMarkers() {
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    const model = editor?.getModel() ?? null
+    const filePath = fileRef.current.path
+
+    if (!editor || !monaco || !model || !filePath) {
+      return
+    }
+
+    const maxLine = Math.max(1, model.getLineCount())
+    const data: MonacoMarkerData[] = (markersRef.current ?? [])
+      .filter((diagnostic) =>
+        samePath(
+          resolveAgainstRoot(fileRef.current.root, diagnostic.file),
+          filePath
+        )
+      )
+      .map((diagnostic) => {
+        const line = Math.min(
+          Math.max(1, diagnostic.line || 1),
+          maxLine
+        )
+        const column = Math.max(1, diagnostic.column || 1)
+
+        return {
+          severity:
+            diagnostic.severity === 'warning'
+              ? monaco.MarkerSeverity.Warning
+              : monaco.MarkerSeverity.Error,
+          message: diagnostic.code
+            ? `${diagnostic.message} (${diagnostic.code})`
+            : diagnostic.message,
+          startLineNumber: line,
+          startColumn: column,
+          endLineNumber: line,
+          endColumn: column + 1,
+          source: diagnostic.source || 'kryom',
+        }
+      })
+
+    monaco.editor.setModelMarkers(model, 'kryom', data)
+  }
+
+  useEffect(() => {
+    applyMarkers()
+  })
 
   useEffect(() => {
     if (props.pendingLine === null || !props.filePath) {
@@ -102,8 +192,18 @@ export function EditorPanel(props: EditorPanelProps) {
 
   const handleMount = (editor: MonacoEditorInstance, monaco: MonacoApi) => {
     editorRef.current = editor
+    monacoRef.current = monaco
+    applyMarkers()
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       saveRef.current()
+    })
+    // Explicit marker navigation so F8/Shift+F8 always cycle the
+    // KryomCode diagnostics, regardless of Monaco defaults.
+    editor.addCommand(monaco.KeyCode.F8, () => {
+      editor.trigger('shortcuts', 'editor.action.marker.next')
+    })
+    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F8, () => {
+      editor.trigger('shortcuts', 'editor.action.marker.prev')
     })
     editor.onDidChangeCursorPosition((event) => {
       cursorRef.current?.(
