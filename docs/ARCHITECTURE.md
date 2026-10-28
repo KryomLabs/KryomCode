@@ -50,8 +50,9 @@ before calling a service.
 | `filesystem:create/rename/delete` | Explorer mutations |
 | `search:files` | Name or content search |
 | `terminal:run/cancel/status` | One command per call, kill-all, list |
-| `ai:chat` | Single chat completion |
-| `agent:plan/apply` | Plan proposal, approved-edits apply |
+| `ai:chat/cancel` | Single chat completion, in-flight abort |
+| `chat:save/restore` | Per-project conversation persistence |
+| `agent:plan/apply/cancel` | Plan proposal, approved-edits apply, planning abort |
 | `git:status/diff/changed-files/stage/unstage/discard/commit/push` | One channel per operation |
 | `diagnostics:run` | One build/test command + parsed problems |
 | `intelligence:summary/context` | Project summary + bounded context |

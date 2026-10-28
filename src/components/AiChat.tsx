@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { kryom, errorMessage } from '../api/kryom'
+import { kryom, errorMessage, isCancelError } from '../api/kryom'
 import { AiKeyNotice } from './AiKeyNotice'
 import { MarkdownLite } from './MarkdownLite'
 
@@ -31,6 +31,7 @@ export function AiChat(props: AiChatProps) {
   const [prompt, setPrompt] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
+  const [restored, setRestored] = useState(false)
   const [error, setError] = useState('')
   const [includeFileContext, setIncludeFileContext] = useState(
     props.contextEnabled
@@ -71,6 +72,47 @@ export function AiChat(props: AiChatProps) {
 
     return ''
   }
+
+  // Per-project conversation: restore follows the open project,
+  // and every message change saves (sends are rare, so no debounce
+  // is needed). The ready gate keeps the pre-restore empty state
+  // from wiping stored history. A mid-request close restores
+  // without the pending answer: in-flight requests are never faked.
+  useEffect(() => {
+    let cancelled = false
+
+    setRestored(false)
+
+    kryom()
+      .restoreChat()
+      .then((result) => {
+        if (!cancelled) {
+          setMessages(result.restored ? result.messages : [])
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMessages([])
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRestored(true)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [props.workspaceRoot])
+
+  useEffect(() => {
+    if (!restored) {
+      return
+    }
+
+    kryom().saveChat(messages).catch(() => undefined)
+  }, [messages, restored])
 
   const consumedPromptNonce = useRef<number | null>(null)
 
@@ -152,10 +194,19 @@ export function AiChat(props: AiChatProps) {
       props.onStatus(`AI response received (${result.model})`)
     } catch (e) {
       setMessages((previous) => [...previous, userMessage])
-      setError(errorMessage(e))
+
+      if (isCancelError(e)) {
+        props.onStatus('AI request cancelled')
+      } else {
+        setError(errorMessage(e))
+      }
     } finally {
       setLoading(false)
     }
+  }
+
+  function stopRequest() {
+    kryom().cancelAI().catch(() => undefined)
   }
 
   async function sendMessage() {
@@ -351,9 +402,15 @@ export function AiChat(props: AiChatProps) {
 
         <div className="composer-footer">
           <span className="muted">{prompt.length}/12000</span>
-          <button type="submit" disabled={loading || !prompt.trim()}>
-            {loading ? 'Thinking…' : 'Send ↑'}
-          </button>
+          {loading ? (
+            <button type="button" onClick={stopRequest}>
+              Stop
+            </button>
+          ) : (
+            <button type="submit" disabled={!prompt.trim()}>
+              Send ↑
+            </button>
+          )}
         </div>
       </form>
     </section>

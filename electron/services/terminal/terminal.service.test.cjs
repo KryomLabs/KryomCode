@@ -13,6 +13,9 @@ const {
 const {
   setWorkspaceRoot,
 } = require('../workspace/workspace.service.cjs')
+const {
+  killProcessTree,
+} = require('./process-manager.cjs')
 
 describe('terminal.service', () => {
   it('never exposes MODEL_API_KEY to child processes', () => {
@@ -56,6 +59,52 @@ describe('terminal.service', () => {
     assert.equal(result.exitCode, 0)
     assert.match(result.output, /kryom-ok/)
     assert.equal(result.timedOut, false)
+  })
+
+  it('kills whole process trees without throwing', () => {
+    assert.equal(killProcessTree(null), false)
+    assert.equal(killProcessTree(undefined), false)
+
+    let killed = false
+    const plain = { kill: () => { killed = true; return true } }
+
+    assert.equal(killProcessTree(plain, { platform: 'linux' }), true)
+    assert.equal(killed, true)
+
+    const calls = []
+    const windowsChild = {
+      pid: 4242,
+      kill: () => { throw new Error('should not be called') },
+    }
+
+    assert.equal(
+      killProcessTree(windowsChild, {
+        platform: 'win32',
+        spawnSync: (cmd, args) => {
+          calls.push([cmd, args])
+          return { status: 0 }
+        },
+      }),
+      true
+    )
+    assert.deepEqual(calls, [
+      ['taskkill', ['/pid', '4242', '/T', '/F']],
+    ])
+
+    // A failed taskkill falls back to plain kill instead of throwing.
+    let fallback = false
+
+    assert.equal(
+      killProcessTree(
+        { pid: 1, kill: () => { fallback = true; return true } },
+        {
+          platform: 'win32',
+          spawnSync: () => { throw new Error('taskkill missing') },
+        }
+      ),
+      true
+    )
+    assert.equal(fallback, true)
   })
 
   it('attaches advisory warnings without blocking commands', async () => {

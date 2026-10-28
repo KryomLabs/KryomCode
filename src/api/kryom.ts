@@ -27,3 +27,10 @@ export function errorMessage(error: unknown): string {
 export function isWriteConflict(error: unknown): boolean {
   return error instanceof Error && /changed on disk/i.test(error.message)
 }
+
+// Cancellation surfaces as a rejected request whose message reports
+// it (the provider was really aborted; this only classifies the
+// outcome so the UI can show "cancelled" instead of an error box).
+export function isCancelError(error: unknown): boolean {
+  return error instanceof Error && /cancelled/i.test(error.message)
+}

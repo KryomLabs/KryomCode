@@ -40,6 +40,22 @@ const MAX_PATH_LENGTH = 1000
 
 const EDIT_ACTIONS = ['create', 'modify', 'delete']
 
+// In-flight planning request, if any. cancelPlan() aborts the real
+// provider call; planning is the only long pole (validation and
+// apply are local and complete in milliseconds).
+let activePlanController = null
+
+function cancelPlan() {
+  if (activePlanController) {
+    activePlanController.abort()
+    activePlanController = null
+
+    return { cancelled: true }
+  }
+
+  return { cancelled: false }
+}
+
 // The agent NEVER executes commands and NEVER writes files during
 // planning. planTask returns a validated, previewable proposal; the
 // renderer shows it and the user approves explicitly; only then does
@@ -231,9 +247,25 @@ async function planTask(payload, options = {}) {
     researchContext = loaded.context
   }
 
-  const result = await provider.chat({
-    model,
-    messages: [
+  const planController = new AbortController()
+  activePlanController = planController
+
+  const onOuterAbort = () => planController.abort()
+
+  if (options.signal) {
+    if (options.signal.aborted) {
+      planController.abort()
+    } else {
+      options.signal.addEventListener('abort', onOuterAbort, { once: true })
+    }
+  }
+
+  let result = null
+
+  try {
+    result = await provider.chat({
+      model,
+      messages: [
       { role: 'system', content: PLANNER_SYSTEM_PROMPT },
       {
         role: 'system',
@@ -250,8 +282,17 @@ async function planTask(payload, options = {}) {
         : []),
       { role: 'user', content: payload.task.trim() },
     ],
-    signal: options.signal,
-  })
+    signal: planController.signal,
+    })
+  } finally {
+    if (activePlanController === planController) {
+      activePlanController = null
+    }
+
+    if (options.signal) {
+      options.signal.removeEventListener('abort', onOuterAbort)
+    }
+  }
 
   if (!result || typeof result.answer !== 'string' || !result.answer.trim()) {
     throw new Error('The planner returned an empty response.')
@@ -307,7 +348,12 @@ async function applyEdits(payload, options = {}) {
   const applied = []
   const snapshots = []
 
+  // Best-effort restore in reverse order. Returns the number of
+  // snapshots that could NOT be restored so the caller reports
+  // honestly instead of claiming a rollback that failed.
   const rollback = async () => {
+    let failures = 0
+
     for (const snapshot of snapshots.reverse()) {
       try {
         if (snapshot.created) {
@@ -316,9 +362,11 @@ async function applyEdits(payload, options = {}) {
           await fs.writeFile(snapshot.path, snapshot.buffer)
         }
       } catch {
-        // Best effort: report the original failure below.
+        failures += 1
       }
     }
+
+    return failures
   }
 
   try {
@@ -401,16 +449,24 @@ async function applyEdits(payload, options = {}) {
       applied.push({ path: resolved, action: entry.action })
     }
   } catch (error) {
-    await rollback()
+    const rollbackFailures = await rollback()
 
-    log.warn(`Agent apply failed and rolled back: ${error.message}`)
+    log.warn(
+      `Agent apply failed and rolled back (${rollbackFailures} restore failure(s)): ${error.message}`
+    )
 
     return {
       completed: false,
       cancelled: false,
       applied: [],
-      failed: { message: error.message || 'Apply failed.' },
-      rolledBack: true,
+      failed: {
+        message:
+          (error.message || 'Apply failed.') +
+          (rollbackFailures > 0
+            ? ` (${rollbackFailures} file(s) could not be restored; check the workspace.)`
+            : ''),
+      },
+      rolledBack: rollbackFailures === 0,
     }
   }
 
@@ -426,4 +482,5 @@ async function applyEdits(payload, options = {}) {
 module.exports = {
   planTask,
   applyEdits,
+  cancelPlan,
 }

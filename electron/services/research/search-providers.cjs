@@ -440,6 +440,12 @@ async function tavilySearch(query, { limit = 5, signal, fetchImpl = fetch, apiKe
       .filter(Boolean)
   } catch (error) {
     if (error && error.name === 'AbortError') {
+      // Caller cancellation and local timeouts share the abort
+      // signal: report which one actually fired.
+      if (signal && signal.aborted) {
+        throw new Error('Search was cancelled.')
+      }
+
       throw new Error('Search provider timed out.')
     }
 

@@ -13,6 +13,7 @@ interface KryomWorkspace {
 interface KryomAIMessage {
   role: 'user' | 'assistant'
   content: string
+  model?: string
 }
 
 interface KryomAIResponse {
@@ -314,6 +315,12 @@ interface KryomAPI {
     researchSessionId?: string
   }) => Promise<KryomAIResponse>
 
+  cancelAI: () => Promise<{ cancelled: boolean }>
+
+  saveChat: (messages: KryomAIMessage[]) => Promise<{ saved: boolean }>
+
+  restoreChat: () => Promise<{ messages: KryomAIMessage[]; restored: boolean }>
+
   closeWorkspace: () => Promise<{ success: boolean }>
 
   refreshWorkspace: () => Promise<KryomWorkspace>
@@ -359,6 +366,8 @@ interface KryomAPI {
     context?: string
     researchSessionId?: string
   }) => Promise<KryomAgentPlan>
+
+  cancelAgentPlan: () => Promise<{ cancelled: boolean }>
 
   applyAgentEdits: (payload: {
     edits: KryomAgentEdit[]

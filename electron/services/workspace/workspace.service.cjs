@@ -67,6 +67,29 @@ function isInsideWorkspace(targetPath) {
       !relative.startsWith(`..${path.sep}`))
 }
 
+// Scope check for directory walkers: true when the already-resolved
+// target stays inside the already-resolved scope root. Walkers use
+// this (after realpath) so junctions and reparse points — which
+// Dirent reports as plain directories — cannot pull outside content
+// into the tree, index, or search results.
+function isInsideScope(scopeRoot, targetPath) {
+  if (typeof scopeRoot !== 'string' || typeof targetPath !== 'string') {
+    return false
+  }
+
+  const relative =
+    process.platform === 'win32'
+      ? path.relative(scopeRoot.toLowerCase(), targetPath.toLowerCase())
+      : path.relative(scopeRoot, targetPath)
+
+  return (
+    relative === '' ||
+    (!path.isAbsolute(relative) &&
+      relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`))
+  )
+}
+
 // Case-insensitive on Windows, exact elsewhere. Compares two already
 // resolved absolute paths for identity (workspace-root targeting).
 function isSamePath(firstPath, secondPath) {
@@ -107,15 +130,26 @@ function isSameVolume(firstPath, secondPath) {
 async function buildTree(
   directoryPath = workspaceRoot,
   depth = 0,
-  counter = { count: 0 }
+  counter = { count: 0 },
+  scopeRoot = null
 ) {
   if (!directoryPath || depth > 8 || counter.count >= 2000) {
     return []
   }
 
-  const entries = await fs.readdir(directoryPath, {
-    withFileTypes: true,
-  })
+  const scope = scopeRoot ?? directoryPath
+
+  let entries = null
+
+  try {
+    entries = await fs.readdir(directoryPath, {
+      withFileTypes: true,
+    })
+  } catch {
+    // Unreadable directories are skipped, not fatal: one denied
+    // folder must not abort the whole workspace tree.
+    return []
+  }
 
   entries.sort((a, b) => {
     if (a.isDirectory() !== b.isDirectory()) {
@@ -132,16 +166,32 @@ async function buildTree(
     if (IGNORED.has(entry.name) || entry.isSymbolicLink()) continue
 
     const fullPath = path.join(directoryPath, entry.name)
-    counter.count++
 
     if (entry.isDirectory()) {
+      // Junctions and reparse points look like directories but can
+      // point anywhere (including cycles): descend only when the
+      // canonical path stays inside the tree being built.
+      let real = null
+
+      try {
+        real = await fs.realpath(fullPath)
+      } catch {
+        continue
+      }
+
+      if (!isInsideScope(scope, real)) {
+        continue
+      }
+
+      counter.count++
       result.push({
         name: entry.name,
         path: fullPath,
         type: 'directory',
-        children: await buildTree(fullPath, depth + 1, counter),
+        children: await buildTree(fullPath, depth + 1, counter, scope),
       })
     } else if (entry.isFile()) {
+      counter.count++
       result.push({
         name: entry.name,
         path: fullPath,
@@ -158,6 +208,7 @@ module.exports = {
   setWorkspaceRoot,
   closeWorkspace,
   isInsideWorkspace,
+  isInsideScope,
   isSamePath,
   isSameVolume,
   buildTree,

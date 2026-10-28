@@ -10,6 +10,9 @@ const {
   buildChildEnv,
 } = require('../terminal/terminal.service.cjs')
 const {
+  killProcessTree,
+} = require('../terminal/process-manager.cjs')
+const {
   assertNonEmptyString,
   assertStringArray,
   assertOptionalString,
@@ -28,11 +31,7 @@ const activeChildren = new Set()
 
 function killAllActiveProcesses() {
   for (const child of activeChildren) {
-    try {
-      child.kill()
-    } catch {
-      // Already exited.
-    }
+    killProcessTree(child)
   }
 
   activeChildren.clear()
@@ -71,7 +70,7 @@ function spawnGit(cwd, args, { timeoutMs = TIMEOUT_MS, extraEnv = {} } = {}) {
 
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill()
+      killProcessTree(child)
     }, timeoutMs)
 
     const cleanup = () => {

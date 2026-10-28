@@ -3,6 +3,7 @@ const path = require('node:path')
 
 const {
   getWorkspaceRoot,
+  isInsideScope,
 } = require('../workspace/workspace.service.cjs')
 const {
   analyzeDependencies,
@@ -74,6 +75,22 @@ async function collectIndex(directory, root, depth, index, counts) {
     const fullPath = path.join(directory, entry.name)
 
     if (entry.isDirectory()) {
+      // Junctions look like directories: descend only when the
+      // canonical path stays inside the indexed tree.
+      let real = null
+
+      try {
+        real = await fs.realpath(fullPath)
+      } catch {
+        counts.skipped += 1
+        continue
+      }
+
+      if (!isInsideScope(root, real)) {
+        counts.skipped += 1
+        continue
+      }
+
       counts.directories += 1
       await collectIndex(fullPath, root, depth + 1, index, counts)
     } else if (entry.isFile()) {

@@ -68,8 +68,20 @@ contextBridge.exposeInMainWorld('kryom', {
   askAI: (payload) =>
     ipcRenderer.invoke('ai:chat', payload),
 
+  cancelAI: () =>
+    ipcRenderer.invoke('ai:cancel'),
+
+  saveChat: (messages) =>
+    ipcRenderer.invoke('chat:save', { messages }),
+
+  restoreChat: () =>
+    ipcRenderer.invoke('chat:restore'),
+
   planAgentTask: (payload) =>
     ipcRenderer.invoke('agent:plan', payload),
+
+  cancelAgentPlan: () =>
+    ipcRenderer.invoke('agent:cancel'),
 
   applyAgentEdits: (payload) =>
     ipcRenderer.invoke('agent:apply', payload),

@@ -27,10 +27,11 @@ promised. Nothing under Planned should be treated as a commitment.
   Terminal/Output panel, status bar. No bottom dock.
 - Multi-file editor tabs with dirty tracking, save-conflict dialog,
   discard-changes confirmation, and keyboard navigation.
-- AI chat with history, code rendering, workspace context toggle,
-  model override, and key-setup guidance.
+- AI chat with persisted per-project history, stop/cancel, code
+  rendering, workspace context toggle, model override, and
+  key-setup guidance.
 - Agent panel with plan preview diffs, open-in-editor, full
-  previews, selective apply, and rollback.
+  previews, selective apply, planning cancel, and rollback.
 - Terminal (history, auto-scroll), Problems (Monaco markers), Git
   (unstage, discard), Search, and Settings UI wired to the bridge.
 - Research findings/evidence/decisions rendered with citations and
@@ -48,10 +49,11 @@ promised. Nothing under Planned should be treated as a commitment.
 
 - Live verification of the packaged app and both Meta models.
 - Streaming terminal and diagnostics output.
-- Mid-plan agent cancellation in the UI (needs an IPC cancel
-  path; the provider accepts an AbortSignal but nothing wires it).
-- Chat streaming, stop/cancel, and session persistence (needs new
-  provider and storage contracts; the provider is single-shot).
+- Chat streaming (needs provider SSE plus IPC push events; the
+  provider is single-shot).
+- Mid-apply agent cancellation (apply is local and completes in
+  milliseconds; planning cancel via `agent:cancel` is done).
+- Research session rename/delete (no product UI needs them yet).
 - Additional diagnostics parsers (ESLint output, more test runners).
 - macOS and Linux packaging.
 - Renderer unit tests.

@@ -9,6 +9,7 @@ const log = createLogger('research-fetch')
 const FETCH_TIMEOUT_MS = 15000
 const MAX_BYTES = 512 * 1024
 const MAX_EXCERPT_CHARS = 2000
+const MAX_DECLARED_BYTES = 8 * 1024 * 1024
 
 function isBlockedHost(hostname) {
   const host = String(hostname || '').toLowerCase().replace(/\.$/, '')
@@ -128,6 +129,63 @@ function extractTitle(html) {
   return match[1].replace(/\s+/g, ' ').trim().slice(0, 300)
 }
 
+// Reads at most MAX_BYTES from a response body, cancelling the
+// stream early. A huge response can never fill memory: only the
+// bounded prefix is kept.
+async function readBoundedBody(response) {
+  if (response.body && typeof response.body.getReader === 'function') {
+    const reader = response.body.getReader()
+    const chunks = []
+    let total = 0
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          break
+        }
+
+        if (!value || value.length === 0) {
+          continue
+        }
+
+        total += value.length
+
+        if (total > MAX_BYTES) {
+          const keep = value.length - (total - MAX_BYTES)
+
+          if (keep > 0) {
+            chunks.push(value.slice(0, keep))
+          }
+
+          try {
+            await reader.cancel()
+          } catch {
+            // Already closed; the prefix we kept is enough.
+          }
+
+          break
+        }
+
+        chunks.push(value)
+      }
+    } finally {
+      try {
+        reader.releaseLock()
+      } catch {
+        // Best effort on doubles without a real lock.
+      }
+    }
+
+    return Buffer.concat(chunks)
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer())
+
+  return buffer.length > MAX_BYTES ? buffer.slice(0, MAX_BYTES) : buffer
+}
+
 // Fetches one page and returns a bounded excerpt. Returns an object
 // with ok:false instead of throwing for HTTP-level failures so the
 // caller can record per-source access status honestly.
@@ -154,6 +212,17 @@ async function fetchExcerpt(rawUrl, { fetchImpl = fetch, signal, timeoutMs = FET
       redirect: 'follow',
     })
 
+    // Redirects are followed by fetch but never re-validated by it:
+    // a benign URL could land on a blocked destination. Re-check the
+    // final URL before reading anything.
+    if (response.url) {
+      try {
+        assertSafeUrl(response.url)
+      } catch (error) {
+        return { ok: false, url, accessStatus: 'blocked', excerpt: '', title: '', detail: error.message }
+      }
+    }
+
     if (response.status === 401 || response.status === 403 || response.status === 402) {
       return { ok: false, url, accessStatus: 'paywalled', excerpt: '', title: '', detail: `HTTP ${response.status}` }
     }
@@ -174,13 +243,21 @@ async function fetchExcerpt(rawUrl, { fetchImpl = fetch, signal, timeoutMs = FET
       return { ok: false, url, accessStatus: 'pdf-unparsed', excerpt: '', title: '', detail: 'PDF full text was not downloaded.' }
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer())
+    const declared = response.headers && typeof response.headers.get === 'function'
+      ? Number(response.headers.get('content-length'))
+      : NaN
 
-    if (buffer.length > MAX_BYTES) {
-      log.warn(`Truncated oversized page (${buffer.length} bytes).`)
+    if (Number.isFinite(declared) && declared > MAX_DECLARED_BYTES) {
+      return { ok: false, url, accessStatus: 'too-large', excerpt: '', title: '', detail: `Declared ${declared} bytes exceeds the read limit.` }
     }
 
-    const text = buffer.slice(0, MAX_BYTES).toString('utf8')
+    const buffer = await readBoundedBody(response)
+
+    if (buffer.length >= MAX_BYTES) {
+      log.warn(`Truncated oversized page at ${buffer.length} bytes.`)
+    }
+
+    const text = buffer.toString('utf8')
     const stripped = stripMarkup(text)
 
     if (!stripped) {

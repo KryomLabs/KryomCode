@@ -10,7 +10,7 @@ const {
 const {
   MockProvider,
 } = require('../ai/providers/mock.provider.cjs')
-const { planTask, applyEdits } = require('./agent.service.cjs')
+const { planTask, applyEdits, cancelPlan } = require('./agent.service.cjs')
 
 function useTestKey() {
   const saved = {
@@ -40,6 +40,26 @@ async function openWorkspace() {
 }
 
 describe('agent.service', () => {
+  it('aborts in-flight planning on cancel', async () => {
+    const restore = useTestKey()
+
+    try {
+      await openWorkspace()
+
+      assert.deepEqual(cancelPlan(), { cancelled: false })
+
+      const provider = new MockProvider({ delayMs: 5000 })
+      const run = planTask({ task: 'Do something.' }, { provider })
+
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      assert.deepEqual(cancelPlan(), { cancelled: true })
+      await assert.rejects(() => run, /cancelled/)
+      assert.deepEqual(cancelPlan(), { cancelled: false })
+    } finally {
+      restore()
+    }
+  })
+
   it('plans validated edits and returns commands unexecuted', async () => {
     const restore = useTestKey()
 

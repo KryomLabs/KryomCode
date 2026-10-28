@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { kryom, errorMessage } from '../api/kryom'
+import { kryom, errorMessage, isCancelError } from '../api/kryom'
 import { diffLines } from '../utils/diff'
 import { baseName } from '../utils/paths'
 import { useDialogs } from './dialogs'
@@ -145,10 +145,18 @@ export function AgentPanel(props: AgentPanelProps) {
 
       setOldContents(loaded)
     } catch (e) {
-      setError(errorMessage(e))
+      if (isCancelError(e)) {
+        props.onStatus('Planning cancelled')
+      } else {
+        setError(errorMessage(e))
+      }
     } finally {
       setPlanning(false)
     }
+  }
+
+  function stopPlanning() {
+    kryom().cancelAgentPlan().catch(() => undefined)
   }
 
   function toggleApproval(index: number) {
@@ -289,9 +297,15 @@ export function AgentPanel(props: AgentPanelProps) {
             />
             <div className="composer-footer">
               <span className="muted">{task.length}/4000</span>
-              <button type="submit" disabled={planning || applying || !task.trim()}>
-                {planning ? 'Planning…' : 'Plan task'}
-              </button>
+              {planning ? (
+                <button type="button" onClick={stopPlanning}>
+                  Stop
+                </button>
+              ) : (
+                <button type="submit" disabled={applying || !task.trim()}>
+                  Plan task
+                </button>
+              )}
             </div>
           </form>
 

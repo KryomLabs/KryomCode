@@ -8,6 +8,7 @@ const {
   unregisterProcess,
   listProcesses,
   killAllProcesses,
+  killProcessTree,
 } = require('./process-manager.cjs')
 const { classifyCommand } = require('./command-validator.cjs')
 const { isSecretKey } = require('../settings/secrets.service.cjs')
@@ -87,16 +88,16 @@ async function runCommand(command, options = {}) {
 
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill()
+      killProcessTree(child)
     }, TIMEOUT_MS)
 
     const onAbort = () => {
-      child.kill()
+      killProcessTree(child)
     }
 
     if (signal) {
       if (signal.aborted) {
-        child.kill()
+        killProcessTree(child)
       } else {
         signal.addEventListener('abort', onAbort, { once: true })
       }

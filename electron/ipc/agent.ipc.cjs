@@ -3,6 +3,7 @@ const { ipcMain } = require('electron')
 const {
   planTask,
   applyEdits,
+  cancelPlan,
 } = require('../services/agent/agent.service.cjs')
 const {
   assertPlainObject,
@@ -42,5 +43,13 @@ module.exports = function registerAgentIPC({
     assertPlainObject(payload, 'apply payload')
 
     return applyEdits({ edits: payload.edits })
+  })
+
+  ipcMain.handle('agent:cancel', async (event) => {
+    if (!isTrustedSender(event)) {
+      throw new Error('Unauthorized agent request.')
+    }
+
+    return cancelPlan()
   })
 }

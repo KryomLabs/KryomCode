@@ -1,0 +1,285 @@
+{
+  "id": "rs-mvsi843p-9gy8ii",
+  "version": 1,
+  "objective": "Research the official Meta AI documentation for the Llama models.\n\nTasks:\n\n1. Find relevant information about Meta's Llama models and their official documentation.\n2. Summarize the main findings in clear bullet points.\n3. Include source titles and URLs for the findings.\n4. Clearly distinguish verified source information from any assumptions.\n5. Do not modify project files or execute terminal commands.\n\nReturn the research findings with citations that can be opened and verified.",
+  "questions": [
+    "What is the current state of the art for: Research the official Meta AI documentation for the Llama models. Tasks: 1. Find relevant information about Meta's Llama models and their...?",
+    "What are the limitations and open problems for: Research the official Meta AI documentation for the Llama models. Tasks: 1. Find relevant information about Meta's Llama models and their...?",
+    "Which algorithms, architectures, or tools are used for: Research the official Meta AI documentation for the Llama models. Tasks: 1. Find relevant information about Meta's Llama models and their...?",
+    "How is progress evaluated (benchmarks, metrics) for: Research the official Meta AI documentation for the Llama models. Tasks: 1. Find relevant information about Meta's Llama models and their...?"
+  ],
+  "queries": [
+    {
+      "query": "Research the official Meta AI documentation for the Llama models.\n\nTasks:\n\n1. Find relevant information about Meta's Llama models and their official documentation.\n2. Summarize the main findings in clear bullet points.\n3. Include source titles and URLs for the findings.\n4. Clearly distinguish verifi",
+      "at": "2026-10-28T19:25:27.157Z"
+    },
+    {
+      "query": "Research the official Meta AI documentation for the Llama models. Tasks: 1. Find relevant information about Meta's Llama models and their...?",
+      "at": "2026-10-28T19:25:27.416Z"
+    },
+    {
+      "query": "Research the official Meta AI documentation for the Llama models.\n\nTasks:\n\n1. Find relevant information about Meta's Llama models and their official documentation.\n2. Summarize the main findings in clear bullet points.\n3. Include source titles and URLs for the findings.\n4. Clearly distinguish verifi",
+      "at": "2026-10-28T19:25:27.510Z"
+    },
+    {
+      "query": "Research the official Meta AI documentation for the Llama models. Tasks: 1. Find relevant information about Meta's Llama models and their...?",
+      "at": "2026-10-28T19:25:30.442Z"
+    }
+  ],
+  "steps": [
+    {
+      "id": "planning",
+      "label": "Planning research",
+      "status": "done",
+      "detail": "4 questions, 2 queries planned.",
+      "error": "",
+      "startedAt": "2026-10-28T19:25:27.150Z",
+      "finishedAt": "2026-10-28T19:25:27.153Z"
+    },
+    {
+      "id": "searching",
+      "label": "Searching the web",
+      "status": "done",
+      "detail": "0 web result(s) collected.",
+      "error": "",
+      "startedAt": "2026-10-28T19:25:27.155Z",
+      "finishedAt": "2026-10-28T19:25:27.499Z"
+    },
+    {
+      "id": "papers",
+      "label": "Finding scientific papers",
+      "status": "done",
+      "detail": "7 paper result(s) collected.",
+      "error": "",
+      "startedAt": "2026-10-28T19:25:27.503Z",
+      "finishedAt": "2026-10-28T19:25:32.293Z"
+    },
+    {
+      "id": "reading",
+      "label": "Reading available sources",
+      "status": "skipped",
+      "detail": "All sources already carry abstracts; no page reads needed.",
+      "error": "",
+      "startedAt": "2026-10-28T19:25:32.298Z",
+      "finishedAt": "2026-10-28T19:25:32.301Z"
+    },
+    {
+      "id": "comparing",
+      "label": "Comparing evidence",
+      "status": "done",
+      "detail": "Grouped 6 source(s): preprint x1, paper-open x5.",
+      "error": "",
+      "startedAt": "2026-10-28T19:25:32.304Z",
+      "finishedAt": "2026-10-28T19:25:32.309Z"
+    },
+    {
+      "id": "synthesizing",
+      "label": "Synthesizing findings",
+      "status": "done",
+      "detail": "Brief v1 synthesized (llm (muse-spark-1.3)).",
+      "error": "",
+      "startedAt": "2026-10-28T19:25:32.314Z",
+      "finishedAt": "2026-10-28T19:26:05.551Z"
+    },
+    {
+      "id": "brief",
+      "label": "Preparing the research brief",
+      "status": "done",
+      "detail": "Brief v1 saved with 6 source(s).",
+      "error": "",
+      "startedAt": "2026-10-28T19:26:05.556Z",
+      "finishedAt": "2026-10-28T19:26:05.588Z"
+    }
+  ],
+  "sources": [
+    {
+      "provider": "arxiv",
+      "title": "The JRC-Acquis: A multilingual aligned parallel corpus with 20+ languages",
+      "url": "http://arxiv.org/abs/cs/0609058v1",
+      "authors": [
+        "Ralf Steinberger",
+        "Bruno Pouliquen",
+        "Anna Widiger",
+        "Camelia Ignat",
+        "Tomaz Erjavec",
+        "Dan Tufis",
+        "Daniel Varga"
+      ],
+      "publishedAt": "2006-09-12",
+      "abstract": "We present a new, unique and freely available parallel corpus containing European Union (EU) documents of mostly legal nature. It is available in all 20 official EUanguages, with additional documents being available in the languages of the EU candidate countries. The corpus consists of almost 8,000 documents per language, with an average size of nearly 9 million words per language. Pair-wise paragraph alignment information produced by two different aligners (Vanilla and HunAlign) is available for all 190+ language pair combinations. Most texts have been manually classified according to the EUROVOC subject domains so that the collection can also be used to train and test multi-label classification algorithms and keyword-assignment software. The corpus is encoded in XML, according to the Text Encoding Initiative Guidelines. Due to the large number of parallel texts in many languages, the JRC-Acquis is particularly suitable to carry out all types of cross-language research, as well as to test and benchmark text analysis software across different languages (for instance for alignment, sentence splitting and term extraction).",
+      "venue": "arXiv",
+      "doi": null,
+      "sourceType": "preprint",
+      "accessStatus": "open",
+      "excerpt": ""
+    },
+    {
+      "provider": "openalex",
+      "title": "The Llama 3 Herd of Models",
+      "url": "https://arxiv.org/abs/2407.21783",
+      "authors": [
+        "Grattafiori, Aaron",
+        "Abhimanyu Dubey",
+        "Jauhri, Abhinav",
+        "Pandey, Abhinav",
+        "Kadian, Abhishek",
+        "Al-Dahle, Ahmad",
+        "Letman, Aiesha",
+        "Akhil Mathur"
+      ],
+      "publishedAt": "2024-07-31",
+      "abstract": "Modern artificial intelligence (AI) systems are powered by foundation models. This paper presents a new set of foundation models, called Llama 3. It is a herd of language models that natively support multilinguality, coding, reasoning, and tool usage. Our largest model is a dense Transformer with 405B parameters and a context window of up to 128K tokens. This paper presents an extensive empirical evaluation of Llama 3. We find that Llama 3 delivers comparable quality to leading language models such as GPT-4 on a plethora of tasks. We publicly release Llama 3, including pre-trained and post-trained versions of the 405B parameter language model and our Llama Guard 3 model for input and output safety. The paper also presents the results of experiments in which we integrate image, video, and speech capabilities into Llama 3 via a compositional approach. We observe this approach performs competitively with the state-of-the-art on image, video, and speech recognition tasks. The resulting models are not yet being broadly released as they are still under development.",
+      "venue": "arXiv (Cornell University)",
+      "doi": "10.48550/arxiv.2407.21783",
+      "sourceType": "paper-open",
+      "accessStatus": "open",
+      "excerpt": ""
+    },
+    {
+      "provider": "openalex",
+      "title": "The Llama 3 herd of models",
+      "url": "https://hal.science/hal-05414211",
+      "authors": [
+        "Grattafiori, Aaron",
+        "Abhimanyu Dubey",
+        "Jauhri, Abhinav",
+        "Pandey, Abhinav",
+        "Kadian, Abhishek",
+        "Al-Dahle, Ahmad",
+        "Letman, Aiesha",
+        "Akhil Mathur"
+      ],
+      "publishedAt": "2025-12-26",
+      "abstract": "Modern artificial intelligence (AI) systems are powered by foundation models. This paper presents a new set of foundation models, called Llama 3. It is a herd of language models that natively support multilinguality, coding, reasoning, and tool usage. Our largest model is a dense Transformer with 405B parameters and a context window of up to 128K tokens. This paper presents an extensive empirical evaluation of Llama 3. We find that Llama 3 delivers comparable quality to leading language models such as GPT-4 on a plethora of tasks. We publicly release Llama 3, including pre-trained and post-trained versions of the 405B parameter language model and our Llama Guard 3 model for input and output safety. The paper also presents the results of experiments in which we integrate image, video, and speech capabilities into Llama 3 via a compositional approach. We observe this approach performs competitively with the state-of-the-art on image, video, and speech recognition tasks. The resulting models are not yet being broadly released as they are still under development.",
+      "venue": "HAL",
+      "doi": null,
+      "sourceType": "paper-open",
+      "accessStatus": "open",
+      "excerpt": ""
+    },
+    {
+      "provider": "openalex",
+      "title": "Galactica’s dis-assemblage: Meta’s beta and the omega of post-human science",
+      "url": "https://doi.org/10.1007/s00146-024-02088-7",
+      "authors": [
+        "Nicolas Chartier-Edwards",
+        "Étienne Grenier",
+        "Valentin Goujon"
+      ],
+      "publishedAt": "2024-10-01",
+      "abstract": "Abstract Released mid-November 2022, Galactica is a set of six large language models (LLMs) of different sizes (from 125 M to 120B parameters) designed by Meta AI to achieve the ultimate ambition of “a single neural network for powering scientific tasks”, according to its accompanying whitepaper. It aims to carry out knowledge-intensive tasks, such as publication summarization, information ordering and protein annotation. However, just a few days after the release, Meta had to pull back the demo due to the strong hallucinatory tendencies or underwhelming performances of the model. This article aims to study, through a critical threefold argument, the potential impacts of LLMs once deployed in the scientific value chain. Our first argument is a technical one. By examining the technicity of Galactica, it is possible to explain the descripancies between its promotional corporate discourse and abysmal outputs. Second, by going back to debates in both computer science and computational philosophy on the automation of abduction, we argue from the epistemological front that LLMs indeed cannot produce strong abductions and, therefore, claims about the automation of hypothesis generation remains chambering. Finally, our third argument is a sociological one. By conceptualizing the scientific field through Nancy Katherine Hayles’ cognitive assemblage theory, we aim to outline the potential steering of science by LLMs, mainly through information ordering. The core of our argument rests on the assertion that excessive control on information risks contravening a certain serendipitous aspect inherent to scientific discoveries.",
+      "venue": "AI & Society",
+      "doi": "10.1007/s00146-024-02088-7",
+      "sourceType": "paper-open",
+      "accessStatus": "open",
+      "excerpt": ""
+    },
+    {
+      "provider": "openalex",
+      "title": "Balancing Algorithmic Safety and Fundamental Rights: General-Purpose AI Guardrails under EU Law and the Case of Llama Guard",
+      "url": "https://etd.adm.unipi.it/theses/available/etd-08172026-130338/",
+      "authors": [
+        "SARA CERISE"
+      ],
+      "publishedAt": "2026-09-09",
+      "abstract": "The rapid proliferation of General-Purpose Artificial Intelligence (GPAI) models has prompted supranational regulatory interventions, most notably the European Union’s (EU) 2024 Artificial Intelligence Act (AI Act). Under Chapter V of the AI Act, providers of systemic-risk GPAI models must conduct model evaluations, adversarial testing, and risk mitigation. To demonstrate compliance with these stringent requirements, under threat of severe administrative fines, the AI industry has widely adopted automated, runtime safety classifiers known as \"guardrails\" to filter both user inputs and model outputs. This thesis investigates the constitutional and technical tensions arising from the deployment of these automated guardrails. While designed to mitigate risks such as toxicity, illegal activities, and privacy violations, their implementation creates a structural asymmetry. To avoid liability, providers are incentivised to optimise classifiers with a highly conservative threshold calibration. This configuration causes systematic \"over-blocking\" (or over-refusal) of legitimate, benign queries touching on sensitive subjects, directly interfering with the right to freedom to receive information under Article 11 of the Charter of Fundamental Rights of the European Union (CFREU). Furthermore, the lack of dedicated, binding redress mechanisms in the AI Act for users affected by automated over-blocking creates a critical due process gap under the right to an effective remedy, established by Article 47 CFREU. To contextualise this tension, this work conducts an interdisciplinary review of regulatory and technical literature. It evaluates the limitations of existing European frameworks alongside a technical deep dive into the state-of-the-art of AI safety classifiers. More specifically, the Meta Llama Guard family of open-weight safety models will be presented as a vertical case study, offering an analysis of the architecture, taxonomy, and vulnerabilities. The analysis concludes by identifying the intersection points between the technical and the legal sides in the balance between algorithmic safety and fundamental rights protection within the EU borders, outlining key open challenges for the future of the discipline.",
+      "venue": "Electronic Theses and Dissertations Repository (University of Pisa)",
+      "doi": null,
+      "sourceType": "paper-open",
+      "accessStatus": "open",
+      "excerpt": ""
+    },
+    {
+      "provider": "openalex",
+      "title": "Leveraging Generative AI and Large Language Models: A Comprehensive Roadmap for Healthcare Integration",
+      "url": "https://doi.org/10.3390/healthcare11202776",
+      "authors": [
+        "Ping Yu",
+        "Hua Xu",
+        "Xia Hu",
+        "Chao Deng"
+      ],
+      "publishedAt": "2023-10-20",
+      "abstract": "Generative artificial intelligence (AI) and large language models (LLMs), exemplified by ChatGPT, are promising for revolutionizing data and information management in healthcare and medicine. However, there is scant literature guiding their integration for non-AI professionals. This study conducts a scoping literature review to address the critical need for guidance on integrating generative AI and LLMs into healthcare and medical practices. It elucidates the distinct mechanisms underpinning these technologies, such as Reinforcement Learning from Human Feedback (RLFH), including few-shot learning and chain-of-thought reasoning, which differentiates them from traditional, rule-based AI systems. It requires an inclusive, collaborative co-design process that engages all pertinent stakeholders, including clinicians and consumers, to achieve these benefits. Although global research is examining both opportunities and challenges, including ethical and legal dimensions, LLMs offer promising advancements in healthcare by enhancing data management, information retrieval, and decision-making processes. Continued innovation in data acquisition, model fine-tuning, prompt strategy development, evaluation, and system implementation is imperative for realizing the full potential of these technologies. Organizations should proactively engage with these technologies to improve healthcare quality, safety, and efficiency, adhering to ethical and legal guidelines for responsible application.",
+      "venue": "Healthcare",
+      "doi": "10.3390/healthcare11202776",
+      "sourceType": "paper-open",
+      "accessStatus": "open",
+      "excerpt": ""
+    }
+  ],
+  "evidence": [],
+  "findings": [
+    {
+      "claim": "We present a new, unique and freely available parallel corpus containing European Union (EU) documents of mostly legal nature. It is available in all 20 official EUanguages, with additional documents being available in the languages of the EU candidate countries. The corpus consi...",
+      "sourceIndexes": [
+        1
+      ],
+      "confidence": "medium",
+      "note": "Single-source excerpt; corroboration required."
+    },
+    {
+      "claim": "Modern artificial intelligence (AI) systems are powered by foundation models. This paper presents a new set of foundation models, called Llama 3. It is a herd of language models that natively support multilinguality, coding, reasoning, and tool usage. Our largest model is a dense...",
+      "sourceIndexes": [
+        2
+      ],
+      "confidence": "medium",
+      "note": "Single-source excerpt; corroboration required."
+    },
+    {
+      "claim": "Modern artificial intelligence (AI) systems are powered by foundation models. This paper presents a new set of foundation models, called Llama 3. It is a herd of language models that natively support multilinguality, coding, reasoning, and tool usage. Our largest model is a dense...",
+      "sourceIndexes": [
+        3
+      ],
+      "confidence": "medium",
+      "note": "Single-source excerpt; corroboration required."
+    },
+    {
+      "claim": "Abstract Released mid-November 2022, Galactica is a set of six large language models (LLMs) of different sizes (from 125 M to 120B parameters) designed by Meta AI to achieve the ultimate ambition of “a single neural network for powering scientific tasks”, according to its accompa...",
+      "sourceIndexes": [
+        4
+      ],
+      "confidence": "medium",
+      "note": "Single-source excerpt; corroboration required."
+    },
+    {
+      "claim": "The rapid proliferation of General-Purpose Artificial Intelligence (GPAI) models has prompted supranational regulatory interventions, most notably the European Union’s (EU) 2024 Artificial Intelligence Act (AI Act). Under Chapter V of the AI Act, providers of systemic-risk GPAI m...",
+      "sourceIndexes": [
+        5
+      ],
+      "confidence": "medium",
+      "note": "Single-source excerpt; corroboration required."
+    },
+    {
+      "claim": "Generative artificial intelligence (AI) and large language models (LLMs), exemplified by ChatGPT, are promising for revolutionizing data and information management in healthcare and medicine. However, there is scant literature guiding their integration for non-AI professionals. T...",
+      "sourceIndexes": [
+        6
+      ],
+      "confidence": "medium",
+      "note": "Single-source excerpt; corroboration required."
+    }
+  ],
+  "decisions": [
+    {
+      "text": "Brief v1 generated via llm (muse-spark-1.3); approach selection left to user review.",
+      "at": "2026-10-28T19:26:05.551Z"
+    }
+  ],
+  "brief": {
+    "version": 1,
+    "markdown": "## Problem statement\n\n- The requested objective was to research the **official Meta AI documentation for the Llama models** using **only** sources [1]–[6].\n- **No source in the provided set is an official Meta AI documentation page**, based on the titles, venues, and abstracts provided [1][2][3][4][5][6].\n- Therefore, findings below are limited to what secondary or adjacent sources state about Llama models, and **official-documentation questions cannot be answered from this evidence alone** [1][2][3][4][5][6].\n\n## Evidence-backed findings\n\n### What the sources actually contain about Llama / Meta models\n\n- Sources [2] and [3] present the same paper, **“The Llama 3 Herd of Models”**, hosted on arXiv and HAL respectively [2][3].\n- The paper describes Llama 3 as **“a herd of language models that natively support multilinguality, coding, reasoning, and tool usage”** [2][3].\n- The largest Llama 3 model is described as **“a dense Transformer with 405B parameters and a context window of up to 128K tokens”** [2][3].\n- The authors state that they **“publicly release Llama 3, including pre-trained and post-trained versions of the 405B parameter language model and our Llama Guard 3 model for input and output safety”** [2][3].\n- The authors report that **“Llama 3 delivers comparable quality to leading language models such as GPT-4 on a plethora of tasks”** following **“an extensive empirical evaluation”** [2][3].\n- The authors describe experiments integrating **image, video, and speech capabilities into Llama 3 via a compositional approach**, and state that they **“observe this approach performs competitively with the state-of-the-art on image, video, and speech recognition tasks”** [2][3].\n- The same abstracts state that the resulting multimodal models **“are not yet being broadly released as they are still under development”** [2][3].\n\n### Safety guardrails and Llama Guard\n\n- Source [5], a thesis titled **“Balancing Algorithmic Safety and Fundamental Rights: General-Purpose AI Guardrails under EU Law and the Case of Llama Guard”**, examines automated runtime safety classifiers called **“guardrails”** used to filter user inputs and model outputs [5].\n- The thesis states that under **Chapter V of the EU’s 2024 Artificial Intelligence Act**, providers of systemic-risk general-purpose AI models must conduct **model evaluations, adversarial testing, and risk mitigation** [5].\n- The thesis argues that industry has widely adopted guardrails to demonstrate compliance under threat of severe administrative fines [5].\n- The thesis advances the hypothesis that providers are incentivised to use highly conservative threshold calibration, causing systematic **“over-blocking” or over-refusal of legitimate benign queries** and interfering with freedom to receive information under Article 11 of the Charter of Fundamental Rights of the European Union [5].\n- The thesis further argues that the lack of dedicated binding redress mechanisms for users affected by over-blocking creates a due-process gap under the right to an effective remedy [5].\n\n### Other Meta AI model mentioned: Galactica\n\n- Source [4], **“Galactica’s dis-assemblage: Meta’s beta and the omega of post-human science,”** states that **Galactica was released mid-November 2022 as six large language models from 125M to 120B parameters designed by Meta AI** [4].\n- The stated ambition was **“a single neural network for powering scientific tasks,”** including publication summarization, information ordering, and protein annotation [4].\n- The article states that Meta pulled back the demo just days after release due to strong hallucinatory tendencies or underwhelming performance [4].\n- The article offers a critical threefold technical, epistemological, and sociological argument, including claims that LLMs cannot produce strong abductions and that automation of hypothesis generation remains unachieved, and that LLMs may steer science mainly through information ordering [4].\n\n### Sources with no Llama-specific evidence\n\n- Source [1], **“The JRC-Acquis: A multilingual aligned parallel corpus with 20+ languages,”** describes an EU legal parallel corpus with almost 8,000 documents per language and nearly 9 million words per language, with pairwise paragraph alignment by Vanilla and HunAlign for 190+ language pairs [1].\n- Source [1] states the corpus is encoded in XML under Text Encoding Initiative Guidelines and classified by EUROVOC domains for training and testing multi-label classification and keyword-assignment software [1].\n- Source [1] states the corpus is suitable for cross-language research and benchmarking text-analysis software for alignment, sentence splitting, and term extraction [1].\n- Source [1] contains **no Llama-specific information in the provided abstract** [1].\n- Source [6], **“Leveraging Generative AI and Large Language Models: A Comprehensive Roadmap for Healthcare Integration,”** is a scoping review about generative AI and LLMs exemplified by ChatGPT for healthcare data and information management [6].\n- Source [6] mentions mechanisms including Reinforcement Learning from Human Feedback, few-shot learning, and chain-of-thought reasoning as differentiating these technologies from traditional rule-based AI systems [6].\n- Source [6] contains **no Llama-specific or Meta AI documentation information in the provided abstract** [6].\n\n**Verified vs. assumed:** All bullets above citing [2][3][4][5] are verified only as *what those sources claim*, not as independently confirmed technical facts [2][3][4][5]. Any inference that [2] or [3] constitutes official Meta AI documentation would be an assumption and is **not supported** by the source metadata provided [2][3].\n\n## Comparison and confidence\n\n- **High textual agreement, low independence:** Sources [2] and [3] contain substantially identical abstracts despite different repositories and dates, 2024-07-31 on arXiv and 2025-12-26 on HAL [2][3].\n- **Author-reported results vs. established results:** The claims that Llama 3 matches GPT-4 quality and that compositional multimodal integration is competitive with state-of-the-art are presented as the paper’s own empirical findings and observations [2][3]. Without methods, benchmarks, or data in the provided excerpts, they should be treated as **unverified author claims**, not established results [2][3].\n- **Different models, different outcomes:** The positive Llama 3 performance claims [2][3] contrast with the reported Galactica withdrawal for hallucinations and poor performance [4]. This is **not a direct contradiction** because they concern different Meta AI models released at different times [2][3][4].\n- **Interpretive vs. empirical:** Source [4] is a critical humanities/social-science analysis advancing technical, epistemological, and sociological arguments [4]. Source [5] is a legal-technical thesis advancing constitutional and calibration arguments about guardrails [5]. Both should be treated as **hypotheses/arguments**, not as benchmarked technical measurements [4][5].\n- **Confidence assessment:**\n  - High confidence that sources [2][3] describe Llama 3 as 405B dense Transformer with 128K context and Llama Guard 3 release, because both sources state it identically [2][3].\n  - Low confidence on state-of-the-art status, limitations, architectures, tools, and evaluation metrics for Llama, because the excerpts provide no benchmark names, scores, training details, or official documentation URLs [2][3].\n  - Very low confidence on official Meta AI documentation content, because **no official documentation source was provided** [1][2][3][4][5][6].\n\n## Research gaps and recommendations\n\n- **Gap: No official documentation:** The set lacks Meta AI model cards, API docs, license/use policies, system requirements, or official download pages [1][2][3][4][5][6].\n- **Recommendation: Do not substitute arXiv/HAL papers for official docs:** Treat [2][3] as research papers describing Llama 3, not as authoritative usage or deployment documentation [2][3].\n- **Gap: No evaluation details:** Sources [2][3] mention extensive empirical evaluation but provide no benchmark names, metrics, datasets, or scores in the excerpts [2][3].\n- **Recommendation: Retrieve full evaluation sections before making benchmark claims**, rather than inferring them from the abstract-level quality comparison to GPT-4 [2][3].\n- **Gap: No architecture/tool details beyond high level:** Only “dense Transformer,” “compositional approach,” and “Llama Guard 3 for input and output safety” are named, without hyperparameters, training procedures, inference tools, or code [2][3].\n- **Gap: Safety evidence is thesis-based:** Over-blocking and rights impacts are thesis arguments about guardrails including Llama Guard, not measured Llama Guard error rates in the excerpt [5].\n- **Recommendation: Seek primary Llama Guard evaluations, threshold settings, and redress procedures** before concluding on limitations [5].\n- **Gap: Unrelated sources:** Sources [1] and [6] address parallel corpora and healthcare LLM integration generally and cannot fill Llama documentation gaps [1][6].\n\n## Implementation tasks (ordered)\n\n1. **Label the current evidence boundary:** Record that official Meta AI Llama documentation was not found in sources [1]–[6] and restrict claims to paper/thesis/article summaries [1][2][3][4][5][6].\n2. **Extract only directly supported Llama 3 attributes:** multilinguality, coding, reasoning, tool usage; 405B dense Transformer; 128K context; pre-trained and post-trained releases; Llama Guard 3 for input/output safety [2][3].\n3. **Separate author claims from verified facts:** Mark GPT-4 comparability and competitive multimodal recognition performance as reported observations requiring full-paper verification [2][3].\n4. **Document adjacent risk signals separately:** Record Galactica hallucination/withdrawal history [4] and guardrail over-blocking/redress-gap hypothesis [5] as context, not as proven Llama 3 limitations [4][5].\n5. **Avoid using unrelated corpora/healthcare findings as Llama evidence:** Keep JRC-Acquis alignment and healthcare LLM roadmap findings isolated from Llama conclusions [1][6].\n6. **Plan primary-source retrieval as future work:** Obtain official Meta AI documentation URLs, model cards, licenses, and full Llama 3 evaluation tables before implementation decisions [2][3][5].\n\n## Test strategy and acceptance criteria\n\n- **No testable benchmarks can be derived from the excerpts:** Sources [2][3] do not list benchmark names, metrics, baselines, or scores beyond the general GPT-4 comparison [2][3].\n- **Proposed verification strategy, constrained by thin evidence:**\n  - Acceptance requires opening and verifying each cited URL in the Sources list [1][2][3][4][5][6].\n  - Acceptance requires confirming duplicate status of [2] and [3] by comparing titles and abstracts [2][3].\n  - Acceptance requires confirming absence of official Meta AI documentation URLs in the provided set [1][2][3][4][5][6].\n- **Acceptance criteria for any future Llama claim:**\n  - Must cite primary official documentation or full paper sections with explicit metrics, not abstract-level comparability statements [2][3].\n  - Safety claims about Llama Guard must distinguish measured refusal/block rates from the thesis’s legal-technical over-blocking hypothesis [5].\n  - Multimodal claims must note the authors’ own caveat that those models were still under development and not broadly released [2][3].\n- **Evaluation-metric note:** General text-analysis benchmarking uses tasks such as alignment, sentence splitting, and term extraction in source [1], but source [1] does **not** establish these as Llama evaluation metrics [1].\n\n## Limitations and unresolved questions\n\n- **Fundamental limitation:** The research objective cannot be fulfilled from these sources alone because official Meta AI Llama documentation is missing [1][2][3][4][5][6].\n- **Thin evidence:** Architecture is reduced to “dense Transformer,” tools to “Llama Guard 3” and “compositional approach,” and evaluation to “extensive empirical evaluation” without details [2][3].\n- **Unresolved:** Current state-of-the-art standing of Llama relative to GPT-4 or other models cannot be determined beyond the authors’ 2024 claim [2][3].\n- **Unresolved:** Specific Llama limitations, failure modes, hallucination rates, bias, safety incidents, and open problems are not quantified in the provided Llama excerpts [2][3].\n- **Unresolved:** Whether Llama Guard over-blocking occurs at a specific rate, and what remedies exist, remains a thesis argument rather than a measured result in the excerpt [5].\n- **Unresolved:** Whether Galactica lessons apply to Llama 3 is not addressed by the sources and should not be assumed [2][3][4].\n- **Uncertainty:** The future-dated HAL record [3] shares the same abstract as the 2024 arXiv record [2]; the reason for duplication or updating is not explained in the provided metadata [2][3].\n\n## Sources\n\n[1] The JRC-Acquis: A multilingual aligned parallel corpus with 20+ languages — Ralf Steinberger, Bruno Pouliquen, Anna Widiger, Camelia Ignat, Tomaz Erjavec, Dan Tufis, Daniel Varga 2006-09-12 arXiv — http://arxiv.org/abs/cs/0609058v1  \n[2] The Llama 3 Herd of Models — Grattafiori, Aaron, Abhimanyu Dubey, Jauhri, Abhinav, Pandey, Abhinav, Kadian, Abhishek, Al-Dahle, Ahmad, Letman, Aiesha, Akhil Mathur 2024-07-31 arXiv (Cornell University) — https://arxiv.org/abs/2407.21783  \n[3] The Llama 3 herd of models — Grattafiori, Aaron, Abhimanyu Dubey, Jauhri, Abhinav, Pandey, Abhinav, Kadian, Abhishek, Al-Dahle, Ahmad, Letman, Aiesha, Akhil Mathur 2025-12-26 HAL — https://hal.science/hal-05414211  \n[4] Galactica’s dis-assemblage: Meta’s beta and the omega of post-human science — Nicolas Chartier-Edwards, Étienne Grenier, Valentin Goujon 2024-10-01 AI & Society — https://doi.org/10.1007/s00146-024-02088-7  \n[5] Balancing Algorithmic Safety and Fundamental Rights: General-Purpose AI Guardrails under EU Law and the Case of Llama Guard — SARA CERISE 2026-09-09 Electronic Theses and Dissertations Repository (University of Pisa) — https://etd.adm.unipi.it/theses/available/etd-08172026-130338/  \n[6] Leveraging Generative AI and Large Language Models: A Comprehensive Roadmap for Healthcare Integration — Ping Yu, Hua Xu, Xia Hu, Chao Deng 2023-10-20 Healthcare — https://doi.org/10.3390/healthcare11202776",
+    "generatedAt": "2026-10-28T19:26:05.551Z",
+    "via": "llm (muse-spark-1.3)"
+  },
+  "implementationTasks": [
+    "Reproduce the baseline from the cited sources.",
+    "Implement the smallest viable approach behind a flag.",
+    "Add tests with measurable acceptance criteria."
+  ],
+  "verification": [],
+  "errors": [],
+  "status": "completed",
+  "statusDetail": "Research completed with 6 source(s).",
+  "createdAt": "2026-10-28T19:25:27.109Z",
+  "updatedAt": "2026-10-28T19:26:05.588Z"
+}

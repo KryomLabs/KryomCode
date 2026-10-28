@@ -446,12 +446,19 @@ export function ResearchPanel(props: ResearchPanelProps) {
                   </p>
                 ) : (
                   session.findings.map((finding, index) => {
+                    // Backend citations are 1-based: sources[n - 1].
+                    // Non-numeric or out-of-range entries render as
+                    // unavailable instead of resolving wrongly.
                     const cited = finding.sourceIndexes
                       .map((sourceIndex) => {
-                        const source = session.sources[sourceIndex]
+                        const source =
+                          typeof sourceIndex === 'number' &&
+                          Number.isInteger(sourceIndex)
+                            ? session.sources[sourceIndex - 1]
+                            : undefined
 
                         return source
-                          ? `[${sourceIndex + 1}] ${source.title}`
+                          ? `[${sourceIndex}] ${source.title}`
                           : null
                       })
                       .filter((entry): entry is string => entry !== null)

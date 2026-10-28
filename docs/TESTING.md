@@ -75,6 +75,12 @@ works:
    them, and rerunning or switching projects clears stale markers.
 9. A research source Open button launches the system browser; chat
    code blocks render with working Copy buttons.
+10. Chat Stop aborts a slow request with a "cancelled" status (no
+    error box); planning Stop does the same for the agent.
+11. Chat history survives a restart per project; switching projects
+    shows each project's own conversation.
+12. Cancelling or timing out a long terminal command leaves no
+    orphan processes (check the task manager for grandchildren).
 
 Record completed manual checks in
 [backend-limitations.md](backend-limitations.md) with the date.

@@ -64,6 +64,36 @@ found no hardcoded keys (only `test-key` fixtures and env plumbing).
 machine. Verify whether that is intentional (dotfiles) or a stray init:
 every folder currently reports git membership through ancestor discovery.
 
+## Backend audit sprint (2026-10-28, uncommitted, headless)
+
+Implemented without runtime verification (no shell: `npm test`,
+`check:syntax`, and `build` could not run here): fixed a
+citation-index off-by-one in findings rendering (backend indexes
+are 1-based); bounded research page reads (streaming cap,
+content-length guard, redirect re-validation); Windows
+process-tree kill for terminal/Git timeouts and cancels
+(`taskkill /T /F` with fallback); junction/scope guards plus
+unreadable-directory tolerance in tree, search, and index
+walkers; Tavily cancel/timeout message parity; honest agent
+rollback reporting; real `ai:cancel` / `agent:cancel` abort
+paths with Stop buttons; per-project chat persistence
+(`.kryom/chat.json`, sanitized, corrupt-safe). New unit
+coverage: url-fetch suite, chat-store suite, kill-tree tests,
+scope-guard tests, cancel tests, MockProvider abort support.
+Still manual-only: TESTING.md checks 1–12.
+
+Known residual risks: DNS-rebinding SSRF (literal-IP blocking
+only, no lookup pinning); TOCTOU between path validation and
+use (accepted for a local single-user IDE); chat save/restore
+micro-race when switching projects mid-send (one message may
+land in the wrong project's history).
+
+Deferred (documented, not implemented): chat streaming (needs
+provider SSE plus IPC push events); research session
+rename/delete (no product UI needs them); per-window workspace
+isolation (New Window stays disabled); mid-apply agent cancel
+(apply is local and completes in milliseconds).
+
 ## UI/UX maturity sprint (2026-10-28, uncommitted)
 
 Implemented but not yet runtime-verified in this headless session (no

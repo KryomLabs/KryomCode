@@ -1,7 +1,7 @@
 const { describe, it } = require('node:test')
 const assert = require('node:assert/strict')
 
-const { chat } = require('./ai.service.cjs')
+const { chat, cancelChat } = require('./ai.service.cjs')
 const { MockProvider } = require('./providers/mock.provider.cjs')
 
 function useTestKey() {
@@ -49,6 +49,24 @@ describe('ai.service', () => {
       } else {
         process.env.MODEL_API_KEY = saved
       }
+    }
+  })
+
+  it('aborts the in-flight provider request on cancel', async () => {
+    const restore = useTestKey()
+
+    try {
+      assert.deepEqual(cancelChat(), { cancelled: false })
+
+      const provider = new MockProvider({ delayMs: 5000 })
+      const run = chat({ prompt: 'hi' }, { provider })
+
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      assert.deepEqual(cancelChat(), { cancelled: true })
+      await assert.rejects(() => run, /cancelled/)
+      assert.deepEqual(cancelChat(), { cancelled: false })
+    } finally {
+      restore()
     }
   })
 

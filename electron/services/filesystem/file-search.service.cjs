@@ -3,6 +3,7 @@ const path = require('node:path')
 
 const {
   getWorkspaceRoot,
+  isInsideScope,
 } = require('../workspace/workspace.service.cjs')
 
 const IGNORED = new Set([
@@ -27,10 +28,12 @@ function isIgnored(name) {
   )
 }
 
-async function collectFiles(directory, depth, files) {
+async function collectFiles(directory, depth, files, scope = null) {
   if (depth > MAX_DEPTH || files.length >= MAX_FILES) {
     return
   }
+
+  const root = scope ?? directory
 
   let entries = []
 
@@ -52,7 +55,21 @@ async function collectFiles(directory, depth, files) {
     const fullPath = path.join(directory, entry.name)
 
     if (entry.isDirectory()) {
-      await collectFiles(fullPath, depth + 1, files)
+      // Junctions look like directories: descend only when the
+      // canonical path stays inside the searched tree.
+      let real = null
+
+      try {
+        real = await fs.realpath(fullPath)
+      } catch {
+        continue
+      }
+
+      if (!isInsideScope(root, real)) {
+        continue
+      }
+
+      await collectFiles(fullPath, depth + 1, files, root)
     } else if (entry.isFile()) {
       files.push(fullPath)
     }
