@@ -21,6 +21,7 @@ import { SearchPanel } from '../components/SearchPanel'
 import { EditorPanel, type EditorApi } from '../components/EditorPanel'
 import { AiChat } from '../components/AiChat'
 import { AgentPanel } from '../components/AgentPanel'
+import { ResearchPanel } from '../components/ResearchPanel'
 import {
   TerminalPanelView,
   useTerminalController,
@@ -31,7 +32,7 @@ import { SettingsModal } from '../components/SettingsModal'
 import { WelcomePage } from '../components/WelcomePage'
 
 type LeftTab = 'explorer' | 'search'
-type BottomTab = 'terminal' | 'problems' | 'git' | 'ai' | 'agent'
+type BottomTab = 'terminal' | 'problems' | 'git' | 'research' | 'ai' | 'agent'
 
 const FALLBACK_SETTINGS: KryomSettings = {
   defaultModel: 'muse-spark-1.3',
@@ -130,7 +131,9 @@ function AppShell() {
   const [welcomeAgentTask, setWelcomeAgentTask] = useState<{
     text: string
     nonce: number
+    researchSessionId?: string
   } | null>(null)
+  const [chatResearchId, setChatResearchId] = useState<string | null>(null)
   const welcomeNonce = useRef(0)
   const editorApi = useRef<EditorApi | null>(null)
 
@@ -717,6 +720,29 @@ function AppShell() {
     setStatus('Agent task started — planning… Terminal open for commands.')
   }
 
+  function handleResearchImplement(session: KryomResearchSession) {
+    welcomeNonce.current += 1
+    setWelcomeAgentTask({
+      text:
+        `Implement from research brief (session ${session.id}).\n` +
+        `Objective: ${session.objective}\n` +
+        'Follow the brief\'s ordered implementation tasks and acceptance criteria. ' +
+        'Cite the brief\'s sources when reporting which requirements are satisfied.',
+      nonce: welcomeNonce.current,
+      researchSessionId: session.id,
+    })
+    setBottomTab('agent')
+    setBottomOpen(true)
+    setStatus('Agent planning from research brief…')
+  }
+
+  function handleResearchAsk(session: KryomResearchSession) {
+    setChatResearchId(session.id)
+    setBottomTab('ai')
+    setBottomOpen(true)
+    setStatus(`AI chat attached to research ${session.id}`)
+  }
+
   const projectInfo = summary
     ? `${summary.projectType}${
         summary.frameworks.length > 0
@@ -823,6 +849,7 @@ function AppShell() {
               defaultModel={settings.defaultModel}
               onOpenProject={() => void openProject()}
               onShowAiChat={() => selectBottomTab('ai')}
+              onShowResearch={() => selectBottomTab('research')}
               onShowTerminal={() => selectBottomTab('terminal')}
               onSubmitChat={handleWelcomeChat}
               onSubmitAgent={handleWelcomeAgent}
@@ -899,6 +926,12 @@ function AppShell() {
               GIT
             </button>
             <button
+              className={bottomTab === 'research' ? 'panel-tab active' : 'panel-tab'}
+              onClick={() => selectBottomTab('research')}
+            >
+              RESEARCH
+            </button>
+            <button
               className={bottomTab === 'ai' ? 'panel-tab active' : 'panel-tab'}
               onClick={() => selectBottomTab('ai')}
             >
@@ -943,6 +976,14 @@ function AppShell() {
                 onStatus={setStatus}
               />
             </div>
+            <div hidden={bottomTab !== 'research'} className="tab-body">
+              <ResearchPanel
+                workspaceRoot={workspace?.root ?? null}
+                onStatus={setStatus}
+                onImplement={handleResearchImplement}
+                onAsk={handleResearchAsk}
+              />
+            </div>
             <div hidden={bottomTab !== 'ai'} className="tab-body">
               <AiChat
                 workspaceRoot={workspace?.root ?? null}
@@ -954,6 +995,8 @@ function AppShell() {
                 contextEnabled={settings.aiContextEnabled}
                 onStatus={setStatus}
                 pendingPrompt={welcomeChatPrompt}
+                researchSessionId={chatResearchId}
+                onDetachResearch={() => setChatResearchId(null)}
               />
             </div>
             <div hidden={bottomTab !== 'agent'} className="tab-body">

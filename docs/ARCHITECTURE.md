@@ -55,6 +55,7 @@ with `electron/security/validate-input.cjs` before calling a service.
 | `diagnostics:run` | One build/test command + parsed problems |
 | `intelligence:summary/context` | Project summary + bounded context |
 | `settings:get/update` | Validated preference store |
+| `research:start/status/active/list/get/brief/cancel/resume/select` | Background research runs, persisted sessions, cited briefs |
 
 The preload bridge (`electron/preload.cjs`) exposes one method per
 channel plus read-only `platform` and `versions`. No channel accepts a
@@ -77,6 +78,10 @@ CommonJS modules (`.cjs`, `require`/`module.exports`):
 - `diagnostics/` — command runner plus pure output parsers.
 - `project-intelligence/` — summary, dependency analysis, AI context.
 - `settings/` — preference store and the central secret allowlist.
+- `research/` — search-provider abstraction (arXiv, OpenAlex,
+  DuckDuckGo, optional Tavily), safe URL reader, session store under
+  `.kryom/research/`, brief builder/validator, and the orchestrator.
+  Chat and agent attach saved briefs via `researchSessionId`.
 
 Cross-cutting helpers live in `electron/security/` (sender, path, and
 input validation) and `electron/utils/` (coded errors, redacting

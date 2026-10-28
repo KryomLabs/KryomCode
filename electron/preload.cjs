@@ -98,4 +98,31 @@ contextBridge.exposeInMainWorld('kryom', {
 
   updateSettings: (patch) =>
     ipcRenderer.invoke('settings:update', patch),
+
+  startResearch: (payload) =>
+    ipcRenderer.invoke('research:start', payload),
+
+  getResearchStatus: (payload) =>
+    ipcRenderer.invoke('research:status', payload),
+
+  getActiveResearch: () =>
+    ipcRenderer.invoke('research:active'),
+
+  listResearch: () =>
+    ipcRenderer.invoke('research:list'),
+
+  getResearch: (payload) =>
+    ipcRenderer.invoke('research:get', payload),
+
+  getResearchBrief: (payload) =>
+    ipcRenderer.invoke('research:brief', payload),
+
+  cancelResearch: (payload) =>
+    ipcRenderer.invoke('research:cancel', payload),
+
+  resumeResearch: (payload) =>
+    ipcRenderer.invoke('research:resume', payload),
+
+  selectResearch: (payload) =>
+    ipcRenderer.invoke('research:select', payload),
 })

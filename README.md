@@ -22,6 +22,9 @@ user action.
   destructive-pattern warnings, cancellation, and status.
 - Chat with Meta AI models, with optional workspace context and a
   per-request model override.
+- Research a technical topic with real arXiv/OpenAlex paper search,
+  save a cited brief to the project, attach it to chat, and hand it
+  to the agent via "Implement from Research".
 - Plan multi-file coding tasks with the agent, preview each edit as a
   diff, then apply only the approved edits (atomic, with rollback).
 - Inspect Git status and diffs, stage, commit, and push from the Git panel.
@@ -69,7 +72,7 @@ Other commands:
 
 | Command | What it does |
 |---|---|
-| `npm test` | Runs the backend test suite (15 test files). |
+| `npm test` | Runs the backend test suite (18 test files). |
 | `npm run check:syntax` | Byte-compiles every `electron/**/*.cjs` file. |
 | `npm run build` | Type-checks (`tsc -b`) and builds the renderer to `dist/`. |
 | `npm run pack` | Builds the renderer and produces an unpacked Windows app in `release/`. |
@@ -89,6 +92,9 @@ Then edit `.env`:
 - `MODEL_API_KEY` (required for AI chat and agent): your Meta API key.
 - `META_MODEL` (optional): `muse-spark-1.3` (default) or
   `muse-wonder-1.0`.
+- `TAVILY_API_KEY` (optional): enables Tavily web results in Research.
+  Built-in providers (arXiv, OpenAlex, DuckDuckGo) need no key, and
+  research without an LLM key produces an extractive brief.
 
 Rules:
 

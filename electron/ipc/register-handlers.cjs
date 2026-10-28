@@ -7,6 +7,7 @@ const registerDiagnosticsIPC = require('./diagnostics.ipc.cjs')
 const registerIntelligenceIPC = require('./project-intelligence.ipc.cjs')
 const registerAgentIPC = require('./agent.ipc.cjs')
 const registerSettingsIPC = require('./settings.ipc.cjs')
+const registerResearchIPC = require('./research.ipc.cjs')
 
 module.exports = function registerHandlers({
   getMainWindow,
@@ -46,6 +47,10 @@ module.exports = function registerHandlers({
   })
 
   registerSettingsIPC({
+    isTrustedSender,
+  })
+
+  registerResearchIPC({
     isTrustedSender,
   })
 }

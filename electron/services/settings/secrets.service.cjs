@@ -2,7 +2,7 @@
 // through getSecret, and only these names are scrubbed from child
 // process environments. Nothing here ever leaves the main process.
 
-const SECRET_KEYS = ['MODEL_API_KEY']
+const SECRET_KEYS = ['MODEL_API_KEY', 'TAVILY_API_KEY']
 
 function isSecretKey(key) {
   return typeof key === 'string' && SECRET_KEYS.includes(key)

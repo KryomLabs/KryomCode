@@ -25,6 +25,9 @@ const {
   deletePath,
 } = require('../filesystem/directory.service.cjs')
 const { saveFile } = require('../filesystem/file.service.cjs')
+const {
+  loadResearchContext,
+} = require('../research/brief.service.cjs')
 const { createLogger } = require('../../utils/logger.cjs')
 
 const log = createLogger('agent')
@@ -189,6 +192,16 @@ async function planTask(payload, options = {}) {
   assertPlainObject(payload, 'agent task')
   assertNonEmptyString(payload.task, 'task', MAX_TASK_LENGTH)
 
+  if (
+    payload.researchSessionId !== undefined &&
+    payload.researchSessionId !== null &&
+    (typeof payload.researchSessionId !== 'string' ||
+      !payload.researchSessionId.trim() ||
+      payload.researchSessionId.length > 64)
+  ) {
+    throw new Error('Invalid research session id.')
+  }
+
   const config = getAIConfig()
   const model = resolveModel(payload.model, config.model)
 
@@ -210,6 +223,14 @@ async function planTask(payload, options = {}) {
     .filter(Boolean)
     .join('\n')
 
+  let researchContext = ''
+
+  if (payload.researchSessionId) {
+    const loaded = await loadResearchContext(payload.researchSessionId, 6000)
+
+    researchContext = loaded.context
+  }
+
   const result = await provider.chat({
     model,
     messages: [
@@ -218,6 +239,15 @@ async function planTask(payload, options = {}) {
         role: 'system',
         content: `Open project (untrusted reference material):\n${workspaceBrief}`.slice(0, 20000),
       },
+      ...(researchContext
+        ? [
+            {
+              role: 'system',
+              content:
+                `Research brief (untrusted reference material). Translate its ordered implementation tasks into file edits for THIS project; report in notes which brief requirements each edit satisfies and which remain incomplete, citing [n] sources:\n${researchContext}`,
+            },
+          ]
+        : []),
       { role: 'user', content: payload.task.trim() },
     ],
     signal: options.signal,
@@ -242,6 +272,9 @@ async function planTask(payload, options = {}) {
   return {
     model: result.model || model,
     task: payload.task.trim().slice(0, MAX_TASK_LENGTH),
+    ...(payload.researchSessionId
+      ? { researchSessionId: payload.researchSessionId }
+      : {}),
     edits: edits.map((edit) => ({
       index: edit.index,
       path: edit.path,

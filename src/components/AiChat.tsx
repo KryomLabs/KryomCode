@@ -17,6 +17,8 @@ export interface AiChatProps {
   contextEnabled: boolean
   onStatus: (status: string) => void
   pendingPrompt?: { text: string; nonce: number } | null
+  researchSessionId?: string | null
+  onDetachResearch?: () => void
 }
 
 const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
@@ -30,6 +32,7 @@ export function AiChat(props: AiChatProps) {
   const [includeFileContext, setIncludeFileContext] = useState(
     props.contextEnabled
   )
+  const [includeResearch, setIncludeResearch] = useState(true)
 
   useEffect(() => {
     setModel(props.defaultModel)
@@ -107,11 +110,17 @@ export function AiChat(props: AiChatProps) {
         .slice(-10)
         .map((message) => ({ role: message.role, content: message.content }))
 
+      const attachedResearch =
+        includeResearch && props.researchSessionId
+          ? props.researchSessionId
+          : undefined
+
       const result = await kryom().askAI({
         prompt: userPrompt,
         context,
         history,
         model,
+        ...(attachedResearch ? { researchSessionId: attachedResearch } : {}),
       })
 
       setMessages((previous) => [
@@ -197,6 +206,26 @@ export function AiChat(props: AiChatProps) {
             ? 'No active file. Workspace context will be used.'
             : 'File context is disabled.'}
       </div>
+
+      {props.researchSessionId && (
+        <div className="context-file">
+          <label className="context-toggle">
+            <input
+              type="checkbox"
+              checked={includeResearch}
+              onChange={(event) => setIncludeResearch(event.target.checked)}
+            />
+            {`Research attached: ${props.researchSessionId}`}
+          </label>{' '}
+          <button
+            className="secondary-button"
+            onClick={() => props.onDetachResearch?.()}
+            disabled={loading}
+          >
+            Detach
+          </button>
+        </div>
+      )}
 
       <div className="ai-messages" aria-live="polite">
         {messages.length === 0 && (

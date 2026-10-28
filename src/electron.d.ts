@@ -18,6 +18,7 @@ interface KryomAIMessage {
 interface KryomAIResponse {
   answer: string
   model: string
+  researchSessionId?: string
 }
 
 interface KryomFileMeta {
@@ -66,6 +67,7 @@ interface KryomAgentEdit {
 interface KryomAgentPlan {
   model: string
   task: string
+  researchSessionId?: string
   edits: KryomAgentEdit[]
   commands: string[]
   notes: string
@@ -146,6 +148,68 @@ interface KryomSettings {
   panelBottomHeight: number
 }
 
+interface KryomResearchStep {
+  id: string
+  label: string
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped'
+  detail: string
+  error: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+interface KryomResearchSource {
+  provider: string
+  title: string
+  url: string
+  authors: string[]
+  publishedAt: string | null
+  abstract: string
+  venue: string
+  doi: string | null
+  sourceType: string
+  accessStatus: string
+  excerpt: string
+}
+
+interface KryomResearchFinding {
+  claim: string
+  sourceIndexes: number[]
+  confidence: string
+  note: string
+}
+
+interface KryomResearchSession {
+  id: string
+  version: number
+  objective: string
+  questions: string[]
+  queries: Array<{ query: string; at: string }>
+  steps: KryomResearchStep[]
+  sources: KryomResearchSource[]
+  evidence: Array<{ sourceUrl: string; excerpt: string; at: string }>
+  findings: KryomResearchFinding[]
+  decisions: Array<{ text: string; at: string }>
+  brief: { version: number; markdown: string; generatedAt: string | null; via: string }
+  implementationTasks: string[]
+  verification: string[]
+  errors: Array<{ where: string; message: string; at: string }>
+  status: 'running' | 'completed' | 'blocked' | 'cancelled' | 'failed'
+  statusDetail: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface KryomResearchSummary {
+  id: string
+  objective: string
+  status: string
+  sources: number
+  briefVersion: number
+  updatedAt: string
+  createdAt: string
+}
+
 interface KryomAPI {
   platform: string
 
@@ -171,6 +235,7 @@ interface KryomAPI {
     context?: string
     history?: KryomAIMessage[]
     model?: string
+    researchSessionId?: string
   }) => Promise<KryomAIResponse>
 
   closeWorkspace: () => Promise<{ success: boolean }>
@@ -211,6 +276,7 @@ interface KryomAPI {
     task: string
     model?: string
     context?: string
+    researchSessionId?: string
   }) => Promise<KryomAgentPlan>
 
   applyAgentEdits: (payload: {
@@ -252,6 +318,38 @@ interface KryomAPI {
   getSettings: () => Promise<KryomSettings>
 
   updateSettings: (patch: Partial<KryomSettings>) => Promise<KryomSettings>
+
+  startResearch: (payload: {
+    objective: string
+  }) => Promise<{ id: string; status: string }>
+
+  getResearchStatus: (payload: {
+    id: string
+  }) => Promise<KryomResearchSession>
+
+  getActiveResearch: () => Promise<KryomResearchSession | null>
+
+  listResearch: () => Promise<KryomResearchSummary[]>
+
+  getResearch: (payload: {
+    id: string
+  }) => Promise<KryomResearchSession>
+
+  getResearchBrief: (payload: {
+    id: string
+  }) => Promise<{ id: string; markdown: string }>
+
+  cancelResearch: (payload: {
+    id: string
+  }) => Promise<KryomResearchSession>
+
+  resumeResearch: (payload: {
+    id: string
+  }) => Promise<{ id: string; status: string }>
+
+  selectResearch: (payload: {
+    id: string
+  }) => Promise<{ id: string }>
 }
 
 interface Window {

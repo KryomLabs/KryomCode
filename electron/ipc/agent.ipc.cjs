@@ -29,6 +29,8 @@ module.exports = function registerAgentIPC({
       task: payload.task,
       model: assertOptionalString(payload.model, 'model', 100) ?? undefined,
       context: assertOptionalString(payload.context, 'context', 20000) ?? undefined,
+      researchSessionId:
+        assertOptionalString(payload.researchSessionId, 'researchSessionId', 64) ?? undefined,
     })
   })
 

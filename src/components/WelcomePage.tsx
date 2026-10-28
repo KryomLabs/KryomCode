@@ -7,6 +7,7 @@ export interface WelcomePageProps {
   onOpenProject: () => void
   onShowAiChat: () => void
   onShowTerminal: () => void
+  onShowResearch: () => void
   onSubmitChat: (prompt: string) => void
   onSubmitAgent: (task: string) => void
 }
@@ -35,7 +36,7 @@ const AGENT_SUGGESTIONS = [
 
 function composerPlaceholder(mode: WelcomeMode, hasWorkspace: boolean): string {
   if (mode === 'research') {
-    return 'Research is coming soon. Switch to Chat or Agent to continue.'
+    return 'Research runs in the RESEARCH tab below. Open it to search papers and build a cited brief.'
   }
 
   if (mode === 'agent') {
@@ -124,10 +125,9 @@ export function WelcomePage(props: WelcomePageProps) {
             }
             aria-pressed={mode === 'research'}
             onClick={() => selectMode('research')}
-            title="Research is not available yet"
+            title="Research runs in the RESEARCH tab"
           >
             Research
-            <span className="welcome-soon">Soon</span>
           </button>
         </div>
 
@@ -172,8 +172,8 @@ export function WelcomePage(props: WelcomePageProps) {
 
         {isResearch ? (
           <p className="welcome-notice" role="status">
-            Research is coming soon. It has no workflow yet, so nothing runs
-            in this mode. Use Chat or Agent instead.
+            Research runs in the RESEARCH tab, where you can search papers
+            and build a cited brief. Nothing runs in this composer.
           </p>
         ) : notice ? (
           <p className="welcome-notice" role="status">
@@ -207,6 +207,9 @@ export function WelcomePage(props: WelcomePageProps) {
           </button>
           <button className="secondary-button" onClick={props.onShowAiChat}>
             AI Chat
+          </button>
+          <button className="secondary-button" onClick={props.onShowResearch}>
+            Research
           </button>
           <button className="secondary-button" onClick={props.onShowTerminal}>
             Terminal

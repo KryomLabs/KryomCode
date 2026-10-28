@@ -9,7 +9,7 @@ export interface AgentPanelProps {
   defaultModel: string
   onFilesChanged: (changedPaths: string[]) => void
   onStatus: (status: string) => void
-  pendingTask?: { text: string; nonce: number } | null
+  pendingTask?: { text: string; nonce: number; researchSessionId?: string } | null
 }
 
 const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
@@ -39,6 +39,7 @@ export function AgentPanel(props: AgentPanelProps) {
   const dialogs = useDialogs()
   const [model, setModel] = useState(props.defaultModel)
   const [task, setTask] = useState('')
+  const [researchSessionId, setResearchSessionId] = useState<string | null>(null)
   const [plan, setPlan] = useState<KryomAgentPlan | null>(null)
   const [approved, setApproved] = useState<Set<number>>(new Set())
   const [oldContents, setOldContents] = useState<Record<number, string>>({})
@@ -67,22 +68,23 @@ export function AgentPanel(props: AgentPanelProps) {
 
     consumedTaskNonce.current = pending.nonce
     setTask(pending.text)
+    setResearchSessionId(pending.researchSessionId ?? null)
 
     if (!props.workspaceRoot || planning) {
       return
     }
 
-    void requestPlanFor(pending.text)
+    void requestPlanFor(pending.text, pending.researchSessionId ?? null)
     // Consumes one welcome submit per nonce; planning/model come from
     // this render's closure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.pendingTask, props.workspaceRoot])
 
   async function requestPlan() {
-    await requestPlanFor(task)
+    await requestPlanFor(task, researchSessionId)
   }
 
-  async function requestPlanFor(taskText: string) {
+  async function requestPlanFor(taskText: string, researchId: string | null) {
     const trimmed = taskText.trim()
 
     if (!trimmed || planning || !props.workspaceRoot) {
@@ -96,7 +98,11 @@ export function AgentPanel(props: AgentPanelProps) {
     setOldContents({})
 
     try {
-      const next = await kryom().planAgentTask({ task: trimmed, model })
+      const next = await kryom().planAgentTask({
+        task: trimmed,
+        model,
+        ...(researchId ? { researchSessionId: researchId } : {}),
+      })
       setPlan(next)
       setApproved(new Set(next.edits.map((edit) => edit.index ?? 0)))
       props.onStatus(
@@ -184,6 +190,7 @@ export function AgentPanel(props: AgentPanelProps) {
     setApplyResult(null)
     setError('')
     setOldContents({})
+    setResearchSessionId(null)
   }
 
   async function copyCommand(command: string, index: number) {
@@ -264,10 +271,19 @@ export function AgentPanel(props: AgentPanelProps) {
             </div>
           )}
 
+          {researchSessionId && !plan && (
+            <p className="muted padded">
+              Research brief attached: {researchSessionId}
+            </p>
+          )}
+
           {plan && (
             <div className="plan-view">
               <p className="muted padded">
                 Model: {plan.model} · {plan.edits.length} proposed edit(s)
+                {plan.researchSessionId
+                  ? ` · research ${plan.researchSessionId}`
+                  : ''}
               </p>
 
               {plan.notes && <p className="plan-notes">{plan.notes}</p>}

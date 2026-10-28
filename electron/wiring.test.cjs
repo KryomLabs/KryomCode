@@ -36,6 +36,11 @@ const MODULES = [
   ['./security/trusted-sender.cjs', ['createTrustedSender']],
   ['./utils/errors.cjs', ['createError']],
   ['./utils/logger.cjs', ['createLogger', 'redact']],
+  ['./services/research/search-providers.cjs', ['searchAll', 'deduplicateSources', 'normalizeSource']],
+  ['./services/research/url-fetch.service.cjs', ['fetchExcerpt', 'assertSafeUrl']],
+  ['./services/research/session-store.cjs', ['createSession', 'readSession', 'writeSession', 'listSessions', 'getActiveSession']],
+  ['./services/research/brief.service.cjs', ['validateBrief', 'buildExtractiveBrief', 'buildResearchContext', 'loadResearchContext']],
+  ['./services/research/research.service.cjs', ['startResearch', 'getStatus', 'cancelResearch', 'resumeResearch']],
 ]
 
 const IPC_MODULES = [
@@ -48,6 +53,7 @@ const IPC_MODULES = [
   './ipc/project-intelligence.ipc.cjs',
   './ipc/agent.ipc.cjs',
   './ipc/settings.ipc.cjs',
+  './ipc/research.ipc.cjs',
   './ipc/register-handlers.cjs',
 ]
 
