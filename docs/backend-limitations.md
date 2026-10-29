@@ -12,6 +12,15 @@ are verified statements, not guesses.
   Responses are not persisted to chat history by the smoke path.
 - Electron was not launched live in this headless session. `npm run build`
   (tsc + Vite) passes; dev/prod startup needs a manual run.
+- Level 1 gate (2026-10-29): Monaco is bundled locally
+  (`monaco-editor` declared in `package.json`, loader configured in
+  `src/utils/monaco-setup.ts`). Verified statically only: `npm run
+  build` passes, `dist/` contains all five language workers plus the
+  codicon font and editor CSS with relative references, the built
+  `index.html` CSP allows no remote hosts, and the loader source was
+  read to confirm the configured instance bypasses its CDN default.
+  The live offline-editor check was NOT run; see
+  [SMOKE_TEST.md](SMOKE_TEST.md).
 - The production `dist/` fallback in `loadApp` is implemented but
   unexecuted.
 - Phase 3 (2026-10-27): `npm run pack` produced
@@ -37,9 +46,10 @@ are verified statements, not guesses.
 
 - Terminal results arrive on completion; mid-run output streaming is not
   exposed. Cancellation kills running processes via `terminal:cancel`.
-- Agent planning is bounded by the 90 s provider timeout. There is no
-  IPC-level mid-plan cancel; batch apply checks cancellation between edits
-  and keeps already-applied approved work.
+- Agent planning is bounded by the 90 s provider timeout. Mid-plan
+  cancel exists (`agent:cancel` aborts the in-flight provider
+  request); batch apply itself cannot be cancelled mid-apply, but it
+  is local, completes in milliseconds, and rolls back on failure.
 - Diagnostics parsers cover TypeScript, generic file:line:col, and Node
   stack formats only. Unknown formats yield zero diagnostics, never fake
   ones, and `success` still reflects the real exit code.

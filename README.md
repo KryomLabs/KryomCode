@@ -1,9 +1,13 @@
 # KryomCode
 
-KryomCode is an AI-assisted desktop coding workspace. It combines a
-project explorer, multi-tab Monaco editor, integrated terminal, Git
-tools, build diagnostics, and a Meta AI chat, agent, and research panel
-in one Electron app.
+Research → Understand → Plan → Review → Execute → Verify
+
+KryomCode is an open-source, Meta-first, review-first desktop coding
+workspace. It connects research and AI-assisted development to real
+code changes and verified results while keeping developers in
+control: it combines a project explorer, multi-tab Monaco editor,
+integrated terminal, Git tools, build diagnostics, and a Meta AI
+chat, agent, and research panel in one Electron app.
 
 The developer stays in control: the agent only proposes plans, every
 file edit needs explicit approval before it is applied, and terminal,
@@ -15,21 +19,42 @@ Git, and file operations each require an explicit user action.
 > [Limitations](#limitations) and in
 > [docs/backend-limitations.md](docs/backend-limitations.md).
 
+## Why KryomCode?
+
+Research usually dies in browser tabs: papers get read, then the
+implementation starts from a blank file with no trace back to the
+evidence. KryomCode keeps the whole chain in one workspace —
+research with cited sources, source-grounded plans, diff review,
+explicit approval, then verified execution — so every change can be
+traced back to the research and checks behind it.
+
 ## Current development status
 
 - Backend services, IPC channels, and the security boundary are
   implemented (`electron/`).
 - The React frontend panels and bridge wiring are implemented (`src/`).
-- The backend is covered by an automated `node:test` suite (22 test
+- The backend is covered by an automated `node:test` suite (23 test
   files run by `npm test`), a syntax gate (`npm run check:syntax`),
   and a Windows CI workflow that also runs the production build.
 - Windows packaging configuration (electron-builder, NSIS) exists.
 - Manual end-to-end checks (live app launch, real-key AI requests,
   packaged-app launch and install) are tracked in
-  [docs/TESTING.md](docs/TESTING.md); see
+  [docs/TESTING.md](docs/TESTING.md) and
+  [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md); see
   [docs/backend-limitations.md](docs/backend-limitations.md) for the
-  verification record. Do not treat those checks as done until they
-  have actually been run.
+  verification record. The project owner reports the Windows GUI
+  smoke checklist passes; re-run it before each release and do not
+  treat packaged-app checks as done until they have actually been
+  run on the release build.
+
+## Screenshots
+
+No verified screenshots are checked into the repository yet. To add
+them: launch the app with `npm run dev`, capture the AI Workspace
+welcome view and one real chat/agent/research session (redact any
+personal paths or keys), save the files under `docs/images/`, and
+reference them from this section. Do not link screenshots that do
+not exist in the repo.
 
 ## Key features
 
@@ -43,7 +68,7 @@ Git, and file operations each require an explicit user action.
 - Conversation history persists per project (`.kryom/chat.json`) and
   survives restarts.
 - Stop button cancels the in-flight request; prompts are capped at
-  12,000 characters and history at the last 12 messages.
+  12,000 characters and the last 10 messages are sent as history.
 - When no API key is configured, inline setup guidance is shown
   instead of failing blind.
 
@@ -80,6 +105,10 @@ Git, and file operations each require an explicit user action.
 - Save As to a new location, optional Auto Save, and a window close
   guard (native Save/Discard/Cancel prompt when tabs are dirty).
 - Files are capped at 1 MB for reading and writing.
+- The editor is bundled locally with its language workers, styles,
+  and fonts: the production build loads no remote editor assets.
+  The live offline check is a manual step in
+  [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md).
 - Diagnostics from the Problems panel appear as gutter markers with
   F8/Shift+F8 navigation.
 
@@ -114,9 +143,9 @@ Git, and file operations each require an explicit user action.
 
 ### Git workflows
 
-- Sidebar source-control view: status (staged, unstaged, untracked),
-  diffs, stage, unstage, discard of tracked changes (with
-  confirmation), commit, push, and fast-forward-only pull.
+- Bottom-panel Source Control tab: status (staged, unstaged,
+  untracked), diffs, stage, unstage, discard of tracked changes
+  (with confirmation), commit, push, and fast-forward-only pull.
 - Connections view: remote listing, remote verification with
   `git ls-remote`, and clone-and-open.
 - Clone targets are restricted to GitHub HTTPS/SSH repository URLs
@@ -150,7 +179,7 @@ Git, and file operations each require an explicit user action.
 | Electron 45 | Desktop shell, main process, IPC |
 | React 19 + TypeScript 5.7 | Renderer UI |
 | Vite 6 | Dev server and production renderer build |
-| Monaco Editor | Code editing (`@monaco-editor/react`) |
+| Monaco Editor | Code editing (locally bundled `monaco-editor` + `@monaco-editor/react`, no CDN) |
 | Node.js test runner | Backend tests (`node:test`, no framework) |
 | electron-builder 26 | Windows packaging (NSIS) |
 | dotenv | Local `.env` loading in development |
@@ -201,6 +230,33 @@ src/electron.d.ts ◄──────┴── types ─────┘
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) for details.
 
+## Project structure
+
+```text
+kryomcode/
+├── electron/               # Main process (CommonJS .cjs)
+│   ├── main.cjs            # Window, lifecycle, protocol, menus
+│   ├── preload.cjs         # window.kryom capability bridge
+│   ├── menu.cjs            # Native application menu
+│   ├── ipc/                # 12 domain channel modules + register-handlers
+│   ├── security/           # Trusted sender, CSP, protocol, path/input guards
+│   ├── services/           # workspace, filesystem, terminal, ai, agent,
+│   │                       # git, diagnostics, project-intelligence,
+│   │                       # settings, research, documents, ui
+│   └── utils/              # Logger, errors, shared helpers
+├── src/                    # Renderer (React + TypeScript)
+│   ├── app/App.tsx         # Shell: activity bar, sidebar, center, bottom dock
+│   ├── api/kryom.ts        # Typed bridge accessor
+│   ├── electron.d.ts       # Bridge + shared IPC types
+│   ├── components/         # Panels (chat, agent, research, editor, …)
+│   ├── styles/app.css      # Dark theme + design tokens
+│   └── utils/              # Paths, tabs, languages, Monaco setup
+├── docs/                   # Architecture, testing, smoke test, roadmap
+├── scripts/                # Backend syntax gate
+├── index.html              # Renderer entry
+└── package.json            # Scripts, deps, electron-builder config
+```
+
 ## Prerequisites (Windows development)
 
 - Node.js 22 or newer (continuous integration runs Node 22).
@@ -247,6 +303,9 @@ Rules:
 - Never commit `.env`. It is Git-ignored (`.env` and `.env.*`),
   `.env.example` holds placeholders only, and packaged builds
   exclude `.env` files.
+- Never commit `.kryom/`. It holds private per-project state (chat
+  history, research sessions) and is Git-ignored; it must stay
+  untracked in every clone.
 - The key never leaves the main process: it is not exposed to the
   renderer, terminal children, logs, or packaged settings. Only key
   presence (booleans) crosses the bridge.
@@ -276,7 +335,7 @@ All commands run from the repository root.
 | Command | What it does |
 |---|---|
 | `npm run dev` | Starts Vite on `http://127.0.0.1:5173`, then launches Electron against it. |
-| `npm test` | Runs the backend test suite (22 test files, `node:test`). |
+| `npm test` | Runs the backend test suite (23 test files, `node:test`). |
 | `npm run check:syntax` | Byte-checks every `electron/**/*.cjs` file with `node --check`. |
 | `npm run build` | Type-checks (`tsc -b`) and builds the renderer to `dist/`. |
 | `npm run preview` | Serves the production `dist/` build locally with Vite. |
@@ -290,7 +349,7 @@ for pushes and pull requests to `main`. CI uses no secrets.
 ## Basic usage
 
 - Open a project: launch with `npm run dev`, then use Open Project
-  on the welcome page (or File > Open Folder), pick a recent
+  in the Explorer panel (or File > Open Folder), pick a recent
   project, or clone a repository from the Connections view.
 - Chat: open the center-stage Chat view, pick a model, optionally
   toggle workspace context, type a prompt, and send. Use Stop to
@@ -304,29 +363,53 @@ for pushes and pull requests to `main`. CI uses no secrets.
 - Approve file edits: approval is the set of edits you select before
   pressing Apply. The backend re-validates every edit and rolls the
   batch back if one fails.
-- Terminal: open the Terminal panel, type a command, review any
-  destructive-pattern warnings, and run it. Cancel stops running
-  processes; output arrives on completion.
+- Terminal: open the bottom panel's Terminal tab, type a command,
+  review any destructive-pattern warnings, and run it. Cancel stops
+  running processes; output arrives on completion.
 - Research: open the Research view, enter an objective, and start.
   Watch the step list, then read the cited brief, open sources in
   the browser, export to `.docx` if needed, or continue with "Ask
   about this" / "Implement from Research".
-- Git: open the Git sidebar for status, diffs, stage/unstage,
-  discard, commit, push, and pull. Verify remotes and clone from
-  the Connections view.
-- Diagnostics: open the Problems panel, confirm or edit the
-  suggested command, and run it. Click a problem to jump to its
-  file and line; markers support F8/Shift+F8 navigation.
+- Git: open the bottom panel's Source Control tab for status,
+  diffs, stage/unstage, discard, commit, push, and pull. Verify
+  remotes and clone from the Connections view.
+- Diagnostics: open the bottom panel's Problems tab, confirm or
+  edit the suggested command, and run it. Click a problem to jump
+  to its file and line; markers support F8/Shift+F8 navigation.
 - Keyboard shortcuts used above are also listed in the app's Help >
   Keyboard Shortcuts dialog.
+
+## Demo flow (about 5 minutes)
+
+A consistent script for recordings. Use a disposable project and a
+configured `MODEL_API_KEY`:
+
+1. **Open** — `npm run dev`, then Open Project in the Explorer panel.
+2. **Research** — Research view, objective "retry strategies for
+   flaky network calls", Start research; show the cited brief.
+3. **Context** — Agent view: check Include active file, Search + Add
+   one file.
+4. **Plan** — task "Add a one-line comment at the top of hello.js
+   explaining what it does", Plan task; show the context preview.
+5. **Review** — read one Why rationale and its diff; note the
+   never-executed command list.
+6. **Approve** — keep one edit checked, Apply approved edits, confirm.
+7. **Verify** — Verification section: show the working directory and
+   the exact command, Run check, confirm, show the exit code.
+
+The full release gate (save conflicts, stale plans, failing checks,
+offline editor, `.kryom` hygiene) is the separate checklist in
+[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md).
 
 ## Security considerations
 
 - The renderer is sandboxed (`contextIsolation`, no
   `nodeIntegration`, `sandbox: true`) and talks to the main process
   only through the validated `window.kryom` bridge in
-  `electron/preload.cjs`. New windows are denied and navigation is
-  restricted to the dev server origin and `file:` URLs.
+  `electron/preload.cjs`. New windows are denied; navigation is
+  restricted to the exact dev-server origin in development and the
+  `kryom://app` entry document in packaged builds (`file:` URLs are
+  denied), and the content security policy allows no remote hosts.
 - Every IPC channel checks that the sender is the app's own window
   and validates its payload before acting.
 - All file, terminal, Git, diagnostics, and agent operations are
@@ -407,6 +490,11 @@ Planned ideas (not implemented, not promised) are listed in
 7. Open a pull request against `main` describing the change and the
    manual checks you ran.
 
+Report bugs and request features through the repository's Issues
+tab. Include the KryomCode version (Help > About), the Windows
+version, and the exact steps to reproduce; never paste API keys,
+`.env` contents, or private `.kryom` data into an issue.
+
 See [docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) for
 workflows and [docs/TESTING.md](docs/TESTING.md) for test
 conventions and the manual-check list.
@@ -419,6 +507,7 @@ Detailed references live in `docs/`:
 - [SECURITY.md](docs/SECURITY.md) — boundaries and secret handling.
 - [API_INTEGRATION.md](docs/API_INTEGRATION.md) — Meta provider details.
 - [TESTING.md](docs/TESTING.md) — test inventory and manual checks.
+- [SMOKE_TEST.md](docs/SMOKE_TEST.md) — Windows GUI release-gate checklist.
 - [FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) — done vs planned.
 - [CHANGELOG.md](docs/CHANGELOG.md) — release history.
 - [backend-limitations.md](docs/backend-limitations.md) — verified limits.

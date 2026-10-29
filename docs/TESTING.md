@@ -57,7 +57,9 @@ Notes:
 ## Manual checks
 
 Automated tests cannot cover these; run them before claiming a release
-works:
+works. The step-by-step release gate (including the offline-editor
+check) is [SMOKE_TEST.md](SMOKE_TEST.md); the list below is the
+shorter per-feature reminder:
 
 1. `npm run dev` launches and each panel (Explorer, Search, Editor,
    AI Chat, Agent, Terminal, Problems, Git, Settings) responds.
