@@ -2,12 +2,20 @@
 // workspace under `.kryom/research/` so they travel with the project,
 // survive restarts, and reuse existing workspace containment rules.
 // No new database: one JSON file per session plus a markdown brief.
+// All reads and writes go through the storage-path layer, which
+// rejects symlinks and junctions in the chain and writes atomically.
 const fs = require('node:fs/promises')
 const path = require('node:path')
 
 const {
   getWorkspaceRoot,
 } = require('../workspace/workspace.service.cjs')
+const {
+  ensureStorageDir,
+  listStorageFiles,
+  readStorageFile,
+  writeStorageFile,
+} = require('../../security/storage-path.cjs')
 
 const RESEARCH_DIR = '.kryom'
 const SESSIONS_DIR = 'research'
@@ -31,6 +39,23 @@ function sessionsRoot() {
   }
 
   return path.join(root, RESEARCH_DIR, SESSIONS_DIR)
+}
+
+// Logical segments below the workspace root. Every helper resolves
+// them through the storage-path layer; never join them by hand for
+// filesystem access.
+function sessionSegments(name) {
+  return [RESEARCH_DIR, SESSIONS_DIR, name]
+}
+
+function openRoot() {
+  const root = getWorkspaceRoot()
+
+  if (!root) {
+    throw new Error('Open a project folder first.')
+  }
+
+  return root
 }
 
 function sessionFile(id) {
@@ -132,15 +157,17 @@ function sanitizeSession(raw) {
 }
 
 async function ensureDir() {
-  await fs.mkdir(sessionsRoot(), { recursive: true })
+  await ensureStorageDir(openRoot(), [RESEARCH_DIR, SESSIONS_DIR])
 }
 
 async function createSession(objective) {
-  await ensureDir()
-
   const session = createSessionRecord(objective)
 
-  await fs.writeFile(sessionFile(session.id), JSON.stringify(session, null, 2), 'utf8')
+  await writeStorageFile(
+    openRoot(),
+    sessionSegments(`${session.id}.json`),
+    JSON.stringify(session, null, 2)
+  )
   await setActiveSession(session.id)
 
   return session
@@ -149,17 +176,16 @@ async function createSession(objective) {
 async function readSession(id) {
   assertValidSessionId(id)
 
-  try {
-    const raw = await fs.readFile(sessionFile(id), 'utf8')
+  const { found, data } = await readStorageFile(
+    openRoot(),
+    sessionSegments(`${id}.json`)
+  )
 
-    return sanitizeSession(JSON.parse(raw))
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      throw new Error('Research session was not found.')
-    }
-
-    throw error
+  if (!found) {
+    throw new Error('Research session was not found.')
   }
+
+  return sanitizeSession(JSON.parse(data))
 }
 
 async function writeSession(session) {
@@ -168,19 +194,26 @@ async function writeSession(session) {
   }
 
   assertValidSessionId(session.id)
-  await ensureDir()
 
   session.updatedAt = nowIso()
 
-  await fs.writeFile(sessionFile(session.id), JSON.stringify(session, null, 2), 'utf8')
+  await writeStorageFile(
+    openRoot(),
+    sessionSegments(`${session.id}.json`),
+    JSON.stringify(session, null, 2)
+  )
 
   return session
 }
 
 async function writeBrief(id, markdown) {
   assertValidSessionId(id)
-  await ensureDir()
-  await fs.writeFile(briefFile(id), markdown, 'utf8')
+
+  await writeStorageFile(
+    openRoot(),
+    sessionSegments(`brief-${id}.md`),
+    markdown
+  )
 
   return briefFile(id)
 }
@@ -188,37 +221,29 @@ async function writeBrief(id, markdown) {
 async function readBrief(id) {
   assertValidSessionId(id)
 
-  try {
-    return await fs.readFile(briefFile(id), 'utf8')
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      throw new Error('Research brief was not found.')
-    }
+  const { found, data } = await readStorageFile(
+    openRoot(),
+    sessionSegments(`brief-${id}.md`)
+  )
 
-    throw error
+  if (!found) {
+    throw new Error('Research brief was not found.')
   }
+
+  return data
 }
 
 async function listSessions() {
-  await ensureDir()
-
-  let entries = []
-
-  try {
-    entries = await fs.readdir(sessionsRoot())
-  } catch {
-    return []
-  }
-
+  const files = await listStorageFiles(openRoot(), [RESEARCH_DIR, SESSIONS_DIR])
   const sessions = []
 
-  for (const entry of entries) {
-    if (!entry.endsWith('.json') || entry === 'active.json') {
+  for (const { name, path: file } of files) {
+    if (!name.endsWith('.json') || name === 'active.json') {
       continue
     }
 
     try {
-      const raw = await fs.readFile(path.join(sessionsRoot(), entry), 'utf8')
+      const raw = await fs.readFile(file, 'utf8')
       const session = sanitizeSession(JSON.parse(raw))
 
       sessions.push({
@@ -242,16 +267,28 @@ async function listSessions() {
 
 async function setActiveSession(id) {
   assertValidSessionId(id)
-  await ensureDir()
-  await fs.writeFile(activeFile(), JSON.stringify({ id }), 'utf8')
+
+  await writeStorageFile(
+    openRoot(),
+    sessionSegments('active.json'),
+    JSON.stringify({ id })
+  )
 
   return { id }
 }
 
 async function getActiveSessionId() {
   try {
-    const raw = await fs.readFile(activeFile(), 'utf8')
-    const parsed = JSON.parse(raw)
+    const { found, data } = await readStorageFile(
+      openRoot(),
+      sessionSegments('active.json')
+    )
+
+    if (!found) {
+      return null
+    }
+
+    const parsed = JSON.parse(data)
 
     if (parsed && typeof parsed.id === 'string') {
       return assertValidSessionId(parsed.id)

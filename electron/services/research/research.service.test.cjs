@@ -5,6 +5,7 @@ const path = require('node:path')
 const fs = require('node:fs/promises')
 
 const {
+  getWorkspaceRoot,
   setWorkspaceRoot,
 } = require('../workspace/workspace.service.cjs')
 const {
@@ -111,6 +112,70 @@ describe('research session store', () => {
 
     await setActiveSession(first.id)
     assert.equal((await getActiveSession()).id, first.id)
+  })
+
+  it('refuses to escape through a planted research link', async (t) => {
+    const root = await openWorkspace()
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-research-out-'))
+
+    await fs.mkdir(path.join(root, '.kryom'), { recursive: true })
+
+    try {
+      await fs.symlink(
+        outside,
+        path.join(root, '.kryom', 'research'),
+        'junction'
+      )
+    } catch (error) {
+      t.skip(`link creation unavailable: ${error.message}`)
+      return
+    }
+
+    await assert.rejects(
+      () => createSession('Escape attempt'),
+      /Symbolic links|escapes/
+    )
+    await assert.rejects(
+      () => writeSession({ id: 'rs-x', brief: null }),
+      /Symbolic links|escapes/
+    )
+    await assert.rejects(
+      () => listSessions(),
+      /Symbolic links|escapes/
+    )
+
+    assert.deepEqual(await fs.readdir(outside), [])
+  })
+
+  it('never reads sessions through a planted file link', async (t) => {
+    await openWorkspace()
+
+    const session = await createSession('Link test')
+    const dir = path.join(getWorkspaceRoot(), '.kryom', 'research')
+    const target = path.join(dir, `${session.id}.json`)
+    const stashed = `${target}.planted`
+
+    await fs.rename(target, stashed)
+
+    try {
+      await fs.symlink(stashed, target)
+    } catch (error) {
+      await fs.rename(stashed, target)
+      t.skip(`symlink creation unavailable: ${error.message}`)
+      return
+    }
+
+    try {
+      await assert.rejects(() => readSession(session.id), /Symbolic links/)
+
+      // Listing skips the planted link instead of following it.
+      const listed = await listSessions()
+
+      assert.ok(listed.every((entry) => entry.id !== session.id))
+    } finally {
+      await fs.unlink(target).catch(() => undefined)
+      await fs.rename(stashed, target).catch(() => undefined)
+    }
   })
 
   it('persists sessions across simulated restarts', async () => {

@@ -39,6 +39,9 @@ function textResponse(text, status = 200, contentType = 'text/html') {
   }
 }
 
+// Deterministic DNS: fetch tests must never touch a real resolver.
+const publicLookup = async () => [{ address: '93.184.216.34', family: 4 }]
+
 const ARXIV_XML = `<?xml version="1.0"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
 <entry>
@@ -209,6 +212,7 @@ describe('research url fetch', () => {
   it('fetchExcerpt reports paywalled and missing honestly', async () => {
     const paywalled = await fetchExcerpt('https://example.com/a', {
       fetchImpl: async () => textResponse('', 403),
+      lookupImpl: publicLookup,
     })
 
     assert.equal(paywalled.ok, false)
@@ -216,6 +220,7 @@ describe('research url fetch', () => {
 
     const missing = await fetchExcerpt('https://example.com/a', {
       fetchImpl: async () => textResponse('', 404),
+      lookupImpl: publicLookup,
     })
 
     assert.equal(missing.accessStatus, 'missing')
@@ -224,6 +229,7 @@ describe('research url fetch', () => {
   it('fetchExcerpt returns bounded excerpts for readable pages', async () => {
     const result = await fetchExcerpt('https://example.com/a', {
       fetchImpl: async () => textResponse('<html><head><title>Paper</title></head><body><p>' + 'word '.repeat(3000) + '</p></body></html>'),
+      lookupImpl: publicLookup,
     })
 
     assert.equal(result.ok, true)
@@ -242,6 +248,7 @@ describe('research url fetch', () => {
   it('fetchExcerpt sanitizes malicious markup in excerpts', async () => {
     const result = await fetchExcerpt('https://example.com/a', {
       fetchImpl: async () => textResponse('<img src=x onerror=alert(1)><p>Safe <iframe src="evil"></iframe>text</p>'),
+      lookupImpl: publicLookup,
     })
 
     assert.equal(result.ok, true)
