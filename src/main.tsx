@@ -1,5 +1,6 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import './utils/monaco-setup'
 import App from './app/App'
 import './styles/app.css'
 
