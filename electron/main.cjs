@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, shell } = require('electron')
+const { app, BrowserWindow, Menu, dialog, shell, protocol } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const dotenv = require('dotenv')
@@ -11,6 +11,27 @@ const registerHandlers = require('./ipc/register-handlers.cjs')
 const {
   createTrustedSender,
 } = require('./security/trusted-sender.cjs')
+const {
+  APP_ENTRY_URL,
+  APP_SCHEME,
+  DEV_ORIGIN,
+  isAllowedMainFrameUrl,
+} = require('./security/renderer-urls.cjs')
+const {
+  buildProductionCsp,
+} = require('./security/content-security-policy.cjs')
+const {
+  createAppProtocolHandler,
+} = require('./security/protocol-handler.cjs')
+
+// Private renderer scheme. Registered before ready (an Electron
+// requirement): standard + secure so the packaged UI gets a stable
+// kryom://app origin for CSP 'self', secure-context APIs such as the
+// async clipboard, and frame checks — without any file: access.
+protocol.registerSchemesAsPrivileged([
+  { scheme: APP_SCHEME, privileges: { standard: true, secure: true } },
+])
+
 const { createLogger } = require('./utils/logger.cjs')
 const { buildMenuTemplate } = require('./menu.cjs')
 const {
@@ -48,7 +69,19 @@ function settleSaveAll(mayClose) {
   pending.resolve(mayClose)
 }
 
-const isTrustedSender = createTrustedSender(() => [...windows])
+// Expected main-frame URL shared by navigation guards and IPC
+// sender checks: the exact dev origin in development, only the
+// packaged entry document in production.
+function isTrustedAppUrl(url) {
+  return isAllowedMainFrameUrl(url, {
+    packaged: app.isPackaged,
+    devOrigin: DEV_ORIGIN,
+  })
+}
+
+const isTrustedSender = createTrustedSender(() => [...windows], {
+  isTrustedAppUrl,
+})
 
 function getWindows() {
   return [...windows].filter((window) => !window.isDestroyed())
@@ -170,14 +203,14 @@ async function refreshMenuUIState() {
 async function loadApp(window) {
   if (!app.isPackaged) {
     try {
-      await window.loadURL('http://127.0.0.1:5173')
+      await window.loadURL(DEV_ORIGIN)
       return
     } catch {
       log.warn('Dev server unavailable, falling back to built files.')
     }
   }
 
-  await window.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
+  await window.loadURL(APP_ENTRY_URL)
 }
 
 async function resolveDirtyClose(window) {
@@ -291,14 +324,23 @@ function createWindow() {
 
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
+  // Parsed-URL navigation policy: the exact dev origin in
+  // development, only the packaged entry document in production. No
+  // file: URLs, no userinfo or sibling-host tricks, no subframes.
   window.webContents.on('will-navigate', (event, url) => {
-    if (
-      !url.startsWith('http://127.0.0.1:5173') &&
-      !url.startsWith('file:')
-    ) {
+    if (!isTrustedAppUrl(url)) {
       event.preventDefault()
     }
   })
+
+  window.webContents.on(
+    'will-frame-navigate',
+    (event, url, _httpCode, _httpText, isMainFrame) => {
+      if (isMainFrame !== true || !isTrustedAppUrl(url)) {
+        event.preventDefault()
+      }
+    }
+  )
 
   loadApp(window).catch((error) => {
     log.error(`Failed to load the application: ${error.message}`)
@@ -308,6 +350,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  protocol.handle(
+    APP_SCHEME,
+    createAppProtocolHandler({
+      distDir: path.join(__dirname, '..', 'dist'),
+      contentSecurityPolicy: buildProductionCsp(),
+    })
+  )
+
   registerHandlers({
     getMainWindow,
     getWindows,

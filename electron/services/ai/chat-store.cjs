@@ -4,27 +4,27 @@
 // and both operations report honestly instead of throwing. Stored
 // messages are sanitized on read AND write: roles are restricted,
 // content is capped, and malformed entries are dropped.
-const fs = require('node:fs/promises')
-const path = require('node:path')
-
+//
+// Storage layout note: history stays per-project inside the workspace
+// (callers, tests, and restart-restore rely on it) rather than moving
+// to userData, which would orphan existing histories. Containment
+// comes from the storage-path layer: symlinks and junctions in the
+// chain are rejected and writes land atomically, so a hostile project
+// cannot redirect reads or writes outside the workspace. Anyone with
+// project access can still read `.kryom` like any project file, so it
+// must never be shared or committed.
 const {
   getWorkspaceRoot,
 } = require('../workspace/workspace.service.cjs')
+const {
+  readStorageFile,
+  writeStorageFile,
+} = require('../../security/storage-path.cjs')
 
-const CHAT_FILE = 'chat.json'
+const CHAT_SEGMENTS = ['.kryom', 'chat.json']
 const MAX_MESSAGES = 50
 const MAX_MESSAGE_CHARS = 12000
 const MAX_MODEL_CHARS = 100
-
-function chatFile() {
-  const root = getWorkspaceRoot()
-
-  if (!root) {
-    return null
-  }
-
-  return path.join(root, '.kryom', CHAT_FILE)
-}
 
 function sanitizeMessages(value) {
   if (!Array.isArray(value)) {
@@ -49,47 +49,40 @@ function sanitizeMessages(value) {
 }
 
 async function saveChat(messages) {
-  const file = chatFile()
+  const root = getWorkspaceRoot()
 
-  if (!file) {
+  if (!root) {
     return { saved: false, reason: 'No project is open.' }
   }
 
   const clean = sanitizeMessages(messages)
 
-  await fs.mkdir(path.dirname(file), { recursive: true })
-  await fs.writeFile(
-    file,
-    JSON.stringify({ version: 1, savedAt: new Date().toISOString(), messages: clean }),
-    'utf8'
+  await writeStorageFile(
+    root,
+    CHAT_SEGMENTS,
+    JSON.stringify({ version: 1, savedAt: new Date().toISOString(), messages: clean })
   )
 
   return { saved: true, messages: clean.length }
 }
 
 async function restoreChat() {
-  const file = chatFile()
+  const root = getWorkspaceRoot()
 
-  if (!file) {
+  if (!root) {
     return { messages: [], restored: false }
   }
 
-  let raw = null
+  const { found, data } = await readStorageFile(root, CHAT_SEGMENTS)
 
-  try {
-    raw = await fs.readFile(file, 'utf8')
-  } catch (error) {
-    if (error && error.code === 'ENOENT') {
-      return { messages: [], restored: false }
-    }
-
-    throw error
+  if (!found) {
+    return { messages: [], restored: false }
   }
 
   let parsed = null
 
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(data)
   } catch {
     // Corrupted history starts empty rather than crashing chat.
     return { messages: [], restored: false }

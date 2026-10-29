@@ -79,6 +79,96 @@ describe('chat-store', () => {
     assert.equal(capped[0].content, 'm10')
   })
 
+  it('refuses to write through a .kryom symlink planted outside', async () => {
+    const dir = await openWorkspace()
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-chat-out-'))
+    const link = path.join(dir, '.kryom')
+
+    await fs.symlink(outside, link, 'junction')
+
+    try {
+      await assert.rejects(
+        () => saveChat([{ role: 'user', content: 'escape attempt' }]),
+        /Symbolic links|escapes|outside/
+      )
+      await assert.rejects(
+        () => restoreChat(),
+        /Symbolic links|escapes|outside/
+      )
+
+      const leaked = await fs.readdir(outside)
+
+      assert.deepEqual(leaked, [])
+    } finally {
+      await closeWorkspace()
+    }
+  })
+
+  it('refuses to follow a .kryom junction planted outside', async (t) => {
+    if (process.platform !== 'win32') {
+      t.skip('Windows-only junctions')
+      return
+    }
+
+    const dir = await openWorkspace()
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-chat-out-'))
+
+    try {
+      await fs.symlink(outside, path.join(dir, '.kryom'), 'junction')
+    } catch (error) {
+      t.skip(`junction creation unavailable: ${error.message}`)
+      await closeWorkspace()
+      return
+    }
+
+    try {
+      await assert.rejects(
+        () => saveChat([{ role: 'user', content: 'escape attempt' }]),
+        /Symbolic links|escapes/
+      )
+      await assert.rejects(() => restoreChat(), /Symbolic links|escapes/)
+
+      assert.deepEqual(await fs.readdir(outside), [])
+    } finally {
+      await closeWorkspace()
+    }
+  })
+
+  it('never writes chat history through a planted file link', async (t) => {
+    const dir = await openWorkspace()
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-chat-out-'))
+    const secret = path.join(outside, 'secret.txt')
+
+    await fs.writeFile(secret, 'outside')
+    await fs.mkdir(path.join(dir, '.kryom'), { recursive: true })
+
+    try {
+      await fs.symlink(secret, path.join(dir, '.kryom', 'chat.json'))
+    } catch (error) {
+      t.skip(`symlink creation unavailable: ${error.message}`)
+      await closeWorkspace()
+      return
+    }
+
+    try {
+      await assert.rejects(() => restoreChat(), /Symbolic links/)
+
+      // The write replaces the planted link; the outside file is
+      // never touched and history stays readable afterwards.
+      const saved = await saveChat([{ role: 'user', content: 'hi' }])
+
+      assert.deepEqual(saved, { saved: true, messages: 1 })
+      assert.equal(await fs.readFile(secret, 'utf8'), 'outside')
+
+      const restored = await restoreChat()
+
+      assert.equal(restored.restored, true)
+      assert.deepEqual(restored.messages, [{ role: 'user', content: 'hi' }])
+    } finally {
+      await closeWorkspace()
+    }
+  })
+
   it('starts empty on corrupted history and without a project', async () => {
     const dir = await openWorkspace()
 
