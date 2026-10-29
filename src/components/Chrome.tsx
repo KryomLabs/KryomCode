@@ -5,16 +5,13 @@ export interface TitleBarProps {
   workspaceRoot: string | null
   activeFile: string | null
   dirty: boolean
-  canSave: boolean
-  busy: boolean
   autoSave: boolean
-  onOpenProject: () => void
-  onSave: () => void
-  onOpenSettings: () => void
 }
 
-// Slim context bar under the native menu: product mark, project/file
-// breadcrumb, and the handful of global actions.
+// Slim context bar under the native menu: product mark and a
+// project/file breadcrumb. Actions live where they are used: Open
+// Project in Explorer, Save in the editor tab bar, Settings at the
+// bottom of the activity bar.
 export function TitleBar(props: TitleBarProps) {
   const project = props.workspaceRoot ? baseName(props.workspaceRoot) : null
 
@@ -39,38 +36,6 @@ export function TitleBar(props: TitleBarProps) {
           Auto-save
         </span>
       )}
-
-      <span className="spacer" />
-
-      <button
-        type="button"
-        className="title-btn"
-        onClick={props.onOpenProject}
-        disabled={props.busy}
-        title="Open a project folder (Ctrl+Shift+O)"
-      >
-        Open Project
-      </button>
-
-      <button
-        type="button"
-        className="title-btn"
-        onClick={props.onSave}
-        disabled={!props.canSave}
-        title="Save the active file (Ctrl+S)"
-      >
-        Save
-      </button>
-
-      <button
-        type="button"
-        className="title-btn"
-        onClick={props.onOpenSettings}
-        title="Settings"
-        aria-label="Open settings"
-      >
-        Settings
-      </button>
     </header>
   )
 }
@@ -91,8 +56,8 @@ export interface StatusBarProps {
   terminalRunning: boolean
   diagnostics: { count: number; success: boolean } | null
   onShowDiagnostics: () => void
-  rightOpen: boolean
-  onToggleRight: () => void
+  bottomOpen: boolean
+  onToggleBottom: () => void
 }
 
 // Compact status bar. Every segment is verified live state: no fake
@@ -103,15 +68,15 @@ export function StatusBar(props: StatusBarProps) {
       <span className="status-left">
         <button
           className="status-toggle"
-          onClick={props.onToggleRight}
+          onClick={props.onToggleBottom}
           title={
-            props.rightOpen
-              ? 'Hide right panel (Ctrl+J)'
-              : 'Show right panel (Ctrl+J)'
+            props.bottomOpen
+              ? 'Hide bottom panel (Ctrl+J)'
+              : 'Show bottom panel (Ctrl+J)'
           }
-          aria-label={props.rightOpen ? 'Hide right panel' : 'Show right panel'}
+          aria-label={props.bottomOpen ? 'Hide bottom panel' : 'Show bottom panel'}
         >
-          {props.rightOpen ? '▾ Terminal' : '▸ Terminal'}
+          {props.bottomOpen ? '▾ Panel' : '▸ Panel'}
         </button>
         <span className="status-msg" title={props.status}>
           {props.status}

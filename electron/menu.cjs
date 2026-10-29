@@ -211,7 +211,7 @@ function buildMenuTemplate(deps) {
           accelerator: 'CmdOrCtrl+B',
         }),
         commandItem('view.toggleRight', {
-          label: 'Toggle Right Panel',
+          label: 'Toggle Bottom Panel',
           accelerator: 'CmdOrCtrl+J',
         }),
         { type: 'separator' },

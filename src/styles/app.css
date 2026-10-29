@@ -138,8 +138,77 @@ textarea:focus {
   font-size: 11px;
 }
 
+.explorer-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 10px;
+}
+
+.explorer-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: #bdbdc8;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: #292936;
+  color: #fff;
+}
+
+.icon-btn svg {
+  display: block;
+}
+
+.explorer-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px 12px;
+}
+
+.explorer-empty p {
+  margin: 0;
+}
+
+.explorer-empty-title {
+  color: #e4e4e7;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.explorer-empty .muted {
+  white-space: normal;
+  line-height: 1.6;
+}
+
 .tree {
   padding-bottom: 16px;
+}
+
+.tree-name {
+  display: inline-block;
+  max-width: calc(100% - 26px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: -2px;
 }
 
 .tree-icon {
@@ -444,13 +513,6 @@ summary.tree-row.selected {
   line-height: 1.7;
 }
 
-.welcome-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 20px 0 28px;
-}
-
 .welcome-keys {
   margin-top: 24px;
   font-size: 12px;
@@ -513,25 +575,37 @@ section.editor-panel > .welcome {
 }
 
 .welcome-modes {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 2px;
+  margin-bottom: 14px;
+  padding: 3px;
+  background: #17171c;
+  border: 1px solid #292930;
+  border-radius: 9px;
 }
 
 .welcome-mode {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 7px 14px;
+  padding: 7px 18px;
   font-size: 12px;
   font-weight: 600;
+  border-color: transparent;
+  background: transparent;
+  color: #858592;
+}
+
+.welcome-mode:hover:not(:disabled) {
+  background: #22222b;
+  color: #e4e4e7;
 }
 
 .welcome-mode.active {
   background: #292936;
-  border-color: #8b7cff;
+  border-color: transparent;
   color: #fff;
 }
 
@@ -572,11 +646,27 @@ section.editor-panel > .welcome {
   border-top: 1px solid #26262e;
 }
 
+.welcome-composer-footer button[type='submit'] {
+  background: #6556c8;
+  border-color: #6556c8;
+  color: #fff;
+  font-weight: 600;
+}
+
+.welcome-composer-footer button[type='submit']:hover:not(:disabled) {
+  background: #7767df;
+  border-color: #7767df;
+}
+
 .welcome-notice {
   margin: 12px 0 0;
   max-width: 600px;
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 2;
+}
+
+.welcome-notice .mini-btn {
+  margin-left: 8px;
 }
 
 .welcome-key-notice {
@@ -608,11 +698,6 @@ section.editor-panel > .welcome {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.welcome-redesign .welcome-actions {
-  justify-content: center;
-  margin: 20px 0 12px;
 }
 
 .welcome-meta {
@@ -747,19 +832,17 @@ section.editor-panel > .welcome {
   font: 12px/1.7 Consolas, monospace;
 }
 
-/* Right-side panel with Terminal and Output tabs */
-.right-panel {
-  width: 360px;
-  min-width: 300px;
+/* Bottom dock with Terminal, Problems, Source Control, Output tabs */
+.bottom-panel {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--kc-panel-deep, #111116);
-  border-left: 1px solid var(--kc-border, #292930);
+  border-top: 1px solid var(--kc-border, #292930);
 }
 
-.right-tabs {
+.bottom-tabs {
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -769,16 +852,16 @@ section.editor-panel > .welcome {
   border-bottom: 1px solid var(--kc-border, #292930);
 }
 
-.right-tabs .panel-tab {
+.bottom-tabs .panel-tab {
   flex: 0 0 auto;
   padding: 6px 14px;
 }
 
-.right-tabs .right-collapse {
+.bottom-tabs .bottom-collapse {
   padding: 6px 10px;
 }
 
-.right-body {
+.bottom-body {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -802,7 +885,7 @@ section.editor-panel > .welcome {
   border-bottom: 2px solid #8b7cff;
 }
 
-.right-panel > .terminal-panel {
+.bottom-panel .terminal-panel {
   width: 100%;
   min-width: 0;
   flex: 1;
@@ -844,18 +927,52 @@ section.editor-panel > .welcome {
   font-size: 11px;
 }
 
-.model-row {
+/* Compact single-row chat toolbar: title, model, context, research,
+   clear. Wraps on narrow windows instead of squeezing controls. */
+.ai-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 10px 12px 0;
-  color: #bdbdc8;
+  padding: 8px 12px;
+  border-bottom: 1px solid #292930;
+  flex-shrink: 0;
+}
+
+.ai-toolbar-title {
+  font-size: 13px;
+  color: #f4f4f5;
+}
+
+.ai-toolbar select {
+  max-width: 170px;
+  padding: 5px 6px;
   font-size: 12px;
 }
 
-.model-row select {
-  max-width: 200px;
+.ai-toolbar-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #bdbdc8;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ai-toolbar-check input {
+  accent-color: #8b7cff;
+}
+
+.ai-toolbar-context {
+  min-width: 0;
+  max-width: 220px;
+}
+
+.ai-toolbar-research {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .context-toggle {
@@ -1114,7 +1231,7 @@ section.editor-panel > .welcome {
 .ai-composer textarea {
   display: block;
   width: 100%;
-  min-height: 88px;
+  min-height: 62px;
   max-height: 180px;
   resize: vertical;
   padding: 10px;
@@ -1152,6 +1269,64 @@ section.editor-panel > .welcome {
   overflow-y: auto;
 }
 
+/* Docked agent layout: fixed header + toolbar, scrollable task
+   region, bottom-docked task composer. Research reuses .agent-panel
+   without this modifier and keeps page scrolling. */
+.agent-docked {
+  overflow: hidden;
+}
+
+.agent-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #292930;
+  flex-shrink: 0;
+}
+
+.agent-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #bdbdc8;
+  font-size: 12px;
+}
+
+.agent-model select {
+  max-width: 170px;
+  padding: 5px 6px;
+  font-size: 12px;
+}
+
+.agent-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-context {
+  border-bottom: 1px solid #292930;
+  flex-shrink: 0;
+}
+
+.agent-context .agent-composer {
+  border-bottom: 0;
+}
+
+.agent-dock {
+  flex-shrink: 0;
+  background: #17171c;
+  border-top: 1px solid #292930;
+}
+
+.agent-dock .agent-composer {
+  border-bottom: 0;
+}
+
 .agent-composer {
   flex-shrink: 0;
   padding: 10px 12px;
@@ -1169,6 +1344,18 @@ section.editor-panel > .welcome {
 
 .plan-view {
   padding-bottom: 16px;
+}
+
+.plan-task {
+  margin: 4px 12px 10px;
+  padding: 10px 12px;
+  border: 1px solid #403b58;
+  border-radius: 8px;
+  background: #22212e;
+  color: #e4e4eb;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .plan-notes {
@@ -1290,6 +1477,22 @@ section.editor-panel > .welcome {
   flex-direction: column;
   gap: 8px;
   font-size: 12px;
+}
+
+.sessions-disclosure {
+  margin: 0 12px 10px;
+}
+
+.sessions-disclosure > summary {
+  cursor: pointer;
+  padding: 6px 0;
+  color: #bdbdc8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sessions-disclosure .plan-commands {
+  margin: 4px 0 0;
 }
 
 .command-row {
@@ -1664,11 +1867,6 @@ section.bottom-tab-panel {
   .sidebar {
     width: 200px;
   }
-
-  .right-panel {
-    width: 320px;
-    min-width: 280px;
-  }
 }
 
 /* Draggable panel resize handles */
@@ -1809,11 +2007,6 @@ html.kryom-resizing .resize-handle::after {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.title-btn {
-  padding: 4px 10px;
   white-space: nowrap;
 }
 
@@ -2138,36 +2331,6 @@ html.kryom-resizing .resize-handle::after {
   display: flex;
   gap: 8px;
   padding: 12px;
-}
-
-/* ---- AI Workspace home navigation ---- */
-.home-nav {
-  display: flex;
-  flex-direction: column;
-  padding: 6px 0;
-}
-
-.home-nav-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  text-align: left;
-  padding: 10px 12px;
-  cursor: pointer;
-}
-
-.home-nav-row:hover {
-  background: var(--kc-btn);
-}
-
-.home-nav-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--kc-text);
 }
 
 /* ---- Welcome additions ---- */

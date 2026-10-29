@@ -60,7 +60,7 @@ const SECTIONS: Array<{ title: string; rows: ShortcutRow[] }> = [
       { keys: 'Ctrl+1', action: 'Focus the editor' },
       { keys: 'Ctrl+B', action: 'Toggle the sidebar' },
       { keys: 'Ctrl+`', action: 'Toggle the Terminal tab' },
-      { keys: 'Ctrl+J', action: 'Toggle the right panel' },
+      { keys: 'Ctrl+J', action: 'Toggle the bottom panel' },
     ],
   },
   {

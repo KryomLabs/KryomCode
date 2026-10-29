@@ -39,6 +39,30 @@ export function AiChat(props: AiChatProps) {
   const [includeResearch, setIncludeResearch] = useState(true)
   const [keyMissing, setKeyMissing] = useState(false)
   const [copiedMessage, setCopiedMessage] = useState<number | null>(null)
+  const messagesRef = useRef<HTMLDivElement | null>(null)
+  // Stick-to-bottom follows new messages only while the reader is
+  // already near the bottom; scrolling up pins the view so older
+  // messages can be read undisturbed.
+  const stickRef = useRef(true)
+
+  function onMessagesScroll() {
+    const element = messagesRef.current
+
+    if (!element) {
+      return
+    }
+
+    stickRef.current =
+      element.scrollHeight - element.scrollTop - element.clientHeight < 80
+  }
+
+  useEffect(() => {
+    if (stickRef.current) {
+      messagesRef.current?.scrollTo({
+        top: messagesRef.current.scrollHeight,
+      })
+    }
+  }, [messages, loading])
 
   useEffect(() => {
     setModel(props.defaultModel)
@@ -153,6 +177,9 @@ export function AiChat(props: AiChatProps) {
       const status = await kryom().getAIStatus()
 
       if (!status.modelKeyConfigured) {
+        // The composer clears on send: hand the text back so a missing
+        // key never eats the user's prompt.
+        setPrompt(userPrompt)
         setKeyMissing(true)
         props.onStatus('AI model is not configured')
         return
@@ -240,13 +267,77 @@ export function AiChat(props: AiChatProps) {
     }
   }
 
+  // One-line context summary for the compact toolbar; the full
+  // explanation stays available as a tooltip.
+  const contextShort =
+    includeFileContext && props.activeFile
+      ? `${props.fileName}${props.dirty ? ' •' : ''}`
+      : includeFileContext
+        ? 'workspace summary'
+        : 'context off'
+  const contextTitle =
+    includeFileContext && props.activeFile
+      ? `Context: ${props.fileName}${props.dirty ? ' (unsaved edits included)' : ''}`
+      : includeFileContext
+        ? 'No active file. A short workspace summary (~4,000 chars) is used instead.'
+        : 'File context is disabled. Only your prompt and recent messages are sent.'
+
   return (
     <section className="ai-panel">
-      <div className="ai-heading">
-        <div>
-          <strong>Kryom AI</strong>
-          <div className="muted">Meta Muse · answers never edit files</div>
-        </div>
+      <div className="ai-toolbar">
+        <strong className="ai-toolbar-title">Kryom AI</strong>
+        <select
+          value={model}
+          onChange={(event) => setModel(event.target.value)}
+          disabled={loading}
+          aria-label="AI model"
+          title="Model for this conversation"
+        >
+          {MODELS.map((id) => (
+            <option key={id} value={id}>
+              {id === 'muse-spark-1.3' ? 'Muse Spark 1.3' : 'Muse Wonder 1.0'}
+            </option>
+          ))}
+        </select>
+        <label
+          className="ai-toolbar-check"
+          title="Sends the active file (first ~18,000 characters, unsaved edits included) with each request"
+        >
+          <input
+            type="checkbox"
+            checked={includeFileContext}
+            onChange={(event) => setIncludeFileContext(event.target.checked)}
+          />
+          Context
+        </label>
+        <span className="ai-toolbar-context muted" title={contextTitle}>
+          {contextShort}
+        </span>
+        {props.researchSessionId && (
+          <span className="ai-toolbar-research">
+            <label
+              className="ai-toolbar-check"
+              title={`Research brief ${props.researchSessionId} is attached as cited context`}
+            >
+              <input
+                type="checkbox"
+                checked={includeResearch}
+                onChange={(event) => setIncludeResearch(event.target.checked)}
+              />
+              Research
+            </label>
+            <button
+              type="button"
+              className="mini-btn"
+              onClick={() => props.onDetachResearch?.()}
+              disabled={loading}
+              title="Detach the research brief from this conversation"
+            >
+              Detach
+            </button>
+          </span>
+        )}
+        <span className="spacer" />
         <button
           onClick={clearChat}
           disabled={loading || messages.length === 0}
@@ -256,63 +347,12 @@ export function AiChat(props: AiChatProps) {
         </button>
       </div>
 
-      <label className="model-row">
-        Model
-        <select
-          value={model}
-          onChange={(event) => setModel(event.target.value)}
-          disabled={loading}
-          aria-label="AI model"
-        >
-          {MODELS.map((id) => (
-            <option key={id} value={id}>
-              {id === 'muse-spark-1.3' ? 'Muse Spark 1.3' : 'Muse Wonder 1.0'}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label
-        className="context-toggle"
-        title="Sends the active file (first ~18,000 characters, unsaved edits included) with each request"
+      <div
+        ref={messagesRef}
+        onScroll={onMessagesScroll}
+        className="ai-messages"
+        aria-live="polite"
       >
-        <input
-          type="checkbox"
-          checked={includeFileContext}
-          onChange={(event) => setIncludeFileContext(event.target.checked)}
-        />
-        Include active file context
-      </label>
-
-      <div className="context-file">
-        {includeFileContext && props.activeFile
-          ? `Context: ${props.fileName}${props.dirty ? ' (unsaved edits included)' : ''}`
-          : includeFileContext
-            ? 'No active file. A short workspace summary (~4,000 chars) is used instead.'
-            : 'File context is disabled. Only your prompt and recent messages are sent.'}
-      </div>
-
-      {props.researchSessionId && (
-        <div className="context-file">
-          <label className="context-toggle">
-            <input
-              type="checkbox"
-              checked={includeResearch}
-              onChange={(event) => setIncludeResearch(event.target.checked)}
-            />
-            {`Research attached: ${props.researchSessionId}`}
-          </label>{' '}
-          <button
-            className="secondary-button"
-            onClick={() => props.onDetachResearch?.()}
-            disabled={loading}
-          >
-            Detach
-          </button>
-        </div>
-      )}
-
-      <div className="ai-messages" aria-live="polite">
         {messages.length === 0 && (
           <div className="ai-empty">
             <div className="ai-empty-icon">✦</div>
@@ -395,7 +435,7 @@ export function AiChat(props: AiChatProps) {
             }
           }}
           placeholder="Ask Kryom AI anything about your code… (Ctrl+Enter to send)"
-          rows={4}
+          rows={3}
           maxLength={12000}
           disabled={loading}
         />

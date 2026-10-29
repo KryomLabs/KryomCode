@@ -1,6 +1,15 @@
 import { useState } from 'react'
 import { baseName, parentDir } from '../utils/paths'
-import { FileIcon, FolderIcon, PencilIcon, TrashIcon } from './FileIcons'
+import {
+  FileIcon,
+  FolderIcon,
+  NewFileIcon,
+  NewFolderIcon,
+  OpenFolderIcon,
+  PencilIcon,
+  RefreshIcon,
+  TrashIcon,
+} from './FileIcons'
 
 export interface ExplorerProps {
   workspace: KryomWorkspace | null
@@ -8,6 +17,7 @@ export interface ExplorerProps {
   loading: boolean
   projectInfo: string | null
   onOpenFile: (node: KryomNode) => void
+  onOpenProject: () => void
   onRefresh: () => void
   onNewFile: (dir: string) => void
   onNewFolder: (dir: string) => void
@@ -43,7 +53,7 @@ function ExplorerRow(props: RowProps) {
             <span className="tree-icon" aria-hidden="true">
               <FolderIcon />
             </span>{' '}
-            {node.name}
+            <span className="tree-name">{node.name}</span>
           </summary>
 
           {(node.children ?? []).map((child) => (
@@ -79,9 +89,9 @@ function ExplorerRow(props: RowProps) {
         title={node.path}
       >
         <span className="tree-icon" aria-hidden="true">
-          <FileIcon />
+          <FileIcon name={node.name} />
         </span>{' '}
-        {node.name}
+        <span className="tree-name">{node.name}</span>
       </button>
 
       {isSelected && (
@@ -163,44 +173,75 @@ export function Explorer(props: ExplorerProps) {
 
   return (
     <div className="explorer">
+      <div className="explorer-head">
+        <button
+          type="button"
+          className="explorer-open"
+          onClick={props.onOpenProject}
+          title="Open a project folder (Ctrl+Shift+O)"
+        >
+          <OpenFolderIcon />
+          <span>Open Project</span>
+        </button>
+        <span className="spacer" />
+        <button
+          type="button"
+          className="icon-btn"
+          title="New file in selected folder"
+          aria-label="New file in selected folder"
+          disabled={!targetDir || props.loading}
+          onClick={() => targetDir && props.onNewFile(targetDir)}
+        >
+          <NewFileIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          title="New folder in selected folder"
+          aria-label="New folder in selected folder"
+          disabled={!targetDir || props.loading}
+          onClick={() => targetDir && props.onNewFolder(targetDir)}
+        >
+          <NewFolderIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          title="Refresh explorer"
+          aria-label="Refresh explorer"
+          disabled={!props.workspace || props.loading}
+          onClick={props.onRefresh}
+        >
+          <RefreshIcon />
+        </button>
+      </div>
+
       {!props.workspace ? (
-        <p className="muted padded">Open a folder to get started.</p>
+        <div className="explorer-empty">
+          <p className="explorer-empty-title">No project open</p>
+          <p className="muted">
+            Open a local project to browse and edit its files.
+          </p>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={props.onOpenProject}
+          >
+            Open Project
+          </button>
+        </div>
       ) : (
         <>
           <div className="root-name">
             <span className="tree-icon" aria-hidden="true">
               <FolderIcon />
             </span>{' '}
-            {baseName(props.workspace.root)}
+            <span className="tree-name">{baseName(props.workspace.root)}</span>
           </div>
 
           {props.projectInfo && (
             <div className="project-info">{props.projectInfo}</div>
           )}
-
-          <div className="explorer-actions">
-            <button
-              title="New file in selected folder"
-              disabled={!targetDir || props.loading}
-              onClick={() => targetDir && props.onNewFile(targetDir)}
-            >
-              + File
-            </button>
-            <button
-              title="New folder in selected folder"
-              disabled={!targetDir || props.loading}
-              onClick={() => targetDir && props.onNewFolder(targetDir)}
-            >
-              + Folder
-            </button>
-            <button
-              title="Refresh explorer"
-              disabled={props.loading}
-              onClick={props.onRefresh}
-            >
-              {props.loading ? '…' : 'Refresh'}
-            </button>
-          </div>
 
           {selectedNode && selectedNode.type === 'directory' && (
             <div className="explorer-actions">

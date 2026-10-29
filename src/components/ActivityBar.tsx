@@ -17,6 +17,10 @@ export interface ActivityBarProps {
   sidebarVisible: boolean
   onSelect: (id: ActivityId) => void
   onOpenSettings: () => void
+  // Optional per-destination active state. The shell uses it for
+  // destinations that open the center view or bottom panel instead
+  // of the sidebar (AI Workspace, Source Control, Run).
+  isSelected?: (id: ActivityId) => boolean
 }
 
 function Icon({ d, label }: { d: string[]; label: string }) {
@@ -117,7 +121,9 @@ export function ActivityBar(props: ActivityBarProps) {
       <div className="activity-group" role="group" aria-label="Views">
         {ORDER.map((id) => {
           const icon = ICONS[id]
-          const selected = props.active === id && props.sidebarVisible
+          const selected = props.isSelected
+            ? props.isSelected(id)
+            : props.active === id && props.sidebarVisible
 
           return (
             <button

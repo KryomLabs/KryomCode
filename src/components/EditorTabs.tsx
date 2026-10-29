@@ -105,7 +105,7 @@ export function EditorTabs(props: EditorTabsProps) {
               tabIndex={active ? 0 : -1}
             >
               <span className="tab-file-icon" aria-hidden="true">
-                <FileIcon />
+                <FileIcon name={name} />
               </span>
               <span className="tab-name-text">{name}</span>
               {dirty && (

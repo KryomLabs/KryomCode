@@ -321,24 +321,28 @@ export function ResearchPanel(props: ResearchPanelProps) {
           )}
 
           {sessions.length > 0 && (
-            <div className="plan-commands">
-              <strong>Recent sessions</strong>
-              {sessions.slice(0, 6).map((entry) => (
-                <div key={entry.id} className="command-row">
-                  <code>
-                    {entry.status} · {entry.sources} src ·{' '}
-                    {entry.objective.slice(0, 80)}
-                  </code>
-                  <button
-                    className="secondary-button"
-                    onClick={() => void select(entry.id)}
-                    disabled={working || session?.id === entry.id}
-                  >
-                    {session?.id === entry.id ? 'Open' : 'Open'}
-                  </button>
-                </div>
-              ))}
-            </div>
+            <details className="sessions-disclosure">
+              <summary>
+                Recent sessions ({sessions.length > 6 ? '6+' : sessions.length})
+              </summary>
+              <div className="plan-commands">
+                {sessions.slice(0, 6).map((entry) => (
+                  <div key={entry.id} className="command-row">
+                    <code>
+                      {entry.status} · {entry.sources} src ·{' '}
+                      {entry.objective.slice(0, 80)}
+                    </code>
+                    <button
+                      className="secondary-button"
+                      onClick={() => void select(entry.id)}
+                      disabled={working || session?.id === entry.id}
+                    >
+                      {session?.id === entry.id ? 'Current' : 'Open'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
 
           {session && (

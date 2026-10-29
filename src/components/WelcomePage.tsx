@@ -11,9 +11,6 @@ export interface WelcomePageProps {
   onOpenProject: () => void
   onOpenRecent: (path: string) => void
   onClearRecent: () => void
-  onShowAiChat: () => void
-  onShowResearch: () => void
-  onShowTerminal: () => void
   onSubmitChat: (prompt: string) => void
   onSubmitAgent: (task: string) => void
   onSubmitResearch: (objective: string) => void
@@ -169,11 +166,11 @@ export function WelcomePage(props: WelcomePageProps) {
           Explore ideas, understand your code, research solutions, and turn
           plans into working software.
         </p>
-        <p className="welcome-workspace muted">
-          {hasWorkspace
-            ? `Project ${baseName(props.workspaceRoot ?? '')} is open. Pick a file in the Explorer or start below.`
-            : 'No project open. Open one to browse files, edit code, and run commands.'}
-        </p>
+        {hasWorkspace && (
+          <p className="welcome-workspace muted">
+            Project {baseName(props.workspaceRoot ?? '')} is open.
+          </p>
+        )}
 
         <div className="welcome-modes" role="group" aria-label="Assistant mode">
           <button
@@ -247,16 +244,23 @@ export function WelcomePage(props: WelcomePageProps) {
           </div>
         )}
 
-        {notice ? (
+        {(notice || (mode !== 'chat' && !hasWorkspace)) && (
           <p className="welcome-notice" role="status">
-            {notice}
+            {notice ||
+              (mode === 'research'
+                ? 'Research sessions are saved inside a project. '
+                : 'Agent tasks run against a project. ')}
+            {mode !== 'chat' && !hasWorkspace && (
+              <button
+                type="button"
+                className="mini-btn"
+                onClick={props.onOpenProject}
+              >
+                Open project
+              </button>
+            )}
           </p>
-        ) : mode !== 'chat' && !hasWorkspace ? (
-          <p className="welcome-notice" role="status">
-            {mode === 'research' ? 'Research' : 'Agent tasks'} need an open
-            project. Open one below to continue.
-          </p>
-        ) : null}
+        )}
 
         <div className="welcome-suggestions" aria-label="Suggested prompts">
           {suggestions.map((suggestion) => (
@@ -270,21 +274,6 @@ export function WelcomePage(props: WelcomePageProps) {
               {suggestion}
             </button>
           ))}
-        </div>
-
-        <div className="welcome-actions">
-          <button className="primary-button" onClick={props.onOpenProject}>
-            Open Project
-          </button>
-          <button className="secondary-button" onClick={props.onShowAiChat}>
-            AI Chat
-          </button>
-          <button className="secondary-button" onClick={props.onShowResearch}>
-            Research
-          </button>
-          <button className="secondary-button" onClick={props.onShowTerminal}>
-            Terminal
-          </button>
         </div>
 
         {props.recent.length > 0 && (

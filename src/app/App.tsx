@@ -41,7 +41,7 @@ import { AboutDialog } from '../components/AboutDialog'
 import { QuickOpen } from '../components/QuickOpen'
 import { ShortcutsDialog } from '../components/ShortcutsDialog'
 
-type RightTab = 'terminal' | 'output'
+type BottomTab = 'terminal' | 'problems' | 'git' | 'output'
 type CenterView = 'editor' | 'home' | 'chat' | 'agent' | 'research'
 type StageMode = 'chat' | 'agent' | 'research'
 
@@ -60,27 +60,27 @@ const FALLBACK_SETTINGS: KryomSettings = {
 
 const PANEL_LIMITS = {
   left: { min: 180, max: 420, fallback: 260 },
-  right: { min: 300, max: 560, fallback: 360 },
+  bottom: { min: 120, max: 600, fallback: 264 },
 } as const
 
 const FONT_LIMITS = { min: 10, max: 24, fallback: 14 } as const
 
-function clampLeftWidth(value: number, rightTaken: number): number {
+function clampLeftWidth(value: number): number {
   const max = Math.max(
     PANEL_LIMITS.left.min,
-    Math.min(PANEL_LIMITS.left.max, window.innerWidth - rightTaken - 284)
+    Math.min(PANEL_LIMITS.left.max, window.innerWidth - 284)
   )
 
   return Math.min(max, Math.max(PANEL_LIMITS.left.min, Math.round(value)))
 }
 
-function clampRightWidth(value: number, leftTaken: number): number {
+function clampBottomHeight(value: number): number {
   const max = Math.max(
-    PANEL_LIMITS.right.min,
-    Math.min(PANEL_LIMITS.right.max, window.innerWidth - leftTaken - 284)
+    PANEL_LIMITS.bottom.min,
+    Math.min(PANEL_LIMITS.bottom.max, window.innerHeight - 284)
   )
 
-  return Math.min(max, Math.max(PANEL_LIMITS.right.min, Math.round(value)))
+  return Math.min(max, Math.max(PANEL_LIMITS.bottom.min, Math.round(value)))
 }
 
 function clampFontSize(value: number): number {
@@ -93,14 +93,14 @@ function clampFontSize(value: number): number {
 function readLocalActivity(): ActivityId {
   const raw = window.localStorage.getItem('kryom.activity')
 
+  // Only sidebar-backed views persist here. Panel-backed
+  // destinations (git, run, home) open the bottom panel or center
+  // view instead, so a stale stored value falls back to Explorer.
   if (
     raw === 'explorer' ||
     raw === 'search' ||
-    raw === 'git' ||
-    raw === 'run' ||
     raw === 'extensions' ||
     raw === 'connections' ||
-    raw === 'home' ||
     raw === 'profile'
   ) {
     return raw
@@ -128,12 +128,12 @@ function AppShell() {
   const [pendingLine, setPendingLine] = useState<number | null>(null)
   const [settings, setSettings] = useState<KryomSettings>(FALLBACK_SETTINGS)
   const [leftWidth, setLeftWidth] = useState(FALLBACK_SETTINGS.panelLeftWidth)
-  const [rightWidth, setRightWidth] = useState(
-    FALLBACK_SETTINGS.panelRightWidth
+  const [bottomHeight, setBottomHeight] = useState(
+    FALLBACK_SETTINGS.panelBottomHeight
   )
   const panelsRef = useRef({
     left: FALLBACK_SETTINGS.panelLeftWidth,
-    right: FALLBACK_SETTINGS.panelRightWidth,
+    bottom: FALLBACK_SETTINGS.panelBottomHeight,
   })
   const [summary, setSummary] = useState<KryomWorkspaceSummary | null>(null)
   const [status, setStatus] = useState('Ready')
@@ -196,9 +196,9 @@ function AppShell() {
     workspace?.root ?? null,
     reportStatus
   )
-  const [rightTab, setRightTab] = useState<RightTab>('terminal')
-  const [rightOpen, setRightOpen] = useState(
-    () => window.localStorage.getItem('kryom.rightOpen') !== '0'
+  const [bottomTab, setBottomTab] = useState<BottomTab>('terminal')
+  const [bottomOpen, setBottomOpen] = useState(
+    () => window.localStorage.getItem('kryom.bottomOpen') !== '0'
   )
   const [saving, setSaving] = useState(false)
   const [opening, setOpening] = useState(false)
@@ -239,21 +239,21 @@ function AppShell() {
   useEffect(() => {
     logOutput('app', 'KryomCode started')
 
-    // Retired bottom-dock layout keys from earlier shells.
-    window.localStorage.removeItem('kryom.bottomOpen')
+    // Retired layout keys from earlier shells.
     window.localStorage.removeItem('kryom.panelLoc')
+    window.localStorage.removeItem('kryom.rightOpen')
 
     kryom()
       .getSettings()
       .then((loaded) => {
         setSettings(loaded)
 
-        const right = clampRightWidth(loaded.panelRightWidth, loaded.panelLeftWidth)
-        const left = clampLeftWidth(loaded.panelLeftWidth, right)
+        const left = clampLeftWidth(loaded.panelLeftWidth)
+        const bottom = clampBottomHeight(loaded.panelBottomHeight)
 
-        panelsRef.current = { left, right }
+        panelsRef.current = { left, bottom }
         setLeftWidth(left)
-        setRightWidth(right)
+        setBottomHeight(bottom)
       })
       .catch(() => undefined)
 
@@ -280,32 +280,28 @@ function AppShell() {
   }, [sidebarVisible])
 
   useEffect(() => {
-    window.localStorage.setItem('kryom.rightOpen', rightOpen ? '1' : '0')
-  }, [rightOpen])
+    window.localStorage.setItem('kryom.bottomOpen', bottomOpen ? '1' : '0')
+  }, [bottomOpen])
 
   useEffect(() => {
     window.localStorage.setItem('kryom.editorFontSize', String(fontSize))
   }, [fontSize])
 
   // Keep the layout valid when the Electron window itself is resized.
-  // Hidden sidebars release their width; visible ones keep the editor
-  // at 280px plus the divider handles.
   useEffect(() => {
     const onWindowResize = () => {
-      const leftTaken = sidebarVisible ? panelsRef.current.left : 0
-      const rightTaken = rightOpen ? panelsRef.current.right : 0
-      const right = clampRightWidth(panelsRef.current.right, leftTaken)
-      const left = clampLeftWidth(panelsRef.current.left, rightTaken)
+      const left = clampLeftWidth(panelsRef.current.left)
+      const bottom = clampBottomHeight(panelsRef.current.bottom)
 
-      panelsRef.current = { left, right }
+      panelsRef.current = { left, bottom }
       setLeftWidth(left)
-      setRightWidth(right)
+      setBottomHeight(bottom)
     }
 
     window.addEventListener('resize', onWindowResize)
 
     return () => window.removeEventListener('resize', onWindowResize)
-  }, [sidebarVisible, rightOpen])
+  }, [])
 
   const persistPanels = useCallback(() => {
     const panels = panelsRef.current
@@ -313,43 +309,35 @@ function AppShell() {
     kryom()
       .updateSettings({
         panelLeftWidth: panels.left,
-        panelRightWidth: panels.right,
+        panelBottomHeight: panels.bottom,
       })
       .catch(() => undefined)
   }, [])
 
-  const resizeLeft = useCallback(
-    (value: number) => {
-      const rightTaken = rightOpen ? panelsRef.current.right : 0
-      const next = clampLeftWidth(value, rightTaken)
+  const resizeLeft = useCallback((value: number) => {
+    const next = clampLeftWidth(value)
 
-      panelsRef.current.left = next
-      setLeftWidth(next)
-    },
-    [rightOpen]
-  )
+    panelsRef.current.left = next
+    setLeftWidth(next)
+  }, [])
 
-  const resizeRight = useCallback(
-    (value: number) => {
-      const leftTaken = sidebarVisible ? panelsRef.current.left : 0
-      const next = clampRightWidth(value, leftTaken)
+  const resizeBottom = useCallback((value: number) => {
+    const next = clampBottomHeight(value)
 
-      panelsRef.current.right = next
-      setRightWidth(next)
-    },
-    [sidebarVisible]
-  )
+    panelsRef.current.bottom = next
+    setBottomHeight(next)
+  }, [])
 
   function resetPanels() {
     const left = PANEL_LIMITS.left.fallback
-    const right = PANEL_LIMITS.right.fallback
+    const bottom = PANEL_LIMITS.bottom.fallback
 
-    panelsRef.current = { left, right }
+    panelsRef.current = { left, bottom }
     setLeftWidth(left)
-    setRightWidth(right)
+    setBottomHeight(bottom)
 
     kryom()
-      .updateSettings({ panelLeftWidth: left, panelRightWidth: right })
+      .updateSettings({ panelLeftWidth: left, panelBottomHeight: bottom })
       .then(() => reportStatus('Panel sizes reset to defaults'))
       .catch((e) => reportError(e))
   }
@@ -1345,7 +1333,40 @@ function AppShell() {
     }
   }
 
+  function showBottom(tab: BottomTab) {
+    setBottomTab(tab)
+    setBottomOpen(true)
+  }
+
+  function toggleBottom(tab: BottomTab) {
+    if (bottomTab === tab && bottomOpen) {
+      setBottomOpen(false)
+      return
+    }
+
+    showBottom(tab)
+  }
+
   function selectActivity(id: ActivityId) {
+    // Panel-backed destinations never take over the sidebar: Source
+    // Control and Run toggle bottom-panel tabs, AI Workspace centers
+    // the welcome/stage view. The sidebar keeps its own selection.
+    if (id === 'git') {
+      toggleBottom('git')
+      void refreshGitBranch()
+      return
+    }
+
+    if (id === 'run') {
+      toggleBottom('problems')
+      return
+    }
+
+    if (id === 'home') {
+      setCenterView('home')
+      return
+    }
+
     // Re-selecting the visible view collapses the sidebar, VS Code style.
     if (id === activity && sidebarVisible) {
       setSidebarVisible(false)
@@ -1354,28 +1375,45 @@ function AppShell() {
 
     setActivity(id)
     setSidebarVisible(true)
+  }
 
+  function showSidebar(id: ActivityId) {
     if (id === 'git') {
+      showBottom('git')
       void refreshGitBranch()
+      return
+    }
+
+    if (id === 'run') {
+      showBottom('problems')
+      return
     }
 
     if (id === 'home') {
       setCenterView('home')
+      return
     }
-  }
 
-  function showSidebar(id: ActivityId) {
     setActivity(id)
     setSidebarVisible(true)
-
-    if (id === 'git') {
-      void refreshGitBranch()
-    }
   }
 
-  function showRight(tab: RightTab) {
-    setRightTab(tab)
-    setRightOpen(true)
+  // Activity-bar active state: panel-backed destinations reflect the
+  // bottom panel and center view; sidebar views reflect the sidebar.
+  function isActivitySelected(id: ActivityId): boolean {
+    if (id === 'home') {
+      return centerView !== 'editor'
+    }
+
+    if (id === 'git') {
+      return bottomOpen && bottomTab === 'git'
+    }
+
+    if (id === 'run') {
+      return bottomOpen && bottomTab === 'problems'
+    }
+
+    return activity === id && sidebarVisible
   }
 
   function showHome() {
@@ -1438,7 +1476,7 @@ function AppShell() {
       return
     }
 
-    showSidebar('run')
+    showBottom('problems')
     runNonce.current += 1
     setDiagnosticsRun({ nonce: runNonce.current })
     reportStatus('Diagnostics running…')
@@ -1577,8 +1615,6 @@ function AppShell() {
           showSidebar('run')
           break
         case 'view.home':
-          setActivity('home')
-          setSidebarVisible(true)
           showHome()
           break
         case 'view.chat':
@@ -1598,20 +1634,16 @@ function AppShell() {
           }
           break
         case 'view.terminal':
-          if (rightTab === 'terminal' && rightOpen) {
-            setRightOpen(false)
-          } else {
-            showRight('terminal')
-          }
+          toggleBottom('terminal')
           break
         case 'view.output':
-          showRight('output')
+          showBottom('output')
           break
         case 'view.toggleSidebar':
           setSidebarVisible((visible) => !visible)
           break
         case 'view.toggleRight':
-          setRightOpen((open) => !open)
+          setBottomOpen((open) => !open)
           break
         case 'editor.fontLarger':
           changeFontSize(1)
@@ -1639,11 +1671,11 @@ function AppShell() {
           break
         case 'terminal.clear':
           terminal.clear()
-          showRight('terminal')
+          showBottom('terminal')
           reportStatus('Terminal cleared')
           break
         case 'terminal.focus':
-          showRight('terminal')
+          showBottom('terminal')
           break
         case 'help.shortcuts':
           setShortcutsOpen(true)
@@ -1661,8 +1693,8 @@ function AppShell() {
       activePath,
       activeTab,
       workspace,
-      rightTab,
-      rightOpen,
+      bottomTab,
+      bottomOpen,
       autoSave,
       saving,
       dialogs,
@@ -1704,18 +1736,20 @@ function AppShell() {
     { id: 'research', label: 'RESEARCH' },
   ]
 
+  const BOTTOM_TABS: Array<{ id: BottomTab; label: string }> = [
+    { id: 'terminal', label: 'TERMINAL' },
+    { id: 'problems', label: 'PROBLEMS' },
+    { id: 'git', label: 'SOURCE CONTROL' },
+    { id: 'output', label: 'OUTPUT' },
+  ]
+
   return (
     <main className="ide">
       <TitleBar
         workspaceRoot={workspace?.root ?? null}
         activeFile={showEditor ? (activeTab?.path ?? null) : null}
         dirty={dirty}
-        canSave={dirty && !saving}
-        busy={opening || saving || explorerLoading}
         autoSave={autoSave}
-        onOpenProject={() => void openProject()}
-        onSave={() => void saveEditor()}
-        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       <div className="shell">
@@ -1724,6 +1758,7 @@ function AppShell() {
           sidebarVisible={sidebarVisible}
           onSelect={selectActivity}
           onOpenSettings={() => setSettingsOpen(true)}
+          isSelected={isActivitySelected}
         />
 
         {/* Always mounted (hidden when collapsed) so Git and
@@ -1742,6 +1777,7 @@ function AppShell() {
                   loading={explorerLoading}
                   projectInfo={projectInfo}
                   onOpenFile={(node) => void openEditorFile(node.path)}
+                  onOpenProject={() => void openProject()}
                   onRefresh={() => void refreshExplorer()}
                   onNewFile={(dir) => void createEntry(dir, 'file')}
                   onNewFolder={(dir) => void createEntry(dir, 'directory')}
@@ -1756,27 +1792,6 @@ function AppShell() {
                   onOpenMatch={(path, line) => void openEditorFile(path, line)}
                 />
               </div>
-
-          <div hidden={activity !== 'git'} className="tab-body">
-            <GitPanel
-              workspaceRoot={workspace?.root ?? null}
-              onStatus={reportStatus}
-            />
-          </div>
-
-          <div hidden={activity !== 'run'} className="tab-body">
-            <ProblemsPanel
-              workspaceRoot={workspace?.root ?? null}
-              scripts={scripts}
-              onOpenFileAtLine={(path, line) => void openEditorFile(path, line)}
-              onStatus={reportStatus}
-              pendingRun={diagnosticsRun}
-              onResult={(count, success) => setDiagSummary({ count, success })}
-              onDiagnostics={(result) =>
-                setDiagnostics(result ? result.diagnostics : [])
-              }
-            />
-          </div>
 
               <div hidden={activity !== 'extensions'} className="tab-body">
                 <ExtensionsPanel
@@ -1793,57 +1808,12 @@ function AppShell() {
                   activeFileName={activeTab ? baseName(activeTab.path) : ''}
                   activeFileContent={activeTab?.content ?? ''}
                   onStatus={reportStatus}
-                  onOpenSourceControl={() => showSidebar('git')}
+                  onOpenSourceControl={() => showBottom('git')}
                   onCloneRepository={(url) => void cloneRepository(url)}
                   onCreateReport={(template) => void createReport(template)}
                   onExportActiveFile={(template) => void exportActiveFile(template)}
                   onImportSave={(text, fileName) => void importSave(text, fileName)}
                 />
-              </div>
-
-              <div hidden={activity !== 'home'} className="tab-body">
-                <nav className="home-nav" aria-label="AI Workspace navigation">
-                  <button
-                    type="button"
-                    className="home-nav-row"
-                    onClick={showHome}
-                  >
-                    <span className="home-nav-name">Workspace home</span>
-                    <span className="muted">
-                      Compose prompts for Chat, Agent, or Research
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="home-nav-row"
-                    onClick={() => stageCenter('chat')}
-                  >
-                    <span className="home-nav-name">AI Chat</span>
-                    <span className="muted">
-                      Answers with project and file context
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="home-nav-row"
-                    onClick={() => stageCenter('agent')}
-                  >
-                    <span className="home-nav-name">Coding Agent</span>
-                    <span className="muted">
-                      Planned edits with approval and rollback
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="home-nav-row"
-                    onClick={() => stageCenter('research')}
-                  >
-                    <span className="home-nav-name">Research</span>
-                    <span className="muted">
-                      Cited briefs from real paper search
-                    </span>
-                  </button>
-                </nav>
               </div>
 
               <div hidden={activity !== 'profile'} className="tab-body">
@@ -1882,6 +1852,7 @@ function AppShell() {
               fileName={baseName(activeTab.path)}
               content={activeTab.content}
               dirty={dirty}
+              saving={saving}
               pendingLine={pendingLine}
               onChange={(value) =>
                 setTabs((previous) =>
@@ -1949,6 +1920,9 @@ function AppShell() {
                 <AgentPanel
                   workspaceRoot={workspace?.root ?? null}
                   defaultModel={settings.defaultModel}
+                  defaultIncludeContext={settings.aiContextEnabled}
+                  activeFile={activeTab?.path ?? null}
+                  activeFileDirty={dirty}
                   onFilesChanged={(paths) => void handleAgentFilesChanged(paths)}
                   onStatus={reportStatus}
                   pendingTask={welcomeAgentTask}
@@ -1988,9 +1962,6 @@ function AppShell() {
                 onOpenProject={() => void openProject()}
                 onOpenRecent={(path) => void openRecentPath(path)}
                 onClearRecent={() => void clearRecent()}
-                onShowAiChat={() => stageCenter('chat')}
-                onShowResearch={() => stageCenter('research')}
-                onShowTerminal={() => showRight('terminal')}
                 onSubmitChat={handleWelcomeChat}
                 onSubmitAgent={handleWelcomeAgent}
                 onSubmitResearch={handleWelcomeResearch}
@@ -1998,68 +1969,102 @@ function AppShell() {
               />
             </section>
           )}
+
+          {/* Bottom dock: single mounts for Terminal, Problems, Source
+              Control, and Output. The sidebar no longer mounts Git or
+              Problems; their activity-bar entries toggle these tabs. */}
+          {bottomOpen && (
+            <>
+              <ResizeHandle
+                orientation="horizontal"
+                direction={-1}
+                label="Resize bottom panel"
+                value={bottomHeight}
+                min={PANEL_LIMITS.bottom.min}
+                max={PANEL_LIMITS.bottom.max}
+                onResize={resizeBottom}
+                onResizeEnd={persistPanels}
+              />
+
+              <aside
+                className="bottom-panel"
+                style={{ height: bottomHeight }}
+                aria-label="Bottom panel"
+              >
+                <div
+                  className="bottom-tabs"
+                  role="tablist"
+                  aria-label="Bottom panel"
+                >
+                  {BOTTOM_TABS.map((tab) => (
+                    <button
+                      key={tab.id}
+                      role="tab"
+                      aria-selected={bottomTab === tab.id}
+                      className={
+                        bottomTab === tab.id
+                          ? 'panel-tab active'
+                          : 'panel-tab'
+                      }
+                      onClick={() => toggleBottom(tab.id)}
+                      title={
+                        bottomTab === tab.id
+                          ? `Hide ${tab.label} (click again to collapse)`
+                          : `Show ${tab.label}`
+                      }
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                  <span className="spacer" />
+                  <button
+                    className="panel-tab bottom-collapse"
+                    onClick={() => setBottomOpen(false)}
+                    title="Close bottom panel (Ctrl+J toggles)"
+                    aria-label="Close bottom panel"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="bottom-body">
+                  <div hidden={bottomTab !== 'terminal'} className="tab-body">
+                    <TerminalPanelView
+                      controller={terminal}
+                      workspaceRoot={workspace?.root ?? null}
+                    />
+                  </div>
+                  <div hidden={bottomTab !== 'problems'} className="tab-body">
+                    <ProblemsPanel
+                      workspaceRoot={workspace?.root ?? null}
+                      scripts={scripts}
+                      onOpenFileAtLine={(path, line) =>
+                        void openEditorFile(path, line)
+                      }
+                      onStatus={reportStatus}
+                      pendingRun={diagnosticsRun}
+                      onResult={(count, success) =>
+                        setDiagSummary({ count, success })
+                      }
+                      onDiagnostics={(result) =>
+                        setDiagnostics(result ? result.diagnostics : [])
+                      }
+                    />
+                  </div>
+                  <div hidden={bottomTab !== 'git'} className="tab-body">
+                    <GitPanel
+                      workspaceRoot={workspace?.root ?? null}
+                      onStatus={reportStatus}
+                    />
+                  </div>
+                  <div hidden={bottomTab !== 'output'} className="tab-body">
+                    <OutputPanel />
+                  </div>
+                </div>
+              </aside>
+            </>
+          )}
         </section>
-
-        {rightOpen && (
-          <>
-            <ResizeHandle
-              orientation="vertical"
-              direction={-1}
-              label="Resize right panel"
-              value={rightWidth}
-              min={PANEL_LIMITS.right.min}
-              max={PANEL_LIMITS.right.max}
-              onResize={resizeRight}
-              onResizeEnd={persistPanels}
-            />
-
-            <aside className="right-panel" style={{ width: rightWidth }}>
-              <div className="right-tabs" role="tablist" aria-label="Right panel">
-                <button
-                  role="tab"
-                  aria-selected={rightTab === 'terminal'}
-                  className={
-                    rightTab === 'terminal' ? 'panel-tab active' : 'panel-tab'
-                  }
-                  onClick={() => showRight('terminal')}
-                >
-                  TERMINAL
-                </button>
-                <button
-                  role="tab"
-                  aria-selected={rightTab === 'output'}
-                  className={
-                    rightTab === 'output' ? 'panel-tab active' : 'panel-tab'
-                  }
-                  onClick={() => showRight('output')}
-                >
-                  OUTPUT
-                </button>
-                <span className="spacer" />
-                <button
-                  className="panel-tab right-collapse"
-                  onClick={() => setRightOpen(false)}
-                  title="Close right panel (Ctrl+J toggles)"
-                  aria-label="Close right panel"
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="right-body">
-                <div hidden={rightTab !== 'terminal'} className="tab-body">
-                  <TerminalPanelView
-                    controller={terminal}
-                    workspaceRoot={workspace?.root ?? null}
-                  />
-                </div>
-                <div hidden={rightTab !== 'output'} className="tab-body">
-                  <OutputPanel />
-                </div>
-              </div>
-            </aside>
-          </>
-        )}
       </div>
 
       <StatusBar
@@ -2077,9 +2082,9 @@ function AppShell() {
         autoSave={autoSave}
         terminalRunning={terminal.running}
         diagnostics={diagSummary}
-        onShowDiagnostics={() => showSidebar('run')}
-        rightOpen={rightOpen}
-        onToggleRight={() => setRightOpen((open) => !open)}
+        onShowDiagnostics={() => showBottom('problems')}
+        bottomOpen={bottomOpen}
+        onToggleBottom={() => setBottomOpen((open) => !open)}
       />
 
       {error && (
@@ -2110,7 +2115,7 @@ function AppShell() {
         autoSave={autoSave}
         onToggleAutoSave={() => void toggleAutoSave()}
         panelLeftWidth={leftWidth}
-        panelRightWidth={rightWidth}
+        panelBottomHeight={bottomHeight}
         onResetPanels={resetPanels}
       />
 

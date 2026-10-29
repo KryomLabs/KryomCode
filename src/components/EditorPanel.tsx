@@ -75,6 +75,7 @@ export interface EditorPanelProps {
   onCursorChange?: (line: number, column: number) => void
   workspaceRoot?: string | null
   markers?: KryomDiagnostic[]
+  saving?: boolean
 }
 
 export function EditorPanel(props: EditorPanelProps) {
@@ -245,6 +246,18 @@ export function EditorPanel(props: EditorPanelProps) {
         </span>
         <span className="spacer" />
         <span className="muted">{detectLanguage(props.fileName)}</span>
+        <button
+          type="button"
+          className="mini-btn"
+          onClick={props.onSave}
+          disabled={!props.dirty || props.saving === true}
+          title="Save the active file (Ctrl+S)"
+          aria-label={
+            props.dirty ? 'Save the active file' : 'No unsaved changes'
+          }
+        >
+          {props.saving === true ? 'Saving…' : 'Save'}
+        </button>
       </div>
 
       <Editor
