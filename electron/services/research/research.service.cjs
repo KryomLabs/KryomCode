@@ -37,8 +37,13 @@ const MAX_SOURCES = 20
 const MAX_PAGE_READS = 6
 
 // Live runs only; persistence is the source of truth across restarts.
-// cancelRequested covers the race where cancel lands before the run
-// registers its controller (or after a restart cleared liveRuns).
+// cancelRequested records cancel INTENT unconditionally, so a cancel
+// that lands before the run registers (the resume-startup gap) can
+// never be silently lost. The flag is single-use: executeSession
+// consumes it at startup, resumeResearch clears stale intent before
+// starting a fresh run, and the run finally-block clears it on exit.
+// A flag with no following run is inert: it only takes effect when
+// a run starts, and terminal statuses are never rewritten by cancel.
 const liveRuns = new Map()
 const cancelRequested = new Set()
 
@@ -260,7 +265,10 @@ async function executeSession(id, options = {}) {
 
   liveRuns.set(id, controller)
 
+  // Consume any cancel intent recorded before this run registered
+  // (single-use: a stale flag aborts at most one startup).
   if (cancelRequested.has(id)) {
+    cancelRequested.delete(id)
     controller.abort()
   }
 
@@ -439,13 +447,14 @@ async function getStatus(id) {
 async function cancelResearch(id) {
   const session = await readSession(id)
 
-  if (session.status === 'running') {
-    // Flag first, then abort: a controller registered before this
-    // read is aborted below, and one registered after sees the flag
-    // at startup. The flag is cleared when the run ends, so it
-    // cannot leak into a later resume.
-    cancelRequested.add(id)
-  }
+  // Record intent unconditionally: conditioning the flag on the
+  // observed status loses cancels that land in the resume-startup
+  // gap (status not yet 'running', controller not yet registered).
+  // The flag is single-use (consumed at startup, cleared on resume
+  // and on run exit), and the status flip below still only applies
+  // to 'running' sessions, so idle and terminal sessions keep
+  // truthful statuses and repeated cancels stay consistent.
+  cancelRequested.add(id)
 
   const controller = liveRuns.get(id)
 
@@ -485,6 +494,11 @@ async function resumeResearch(id, options = {}) {
     session.statusDetail = 'Interrupted. Resuming now.'
     await writeSession(session)
   }
+
+  // A fresh explicit run supersedes stale cancel intent left by an
+  // idle cancel. Cancels arriving after this point re-add the flag,
+  // which the run consumes at startup.
+  cancelRequested.delete(id)
 
   executeSession(id, options).catch((error) => {
     log.warn(`Research ${id} ended: ${error.message}`)

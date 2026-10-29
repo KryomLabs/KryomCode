@@ -419,11 +419,75 @@ describe('research service', () => {
     const session = await createSession('Slow research')
     const run = executeSession(session.id, { searchImpl, allowLlm: false })
 
+    // Attach immediately: without this, a rejection that lands while
+    // the test still awaits cancelResearch below is an unhandled
+    // rejection, which node:test attributes to the test and fails it
+    // intermittently under load. The assertions below are unchanged.
+    run.catch(() => {})
+
     await cancelResearch(session.id)
     await assert.rejects(run, /cancelled/)
 
     const done = await readSession(session.id)
 
     assert.equal(done.status, 'cancelled')
+  })
+
+  it('honours cancellation that arrives before startup', async () => {
+    await openWorkspace()
+
+    const searchImpl = async () => ({ sources: [], errors: [], duplicates: 0 })
+    const session = await createSession('Startup race probe')
+
+    // Finish the session so its persisted status is non-running, then
+    // record cancel intent BEFORE the next run registers. This models
+    // a cancel landing in the resume-startup gap with no sleeps: the
+    // ordering is fully deterministic.
+    await executeSession(session.id, { searchImpl, allowLlm: false })
+
+    const finished = await readSession(session.id)
+
+    assert.notEqual(finished.status, 'running')
+
+    await cancelResearch(session.id)
+    await assert.rejects(
+      executeSession(session.id, { searchImpl, allowLlm: false }),
+      /cancelled/
+    )
+
+    const done = await readSession(session.id)
+
+    assert.equal(done.status, 'cancelled')
+
+    // Repeating the cancel stays consistent and truthful.
+    const repeated = await cancelResearch(session.id)
+
+    assert.equal(repeated.id, session.id)
+    assert.equal(repeated.status, 'cancelled')
+  })
+
+  it('keeps repeated cancellation consistent without rewriting terminal state', async () => {
+    await openWorkspace()
+
+    const searchImpl = async () => ({ sources: [], errors: [], duplicates: 0 })
+    const session = await createSession('Repeat cancel probe')
+
+    await executeSession(session.id, { searchImpl, allowLlm: false })
+
+    const finished = await readSession(session.id)
+    const terminal = finished.status
+
+    assert.notEqual(terminal, 'running')
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await cancelResearch(session.id)
+
+      assert.equal(result.id, session.id)
+      assert.equal(result.status, terminal)
+    }
+
+    const done = await readSession(session.id)
+
+    assert.equal(done.status, terminal)
   })
 })
