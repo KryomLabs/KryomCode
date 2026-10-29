@@ -24,6 +24,7 @@ const MODULES = [
   ['./services/ai/providers/meta-muse.provider.cjs', ['MetaMuseProvider']],
   ['./services/ai/providers/mock.provider.cjs', ['MockProvider']],
   ['./services/agent/agent.service.cjs', ['planTask', 'applyEdits', 'cancelPlan']],
+  ['./services/agent/context.service.cjs', ['gatherSourceContext']],
   ['./services/git/git.service.cjs', ['runGit', 'ensureRepository', 'getStatus', 'getRemotes', 'verifyRemote', 'cloneRepository', 'stageFiles', 'unstageFiles', 'discardChanges', 'commitChanges', 'pushChanges', 'pullChanges', 'killAllActiveProcesses']],
   ['./services/git/git-diff.service.cjs', ['getDiff', 'getChangedFiles']],
   ['./services/diagnostics/diagnostics.service.cjs', ['runDiagnostics']],

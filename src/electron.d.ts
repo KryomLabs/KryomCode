@@ -63,12 +63,35 @@ interface KryomAgentEdit {
   content?: string
   contentLength?: number
   preview?: string
+  reason?: string
+  originalDigest?: string
+  originalLength?: number
+}
+
+interface KryomAgentContextFile {
+  path: string
+  relativePath: string
+  bytes: number
+}
+
+interface KryomAgentContextExcluded {
+  path: string
+  reason: string
+}
+
+interface KryomAgentContextPreview {
+  files: KryomAgentContextFile[]
+  excluded: KryomAgentContextExcluded[]
+  totalBytes: number
 }
 
 interface KryomAgentPlan {
   model: string
   task: string
   researchSessionId?: string
+  contextFiles: KryomAgentContextFile[]
+  contextExcluded: KryomAgentContextExcluded[]
+  totalContextBytes: number
   edits: KryomAgentEdit[]
   commands: string[]
   notes: string
@@ -363,7 +386,7 @@ interface KryomAPI {
   planAgentTask: (payload: {
     task: string
     model?: string
-    context?: string
+    contextPaths?: string[]
     researchSessionId?: string
   }) => Promise<KryomAgentPlan>
 
@@ -372,6 +395,10 @@ interface KryomAPI {
   applyAgentEdits: (payload: {
     edits: KryomAgentEdit[]
   }) => Promise<KryomAgentApplyResult>
+
+  getAgentContext: (payload: {
+    paths: string[]
+  }) => Promise<KryomAgentContextPreview>
 
   gitStatus: () => Promise<KryomGitStatus>
 

@@ -86,6 +86,9 @@ contextBridge.exposeInMainWorld('kryom', {
   applyAgentEdits: (payload) =>
     ipcRenderer.invoke('agent:apply', payload),
 
+  getAgentContext: (payload) =>
+    ipcRenderer.invoke('agent:context', payload),
+
   gitStatus: () =>
     ipcRenderer.invoke('git:status'),
 
