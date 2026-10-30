@@ -4,6 +4,7 @@ const os = require('node:os')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const { spawnSync } = require('node:child_process')
+const http = require('node:http')
 
 const {
   setWorkspaceRoot,
@@ -20,6 +21,7 @@ const {
   commitChanges,
   pushChanges,
   pullChanges,
+  cancelGitProcesses,
 } = require('./git.service.cjs')
 const {
   getDiff,
@@ -35,6 +37,57 @@ function hasGit() {
 }
 
 const GIT_AVAILABLE = hasGit()
+
+// Cancellation tests hang a real git child against a localhost
+// server that never answers. An orphaned git would keep its socket
+// open, so socket closure proves the kill reached the child.
+function startHangingServer() {
+  return new Promise((resolve) => {
+    const sockets = new Set()
+    const server = http.createServer(() => {
+      // Never respond: the git child hangs until killed.
+    })
+
+    server.on('connection', (socket) => {
+      sockets.add(socket)
+      socket.on('close', () => sockets.delete(socket))
+    })
+
+    server.listen(0, '127.0.0.1', () => {
+      resolve({ server, sockets, port: server.address().port })
+    })
+  })
+}
+
+async function closeServer(server) {
+  server.closeAllConnections()
+
+  await new Promise((resolve) => server.close(resolve))
+}
+
+async function waitForConnection(sockets) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (sockets.size > 0) {
+      return
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+
+  throw new Error('Git child never connected.')
+}
+
+async function assertSocketsClosed(sockets) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (sockets.size === 0) {
+      return
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+
+  throw new Error('Git child still holds its connection after the kill.')
+}
 
 async function openWorkspace(prefix) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix))
@@ -179,6 +232,14 @@ describe('git.service', () => {
       () => pushChanges('origin', 'main..evil'),
       /unsafe/
     )
+    await assert.rejects(
+      () => pushChanges('--tags', 'main'),
+      /must not start with/
+    )
+    await assert.rejects(
+      () => pushChanges('origin', '--force'),
+      /must not start with/
+    )
   })
 
   it('stages through the repository top level from a subfolder workspace', { skip: !GIT_AVAILABLE }, async () => {
@@ -219,6 +280,28 @@ describe('git.service', () => {
     assert.equal(listed.remotes[0].fetchUrl, 'https://github.com/octo/repo.git')
     assert.equal(listed.remotes[0].pushUrl, 'https://github.com/octo/repo.git')
     assert.ok(root)
+  })
+
+  it('redacts userinfo from remote URLs but keeps SCP-style SSH intact', { skip: !GIT_AVAILABLE }, async () => {
+    await openWorkspace('kryom-remotes-redact-')
+    await runGit(['init'])
+
+    await runGit(['remote', 'add', 'leaky', 'https://user:s3cret@github.com/octo/repo.git'])
+    await runGit(['remote', 'add', 'token', 'https://ghp_tokenvalue@github.com/octo/other.git'])
+    await runGit(['remote', 'add', 'ssh', 'git@github.com:octo/ssh.git'])
+
+    const listed = await getRemotes()
+    const byName = new Map(listed.remotes.map((entry) => [entry.name, entry]))
+
+    assert.equal(byName.get('leaky').fetchUrl, 'https://[REDACTED]@github.com/octo/repo.git')
+    assert.equal(byName.get('leaky').pushUrl, 'https://[REDACTED]@github.com/octo/repo.git')
+    assert.equal(byName.get('token').fetchUrl, 'https://[REDACTED]@github.com/octo/other.git')
+    assert.equal(byName.get('ssh').fetchUrl, 'git@github.com:octo/ssh.git')
+
+    for (const entry of listed.remotes) {
+      assert.ok(!String(entry.fetchUrl).includes('s3cret'))
+      assert.ok(!String(entry.pushUrl).includes('ghp_tokenvalue'))
+    }
   })
 
   it('verifies read access against a local repository without network', { skip: !GIT_AVAILABLE }, async () => {
@@ -298,6 +381,21 @@ describe('git.service', () => {
     )
   })
 
+  it('removes the partial directory when a clone fails', { skip: !GIT_AVAILABLE }, async () => {
+    const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-clonefail-'))
+    const notRepo = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-notrepo-'))
+    await fs.writeFile(path.join(notRepo, 'a.txt'), 'x\n')
+
+    // Cloning a non-repository fails; the assertion below proves the
+    // failure does not leave a partial directory behind.
+    await assert.rejects(() => cloneRepository(notRepo, parent, 'copy'))
+
+    await assert.rejects(
+      () => fs.stat(path.join(parent, 'copy')),
+      /ENOENT/
+    )
+  })
+
   it('pulls fast-forward changes from a local remote', { skip: !GIT_AVAILABLE }, async () => {
     const origin = await openWorkspace('kryom-pullorigin-')
     await runGit(['init'])
@@ -330,5 +428,55 @@ describe('git.service', () => {
       () => pullChanges('origin; evil', branch),
       /unsafe/
     )
+    await assert.rejects(
+      () => pullChanges('--tags', branch),
+      /must not start with/
+    )
+    await assert.rejects(
+      () => pullChanges('origin', '--force'),
+      /must not start with/
+    )
+  })
+
+  it('cancels a running git child without orphans', { skip: !GIT_AVAILABLE }, async () => {
+    await openWorkspace('kryom-gitcancel-')
+    const hanging = await startHangingServer()
+
+    try {
+      const pending = runGit(
+        ['ls-remote', `http://127.0.0.1:${hanging.port}/repo.git`],
+        { extraEnv: { GIT_TERMINAL_PROMPT: '0' }, timeoutMs: 60000 }
+      )
+
+      await waitForConnection(hanging.sockets)
+
+      const stopped = cancelGitProcesses()
+
+      assert.ok(stopped.killed >= 1)
+      await assert.rejects(pending, /cancelled/)
+      await assertSocketsClosed(hanging.sockets)
+      assert.deepEqual(cancelGitProcesses(), { killed: 0 })
+    } finally {
+      await closeServer(hanging.server)
+    }
+  })
+
+  it('reports git timeouts distinctly and kills the child', { skip: !GIT_AVAILABLE }, async () => {
+    await openWorkspace('kryom-gittimeout-')
+    const hanging = await startHangingServer()
+
+    try {
+      const pending = runGit(
+        ['ls-remote', `http://127.0.0.1:${hanging.port}/repo.git`],
+        { extraEnv: { GIT_TERMINAL_PROMPT: '0' }, timeoutMs: 1000 }
+      )
+
+      await waitForConnection(hanging.sockets)
+      await assert.rejects(pending, /timed out/)
+      await assertSocketsClosed(hanging.sockets)
+      assert.deepEqual(cancelGitProcesses(), { killed: 0 })
+    } finally {
+      await closeServer(hanging.server)
+    }
   })
 })

@@ -1,4 +1,8 @@
-import { useState } from 'react'
+// Professional file explorer (Level 3C, Phase 1): hierarchical tree
+// with folder expand/collapse, selection, Git status badges, and a
+// context menu for file operations. All mutations go through the
+// existing validated filesystem IPC; this component only presents.
+import { useEffect, useRef, useState } from 'react'
 import { baseName, parentDir } from '../utils/paths'
 import {
   FileIcon,
@@ -11,13 +15,17 @@ import {
   TrashIcon,
 } from './FileIcons'
 
+export type GitBadge = 'staged' | 'unstaged' | 'untracked'
+
 export interface ExplorerProps {
   workspace: KryomWorkspace | null
   activeFile: string | null
   loading: boolean
   projectInfo: string | null
+  gitBadges?: Record<string, GitBadge> | null
   onOpenFile: (node: KryomNode) => void
   onOpenProject: () => void
+  onCreateProject: () => void
   onRefresh: () => void
   onNewFile: (dir: string) => void
   onNewFolder: (dir: string) => void
@@ -30,16 +38,43 @@ interface RowProps {
   depth: number
   activeFile: string | null
   selected: string | null
+  badges: Record<string, GitBadge> | null | undefined
   onSelect: (path: string) => void
   onOpenFile: (node: KryomNode) => void
   onRename: (node: KryomNode) => void
   onDelete: (node: KryomNode) => void
+  onMenu: (event: React.MouseEvent, node: KryomNode) => void
+}
+
+function badgeLabel(badge: GitBadge): string {
+  if (badge === 'staged') {
+    return 'S'
+  }
+
+  if (badge === 'untracked') {
+    return 'U'
+  }
+
+  return 'M'
+}
+
+function badgeTitle(badge: GitBadge): string {
+  if (badge === 'staged') {
+    return 'Staged Git change'
+  }
+
+  if (badge === 'untracked') {
+    return 'Untracked file'
+  }
+
+  return 'Unstaged Git change'
 }
 
 function ExplorerRow(props: RowProps) {
   const { node } = props
   const isSelected = props.selected === node.path
   const isActive = props.activeFile === node.path
+  const badge = props.badges?.[node.path] ?? null
 
   if (node.type === 'directory') {
     return (
@@ -49,6 +84,7 @@ function ExplorerRow(props: RowProps) {
             className={`tree-row${isSelected ? ' selected' : ''}`}
             style={{ paddingLeft: 12 + props.depth * 14 }}
             onClick={() => props.onSelect(node.path)}
+            onContextMenu={(event) => props.onMenu(event, node)}
           >
             <span className="tree-icon" aria-hidden="true">
               <FolderIcon />
@@ -63,10 +99,12 @@ function ExplorerRow(props: RowProps) {
               depth={props.depth + 1}
               activeFile={props.activeFile}
               selected={props.selected}
+              badges={props.badges}
               onSelect={props.onSelect}
               onOpenFile={props.onOpenFile}
               onRename={props.onRename}
               onDelete={props.onDelete}
+              onMenu={props.onMenu}
             />
           ))}
         </details>
@@ -79,6 +117,7 @@ function ExplorerRow(props: RowProps) {
       key={node.path}
       className={`tree-row-wrap${isSelected ? ' selected' : ''}`}
       style={{ paddingLeft: 12 + props.depth * 14 }}
+      onContextMenu={(event) => props.onMenu(event, node)}
     >
       <button
         className={`tree-row file-row${isActive ? ' selected' : ''}`}
@@ -92,6 +131,15 @@ function ExplorerRow(props: RowProps) {
           <FileIcon name={node.name} />
         </span>{' '}
         <span className="tree-name">{node.name}</span>
+        {badge && (
+          <span
+            className={`git-badge git-${badge}`}
+            title={badgeTitle(badge)}
+            aria-label={badgeTitle(badge)}
+          >
+            {badgeLabel(badge)}
+          </span>
+        )}
       </button>
 
       {isSelected && (
@@ -118,6 +166,37 @@ function ExplorerRow(props: RowProps) {
 
 export function Explorer(props: ExplorerProps) {
   const [selected, setSelected] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{
+    x: number
+    y: number
+    node: KryomNode
+  } | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!menu) {
+      return
+    }
+
+    const onPointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenu(null)
+      }
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMenu(null)
+      }
+    }
+
+    document.addEventListener('pointerdown', onPointer)
+    document.addEventListener('keydown', onKey)
+
+    return () => {
+      document.removeEventListener('pointerdown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menu])
 
   const selectedDir = (): string | null => {
     if (!props.workspace) {
@@ -168,8 +247,35 @@ export function Explorer(props: ExplorerProps) {
     return props.workspace ? walk(props.workspace.tree) : null
   }
 
+  function openMenu(event: React.MouseEvent, node: KryomNode): void {
+    event.preventDefault()
+    event.stopPropagation()
+    setSelected(node.path)
+    // Clamped so the menu never renders off-viewport near edges.
+    setMenu({
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 190)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 220)),
+      node,
+    })
+  }
+
+  async function copyPath(targetPath: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(targetPath)
+    } catch {
+      // Clipboard denial is silent: copying is auxiliary.
+    } finally {
+      setMenu(null)
+    }
+  }
+
   const selectedNode = selected ? findNode(selected) : null
   const targetDir = selectedDir()
+  const menuDir = menu
+    ? menu.node.type === 'directory'
+      ? menu.node.path
+      : parentDir(menu.node.path)
+    : null
 
   return (
     <div className="explorer">
@@ -220,15 +326,25 @@ export function Explorer(props: ExplorerProps) {
         <div className="explorer-empty">
           <p className="explorer-empty-title">No project open</p>
           <p className="muted">
-            Open a local project to browse and edit its files.
+            Open a local project to browse and edit its files, or
+            generate one from a built-in template.
           </p>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={props.onOpenProject}
-          >
-            Open Project
-          </button>
+          <div className="explorer-empty-actions">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={props.onOpenProject}
+            >
+              Open Project
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={props.onCreateProject}
+            >
+              Create Project
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -262,10 +378,12 @@ export function Explorer(props: ExplorerProps) {
                 depth={0}
                 activeFile={props.activeFile}
                 selected={selected}
+                badges={props.gitBadges}
                 onSelect={setSelected}
                 onOpenFile={props.onOpenFile}
                 onRename={props.onRename}
                 onDelete={props.onDelete}
+                onMenu={openMenu}
               />
             ))}
 
@@ -274,6 +392,90 @@ export function Explorer(props: ExplorerProps) {
             )}
           </div>
         </>
+      )}
+
+      {menu && (
+        <div
+          ref={menuRef}
+          className="tab-context-menu"
+          role="menu"
+          style={{ left: menu.x, top: menu.y }}
+        >
+          {menu.node.type === 'file' && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenu(null)
+                props.onOpenFile(menu.node)
+              }}
+            >
+              Open
+            </button>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenu(null)
+              if (menuDir) {
+                props.onNewFile(menuDir)
+              }
+            }}
+          >
+            New file
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenu(null)
+              if (menuDir) {
+                props.onNewFolder(menuDir)
+              }
+            }}
+          >
+            New folder
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenu(null)
+              props.onRename(menu.node)
+            }}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-danger"
+            onClick={() => {
+              setMenu(null)
+              props.onDelete(menu.node)
+            }}
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => void copyPath(menu.node.path)}
+          >
+            Copy path
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenu(null)
+              props.onRefresh()
+            }}
+          >
+            Refresh
+          </button>
+        </div>
       )}
     </div>
   )

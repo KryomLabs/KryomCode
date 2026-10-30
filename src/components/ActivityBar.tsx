@@ -1,16 +1,16 @@
-// Narrow vertical Activity Bar: one icon per sidebar view, settings
-// pinned at the bottom. Icons are original stroke drawings in a
-// 24x24 grid; no external icon font is required.
+// Narrow vertical Activity Bar driven by the activity registry
+// (Level 3C, Phase 1; Level 4 readiness). Destinations render from
+// registered definitions in order, so future modules add navigation
+// without touching the shell. Settings stays pinned at the bottom.
+// Keyboard: the bar is one tab stop with arrow-key navigation.
 
-export type ActivityId =
-  | 'explorer'
-  | 'search'
-  | 'git'
-  | 'run'
-  | 'extensions'
-  | 'connections'
-  | 'home'
-  | 'profile'
+import { useEffect, useRef } from 'react'
+import {
+  listActivities,
+  registerBuiltinActivities,
+} from './activity-registry'
+
+export type ActivityId = string
 
 export interface ActivityBarProps {
   active: ActivityId
@@ -18,8 +18,8 @@ export interface ActivityBarProps {
   onSelect: (id: ActivityId) => void
   onOpenSettings: () => void
   // Optional per-destination active state. The shell uses it for
-  // destinations that open the center view or bottom panel instead
-  // of the sidebar (AI Workspace, Source Control, Run).
+  // destinations that switch the center view or bottom panel instead
+  // of the sidebar.
   isSelected?: (id: ActivityId) => boolean
 }
 
@@ -45,98 +45,95 @@ function Icon({ d, label }: { d: string[]; label: string }) {
   )
 }
 
-const ICONS: Record<ActivityId, { label: string; paths: string[] }> = {
-  explorer: {
-    label: 'Explorer',
-    paths: [
-      'M13 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z',
-      'M13 3v5h6',
-      'M9 13h6M9 17h4',
-    ],
-  },
-  search: {
-    label: 'Search',
-    paths: ['M11 5a6 6 0 1 0 0 12 6 6 0 0 0 0-12z', 'M20 20l-4.2-4.2'],
-  },
-  git: {
-    label: 'Source Control',
-    paths: [
-      'M6 3v6a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v6',
-      'M6 3a1.6 1.6 0 1 0 0 3.2A1.6 1.6 0 0 0 6 3z',
-      'M18 15a1.6 1.6 0 1 0 0 3.2A1.6 1.6 0 0 0 18 15z',
-      'M6 15a1.6 1.6 0 1 0 0 3.2A1.6 1.6 0 0 0 6 15z',
-    ],
-  },
-  run: {
-    label: 'Run and Diagnostics',
-    paths: ['M7 4l13 8-13 8z', 'M7 4v16'],
-  },
-  extensions: {
-    label: 'Extensions',
-    paths: [
-      'M4 4h7v7H4z',
-      'M13 4h7v7h-7z',
-      'M4 13h7v7H4z',
-      'M15.5 13.5l4 4m0-4l-4 4',
-    ],
-  },
-  connections: {
-    label: 'Connections',
-    paths: [
-      'M9 7V4M15 7V4',
-      'M7 7h10v4a5 5 0 0 1-10 0z',
-      'M12 16v5',
-    ],
-  },
-  home: {
-    label: 'AI Workspace',
-    paths: [
-      'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z',
-      'M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z',
-    ],
-  },
-  profile: {
-    label: 'Profile',
-    paths: [
-      'M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
-      'M4 21a8 8 0 0 1 16 0',
-    ],
-  },
-}
-
-const ORDER: ActivityId[] = [
-  'explorer',
-  'search',
-  'git',
-  'run',
-  'extensions',
-  'connections',
-  'home',
-  'profile',
-]
-
 export function ActivityBar(props: ActivityBarProps) {
+  registerBuiltinActivities()
+
+  const activities = listActivities()
+  const buttonRefs = useRef(new Map<string, HTMLButtonElement>())
+  const selectedRef = useRef(props.isSelected)
+  selectedRef.current = props.isSelected
+
+  useEffect(() => {
+    registerBuiltinActivities()
+  }, [])
+
+  function isActive(id: string): boolean {
+    const custom = selectedRef.current
+
+    if (custom) {
+      return custom(id)
+    }
+
+    return props.active === id && props.sidebarVisible
+  }
+
+  function onBarKeyDown(event: React.KeyboardEvent) {
+    const current = document.activeElement
+    const index = activities.findIndex(
+      (entry) => buttonRefs.current.get(entry.id) === current
+    )
+
+    if (index === -1) {
+      return
+    }
+
+    let next: number | null = null
+
+    if (event.key === 'ArrowDown') {
+      next = (index + 1) % activities.length
+    } else if (event.key === 'ArrowUp') {
+      next = (index - 1 + activities.length) % activities.length
+    } else if (event.key === 'Home') {
+      next = 0
+    } else if (event.key === 'End') {
+      next = activities.length - 1
+    }
+
+    if (next !== null) {
+      event.preventDefault()
+      buttonRefs.current.get(activities[next].id)?.focus()
+    }
+  }
+
+  const selectedIndex = Math.max(
+    0,
+    activities.findIndex((entry) => isActive(entry.id))
+  )
+
   return (
-    <nav className="activity-bar" aria-label="Activity Bar">
-      <div className="activity-group" role="group" aria-label="Views">
-        {ORDER.map((id) => {
-          const icon = ICONS[id]
-          const selected = props.isSelected
-            ? props.isSelected(id)
-            : props.active === id && props.sidebarVisible
+    <nav
+      className="activity-bar"
+      aria-label="Activity Bar"
+      onKeyDown={onBarKeyDown}
+    >
+      <div
+        className="activity-group"
+        role="group"
+        aria-label="Views"
+      >
+        {activities.map((entry, index) => {
+          const selected = isActive(entry.id)
 
           return (
             <button
-              key={id}
+              key={entry.id}
+              ref={(element) => {
+                if (element) {
+                  buttonRefs.current.set(entry.id, element)
+                } else {
+                  buttonRefs.current.delete(entry.id)
+                }
+              }}
               type="button"
               className={selected ? 'activity-btn active' : 'activity-btn'}
-              title={icon.label}
-              aria-label={icon.label}
+              title={entry.hint ? `${entry.label} — ${entry.hint}` : entry.label}
+              aria-label={entry.label}
               aria-pressed={selected}
-              onClick={() => props.onSelect(id)}
+              tabIndex={index === selectedIndex ? 0 : -1}
+              onClick={() => props.onSelect(entry.id)}
             >
               <span className="activity-indicator" aria-hidden="true" />
-              <Icon d={icon.paths} label={icon.label} />
+              <Icon d={entry.paths} label={entry.label} />
             </button>
           )
         })}

@@ -10,8 +10,10 @@ const {
 const {
   resolveWorkspacePath,
 } = require('../../security/validate-path.cjs')
+const { boundDetail } = require('../../utils/errors.cjs')
 
 const MAX_DIFF_LENGTH = 200_000
+const MAX_ERROR_DETAIL = 2000
 
 // Bounded, color-free diffs for review UI. Accepts an optional workspace
 // path (validated for containment) and an optional staged flag.
@@ -37,7 +39,7 @@ async function getDiff({ staged = false, path: targetPath } = {}) {
   const result = await runGit(args)
 
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || 'Git diff failed.')
+    throw new Error(boundDetail(result.stderr, MAX_ERROR_DETAIL) || 'Git diff failed.')
   }
 
   const truncated = result.stdout.length >= MAX_DIFF_LENGTH
@@ -61,7 +63,7 @@ async function getChangedFiles({ staged = false } = {}) {
   const result = await runGit(args)
 
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || 'Git diff failed.')
+    throw new Error(boundDetail(result.stderr, MAX_ERROR_DETAIL) || 'Git diff failed.')
   }
 
   return {

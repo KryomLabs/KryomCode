@@ -1,0 +1,16 @@
+{
+  "workflowVersion": 1,
+  "id": "security-review",
+  "name": "Security Review",
+  "description": "Runs a security specialist review plus a computed quality report.",
+  "version": "1.0.0",
+  "inputs": [
+    { "name": "scope", "description": "Comma-separated scope paths (empty means git changes)", "default": "" }
+  ],
+  "steps": [
+    { "id": "security", "kind": "specialist.run", "title": "Security review", "specialist": "security", "task": "Review the current changes for vulnerabilities, unsafe execution, and secret exposure. Scope: {{inputs.scope}}" },
+    { "id": "quality", "kind": "quality.build", "title": "Build quality report", "params": { "paths": "{{inputs.scope}}" } },
+    { "id": "report", "kind": "report", "title": "Report security posture" }
+  ],
+  "owner": "builtin"
+}

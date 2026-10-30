@@ -32,6 +32,8 @@ const {
   deriveQueries,
   compareEvidence,
   cancelResearch,
+  getStatus,
+  resumeResearch,
 } = require('./research.service.cjs')
 
 async function openWorkspace() {
@@ -192,6 +194,56 @@ describe('research session store', () => {
 
     assert.equal(reloaded.sources.length, 1)
     assert.equal(reloaded.sources[0].title, 'Paper 1')
+  })
+
+  it('marks an interrupted run blocked and resumes it after a restart', async () => {
+    await openWorkspace()
+
+    const session = await createSession('Interrupted research')
+    session.sources.push(fakeSource(1))
+    session.status = 'running'
+    session.statusDetail = 'Research running.'
+    await writeSession(session)
+
+    // Simulate a restart: no live run exists, so status must flip.
+    const blocked = await getStatus(session.id)
+
+    assert.equal(blocked.status, 'blocked')
+    assert.match(blocked.statusDetail, /Interrupted/)
+
+    const searchImpl = async () => ({
+      sources: [fakeSource(2)],
+      errors: [],
+      duplicates: 0,
+    })
+    const readImpl = async () => ({
+      ok: true,
+      accessStatus: 'open',
+      excerpt: 'stub excerpt',
+    })
+
+    const resumed = await resumeResearch(session.id, {
+      searchImpl,
+      readImpl,
+      allowLlm: false,
+    })
+
+    assert.deepEqual(resumed, { id: session.id, status: 'running' })
+
+    let done = null
+
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      done = await readSession(session.id)
+
+      if (done.status !== 'running' && done.status !== 'blocked') {
+        break
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+
+    assert.equal(done.status, 'completed')
+    assert.ok(done.sources.some((source) => source.title === 'Paper 1'))
   })
 })
 

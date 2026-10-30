@@ -31,11 +31,23 @@ are verified statements, not guesses.
   `electron/preload.cjs`, and `dotenv`, with no `.env` or test files.
   Neither the unpacked app nor the installer has been launched or
   installed yet; that remains a manual check.
+- Final milestone (2026-10-30): all 7 pre-existing test failures fixed
+  by root cause (F1–F5), P1 critical slice enforced (native approval
+  for destructive terminal/diagnostics commands), renderer harness
+  added. Verified by execution: 632 backend + 8 renderer tests pass,
+  tsc/build/pack/dist green, audit and secret scan clean. Only the
+  running-app GUI walkthrough still needs a display session.
+  See [FINAL_COMPREHENSIVE_AUDIT.md](FINAL_COMPREHENSIVE_AUDIT.md) and
+  [FINAL_RELEASE_REPORT.md](FINAL_RELEASE_REPORT.md).
 
 ## Approval and autonomy boundaries
 
 - Terminal execution requires one explicit `terminal:run` call per command.
-  Command warnings are advisory metadata only, never a safety verdict.
+  Destructive-pattern commands additionally face a native main-process
+  approval dialog (`electron/ipc/approval.cjs`, shared with
+  `diagnostics:run`) that the renderer cannot skip. Command warnings
+  remain advisory metadata, never a safety verdict: no warnings does
+  NOT mean safe.
 - Agent plans never execute. `agent:apply` writes only the edits passed in
   by the caller after re-validating every path. Commands in a plan are
   suggestions and have no execution path in the agent service.
@@ -46,10 +58,10 @@ are verified statements, not guesses.
 
 - Terminal results arrive on completion; mid-run output streaming is not
   exposed. Cancellation kills running processes via `terminal:cancel`.
-- Agent planning is bounded by the 90 s provider timeout. Mid-plan
-  cancel exists (`agent:cancel` aborts the in-flight provider
-  request); batch apply itself cannot be cancelled mid-apply, but it
-  is local, completes in milliseconds, and rolls back on failure.
+- Agent planning is bounded by the 90 s provider timeout. Cancel
+  (`agent:cancel`) aborts in-flight planning or stops an apply
+  between edits, keeping completed work plus a checkpoint; full
+  failures still roll back.
 - Diagnostics parsers cover TypeScript, generic file:line:col, and Node
   stack formats only. Unknown formats yield zero diagnostics, never fake
   ones, and `success` still reflects the real exit code.
@@ -92,17 +104,21 @@ coverage: url-fetch suite, chat-store suite, kill-tree tests,
 scope-guard tests, cancel tests, MockProvider abort support.
 Still manual-only: TESTING.md checks 1–12.
 
-Known residual risks: DNS-rebinding SSRF (literal-IP blocking
-only, no lookup pinning); TOCTOU between path validation and
-use (accepted for a local single-user IDE); chat save/restore
-micro-race when switching projects mid-send (one message may
-land in the wrong project's history).
+Known residual risks: DNS-rebinding SSRF on the undici-missing
+fallback path only (the normal path validates every DNS answer and
+pins the connection to the validated addresses via an undici Agent;
+see `electron/services/research/url-fetch.service.cjs`); TOCTOU
+between path validation and
+use (accepted for a local single-user IDE). Fixed 2026-10-30
+(Level 2B.2): the chat save/restore micro-race is closed by
+root-bound saves, a previous-root slot, and a renderer stash.
 
 Deferred (documented, not implemented): chat streaming (needs
 provider SSE plus IPC push events); research session
 rename/delete (no product UI needs them); per-window workspace
-isolation (New Window stays disabled); mid-apply agent cancel
-(apply is local and completes in milliseconds).
+isolation (New Window stays disabled). Mid-apply cancel shipped in
+2B.4 (`agent:cancel` stops between edits, keeps partial work plus
+a checkpoint).
 
 ## UI/UX maturity sprint (2026-10-28, uncommitted)
 

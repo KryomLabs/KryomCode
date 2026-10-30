@@ -6,7 +6,7 @@ const SUPPORTED_MODELS = ['muse-spark-1.3', 'muse-wonder-1.0']
 const DEFAULT_MODEL = 'muse-spark-1.3'
 
 const MISSING_KEY_MESSAGE =
-  'Meta API key is not configured. Add MODEL_API_KEY to the project-root .env file, then restart KryomCode.'
+  'Meta API key is not configured. Add your key in Settings → Providers, or set MODEL_API_KEY in the project-root .env file and restart KryomCode.'
 
 function isSupportedModel(model) {
   return typeof model === 'string' && SUPPORTED_MODELS.includes(model)

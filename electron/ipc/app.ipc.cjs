@@ -31,16 +31,23 @@ module.exports = function registerAppIPC({
     }
   })
 
-  // Configuration presence only: booleans cross the bridge, never key
-  // material. The Connections view uses this for setup guidance.
+  // Configuration presence only: booleans and source labels cross
+  // the bridge, never key material. The Connections view and the Meta
+  // AI workspace use this for setup guidance.
   ipcMain.handle('app:get-ai-status', async (event) => {
     if (!isTrustedSender(event)) {
       throw new Error('Unauthorized app request.')
     }
 
+    const { getSecretSource } = require('../services/settings/secrets.service.cjs')
+    const { isVaultAvailable } = require('../services/settings/credential-vault.cjs')
+
     return {
       modelKeyConfigured: getSecret('MODEL_API_KEY').length > 0,
       researchKeyConfigured: getSecret('TAVILY_API_KEY').length > 0,
+      modelKeySource: getSecretSource('MODEL_API_KEY'),
+      researchKeySource: getSecretSource('TAVILY_API_KEY'),
+      vaultAvailable: isVaultAvailable(),
     }
   })
 

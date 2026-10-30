@@ -1,0 +1,18 @@
+{
+  "templateVersion": 1,
+  "id": "basic-web",
+  "name": "Basic Web Application",
+  "description": "Zero-dependency static site: HTML, CSS, and JavaScript.",
+  "version": "1.0.0",
+  "category": "frontend",
+  "language": "JavaScript",
+  "framework": "None",
+  "runtime": "Any static server or browser",
+  "variables": [
+    { "name": "project_name", "description": "Site title", "default": "my-site", "required": true, "pattern": "[a-z0-9-]+" }
+  ],
+  "setup": {
+    "instructions": "Open index.html in a browser, or serve the folder with any static server.",
+    "commands": ["npx serve ."]
+  }
+}

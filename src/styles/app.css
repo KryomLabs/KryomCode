@@ -497,40 +497,7 @@ summary.tree-row.selected {
   font-size: 11px;
 }
 
-/* Welcome page */
-.welcome-brand {
-  margin: 0 0 4px;
-  color: #a99cff;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-}
-
-.welcome .welcome-tagline {
-  max-width: 560px;
-  font-size: 14px;
-  line-height: 1.7;
-}
-
-.welcome-keys {
-  margin-top: 24px;
-  font-size: 12px;
-}
-
-.welcome-keys kbd {
-  padding: 1px 6px;
-  background: #24242c;
-  border: 1px solid #3b3b46;
-  border-radius: 4px;
-  color: #e4e4e7;
-  font: 11px Consolas, monospace;
-}
-
-.welcome-key-sep {
-  margin: 0 10px;
-}
-
+/* Minimal fallback panels (missing session, future views) */
 section.editor-panel > .welcome {
   flex: 1;
   min-height: 0;
@@ -543,191 +510,71 @@ section.editor-panel > .welcome {
   }
 }
 
-/* Welcome redesign: spacious centered composer layout */
-.welcome-redesign {
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 56px 24px 40px;
-  text-align: center;
-}
-
-.welcome-inner {
-  width: 100%;
-  max-width: 720px;
+/* Discovery workspace: minimal central home. Two heading lines,
+   then the Chat or Research experience filling the space. */
+.discovery {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  min-width: 0;
-}
-
-.welcome-redesign h1 {
-  margin: 0 0 8px;
-  font-size: 30px;
-  line-height: 1.25;
-  color: #fff;
-  text-wrap: balance;
-}
-
-.welcome-redesign .welcome-tagline {
-  margin: 0 0 20px;
-  max-width: 600px;
-}
-
-.welcome-modes {
-  display: inline-flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 2px;
-  margin-bottom: 14px;
-  padding: 3px;
-  background: #17171c;
-  border: 1px solid #292930;
-  border-radius: 9px;
-}
-
-.welcome-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 18px;
-  font-size: 12px;
-  font-weight: 600;
-  border-color: transparent;
-  background: transparent;
-  color: #858592;
-}
-
-.welcome-mode:hover:not(:disabled) {
-  background: #22222b;
-  color: #e4e4e7;
-}
-
-.welcome-mode.active {
-  background: #292936;
-  border-color: transparent;
-  color: #fff;
-}
-
-.welcome-composer {
-  width: 100%;
-  padding: 12px;
-  background: #19191f;
-  border: 1px solid #30303a;
-  border-radius: 10px;
-  text-align: left;
-}
-
-.welcome-composer textarea {
-  display: block;
-  width: 100%;
-  min-height: 96px;
-  max-height: 200px;
-  resize: vertical;
-  border: 0;
-  background: transparent;
-  padding: 4px;
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.welcome-composer textarea:focus {
-  border-color: transparent;
-}
-
-.welcome-composer textarea:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.welcome-composer-footer {
-  margin-top: 8px;
-  padding-top: 10px;
-  border-top: 1px solid #26262e;
-}
-
-.welcome-composer-footer button[type='submit'] {
-  background: #6556c8;
-  border-color: #6556c8;
-  color: #fff;
-  font-weight: 600;
-}
-
-.welcome-composer-footer button[type='submit']:hover:not(:disabled) {
-  background: #7767df;
-  border-color: #7767df;
-}
-
-.welcome-notice {
-  margin: 12px 0 0;
-  max-width: 600px;
-  font-size: 12px;
-  line-height: 2;
-}
-
-.welcome-notice .mini-btn {
-  margin-left: 8px;
-}
-
-.welcome-key-notice {
-  width: 100%;
-  max-width: 600px;
-  margin-top: 12px;
-  text-align: left;
-}
-
-.welcome-key-notice .ai-error {
-  margin: 0;
-}
-
-.welcome-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 16px;
-  width: 100%;
-}
-
-.welcome-suggestion {
-  padding: 7px 12px;
-  font-size: 12px;
-  background: #1c1c23;
-  border-radius: 999px;
-  max-width: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.welcome-meta {
-  margin: 4px 0 0;
+.discovery-head {
+  flex: none;
+  padding: 28px 32px 12px;
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.discovery-brand {
+  margin: 0 0 2px;
+  color: #a99cff;
   font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
 }
 
-.welcome-meta strong {
-  color: #e4e4e7;
+.discovery-head h1 {
+  margin: 0;
+  font-size: 22px;
   font-weight: 600;
+  line-height: 1.3;
+  color: #fff;
 }
 
-.welcome-redesign .welcome-keys {
-  margin-top: 12px;
-  line-height: 2;
+.discovery-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 32px 20px;
+  overflow: hidden;
+}
+
+.discovery-body > * {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 @media (max-width: 700px) {
-  .welcome-redesign {
-    padding: 32px 16px;
+  .discovery-head {
+    padding: 20px 16px 8px;
   }
 
-  .welcome-redesign h1 {
-    font-size: 24px;
+  .discovery-head h1 {
+    font-size: 18px;
   }
 
-  .welcome-suggestion {
-    white-space: normal;
-    border-radius: 8px;
-    text-align: left;
+  .discovery-body {
+    padding: 0 16px 12px;
   }
 }
 
@@ -833,6 +680,23 @@ section.editor-panel > .welcome {
 }
 
 /* Bottom dock with Terminal, Problems, Source Control, Output tabs */
+.panel-crash {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  margin: 8px;
+  border: 1px solid var(--kc-error, #ff7a93);
+  border-radius: 6px;
+  background: var(--kc-panel, #151519);
+  color: var(--kc-text, #e4e4e7);
+  font-size: 12px;
+}
+
+.bottom-dock {
+  display: contents;
+}
+
 .bottom-panel {
   flex-shrink: 0;
   display: flex;
@@ -2010,6 +1874,38 @@ html.kryom-resizing .resize-handle::after {
   white-space: nowrap;
 }
 
+/* Discovery mode switch: compact Chat/Research segmented control
+   in the title bar. No separate navigation bar. */
+.title-modes {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  background: var(--kc-panel-deep);
+  border: 1px solid var(--kc-border);
+  border-radius: 7px;
+}
+
+.title-mode-btn {
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--kc-text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.title-mode-btn:hover:not(.active) {
+  color: var(--kc-text);
+}
+
+.title-mode-btn.active {
+  background: var(--kc-btn);
+  color: #fff;
+}
+
 /* ---- Shell: activity bar + sidebar + center ---- */
 .shell {
   display: flex;
@@ -2333,68 +2229,10 @@ html.kryom-resizing .resize-handle::after {
   padding: 12px;
 }
 
-/* ---- Welcome additions ---- */
-.welcome-workspace {
-  margin: 6px 0 0;
-}
-
+/* ---- Discovery additions ---- */
 .home-tabbar {
   justify-content: flex-start;
   padding: 6px 10px;
-}
-
-.welcome-recent {
-  width: 100%;
-  max-width: 560px;
-  margin-top: 18px;
-  border: 1px solid var(--kc-border);
-  border-radius: 8px;
-  background: var(--kc-panel-deep);
-  padding: 8px;
-}
-
-.welcome-recent-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 6px 6px;
-}
-
-.welcome-recent ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.recent-row {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  padding: 6px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.recent-row:hover {
-  background: var(--kc-btn);
-}
-
-.recent-name {
-  font-weight: 600;
-  color: var(--kc-text);
-  white-space: nowrap;
-}
-
-.recent-path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ---- Output panel ---- */
@@ -2762,4 +2600,278 @@ html.kryom-resizing .resize-handle::after {
 
 .ide ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ---- Memory (project knowledge) ---- */
+.memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.memory-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.memory-item {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: 4px;
+  color: var(--kc-text);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.memory-item:hover {
+  background: #292936;
+}
+
+.memory-item.selected {
+  border-color: var(--kc-border);
+  background: var(--kc-panel-alt);
+}
+
+.memory-item-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.memory-type {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--kc-text-dim);
+}
+
+.memory-stale {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #e8b93e;
+}
+
+.memory-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-detail,
+.memory-form {
+  border-top: 1px solid var(--kc-border);
+  padding: 10px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.memory-detail-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.memory-detail-title {
+  margin: 0;
+  font-size: 13px;
+}
+
+.memory-detail-content {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.memory-reasons,
+.memory-sources {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.memory-subhead {
+  margin: 4px 0 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--kc-text-dim);
+}
+
+.memory-detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.memory-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.memory-form textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+
+.memory-sources-edit {
+  border: 1px solid var(--kc-border);
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-source-row {
+  display: flex;
+  gap: 6px;
+}
+
+.memory-source-row select {
+  flex: 0 0 auto;
+}
+
+.memory-source-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Agent plan progress (3A.3) ---- */
+.plan-risks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.plan-risks ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.risk-severity {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.risk-low {
+  color: var(--kc-text-dim);
+}
+
+.risk-medium {
+  color: #e8b93e;
+}
+
+.risk-high {
+  color: #e06c5b;
+}
+
+.plan-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  border-top: 1px solid var(--kc-border);
+  padding-top: 10px;
+}
+
+.plan-steps,
+.plan-reports {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plan-step {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+.plan-step p {
+  margin: 0;
+}
+
+.plan-step-failed,
+.plan-step-blocked {
+  background: #292936;
+}
+
+.plan-step-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.plan-interrupted {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #e8b93e;
+}
+
+.plan-step-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.plan-reports pre {
+  margin: 4px 0 0;
+}
+
+/* ---- Agent attached-context provenance (3A.4) ---- */
+.plan-context {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.plan-context p {
+  margin: 0;
+}
+
+.plan-context-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.context-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--kc-text-dim);
+}
+
+.plan-context-warning {
+  color: #e8b93e;
 }

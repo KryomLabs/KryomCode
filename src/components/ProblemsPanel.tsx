@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { kryom, errorMessage } from '../api/kryom'
+import { kryom, errorMessage, isCancelError } from '../api/kryom'
 import { resolveAgainstRoot } from '../utils/paths'
+import { confirmCommandRun } from '../utils/command-confirm'
+import { useDialogs } from './dialogs'
 
 export interface ProblemsPanelProps {
   workspaceRoot: string | null
+  requireConfirmAll: boolean
   scripts: string[]
   onOpenFileAtLine: (path: string, line: number) => void
   onStatus: (status: string) => void
@@ -25,6 +28,7 @@ function suggestCommand(scripts: string[]): string {
 }
 
 export function ProblemsPanel(props: ProblemsPanelProps) {
+  const dialogs = useDialogs()
   const [command, setCommand] = useState('')
   const [result, setResult] = useState<KryomDiagnosticsResult | null>(null)
   const [running, setRunning] = useState(false)
@@ -59,6 +63,21 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
       return
     }
 
+    const approved = await confirmCommandRun(trimmed, {
+      requireConfirmAll: props.requireConfirmAll,
+      classify: (text) =>
+        kryom()
+          .classifyCommand(text)
+          .then((result) => result.warnings),
+      confirm: (title, message, confirmLabel) =>
+        dialogs.confirm({ title, message, confirmLabel, danger: true }),
+    })
+
+    if (!approved) {
+      props.onStatus('Diagnostics run cancelled')
+      return
+    }
+
     setRunning(true)
     setError('')
 
@@ -66,9 +85,11 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
       const next = await kryom().runDiagnostics({ command: trimmed })
       setResult(next)
       props.onStatus(
-        next.success
-          ? `Diagnostics passed (${next.diagnostics.length} problem(s))`
-          : 'Diagnostics failed'
+        next.cancelled
+          ? 'Diagnostics cancelled'
+          : next.success
+            ? `Diagnostics passed (${next.diagnostics.length} problem(s))`
+            : 'Diagnostics failed'
       )
       resultRef.current?.(next.diagnostics.length, next.success)
       diagnosticsRef.current?.(next)
@@ -76,9 +97,26 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
       setResult(null)
       setError(errorMessage(e))
       diagnosticsRef.current?.(null)
+      // Main-process approval declines (native dialog Cancel) land
+      // here as cancellations, not failures. React batches the clear
+      // with the set above, so no error flashes.
+      if (isCancelError(e)) {
+        setError('')
+        props.onStatus('Diagnostics run cancelled')
+      }
     } finally {
       setRunning(false)
     }
+  }
+
+  // Diagnostics share the terminal process registry, so Stop uses
+  // the same kill-all cancel as the terminal panel.
+  function stop() {
+    if (!running) {
+      return
+    }
+
+    kryom().cancelCommand().catch(() => undefined)
   }
 
   // External runs (Run menu / F5) use the current command, falling
@@ -125,6 +163,9 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
         >
           {running ? 'Running…' : 'Run'}
         </button>
+        <button type="button" disabled={!running} onClick={stop}>
+          Stop
+        </button>
       </form>
 
       {props.scripts.length > 0 && (
@@ -158,7 +199,12 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
             className={`verdict ${result.success ? 'verdict-pass' : 'verdict-fail'}`}
             role="status"
           >
-            {result.success ? 'Passed' : 'Failed'} · exit code {result.exitCode}
+            {result.cancelled
+              ? 'Cancelled'
+              : result.success
+                ? 'Passed'
+                : 'Failed'}{' '}
+            · exit code {result.exitCode}
             {result.timedOut ? ' · timed out' : ''}
             {result.outputLimited ? ' · output truncated' : ''} ·{' '}
             {result.diagnostics.length} problem(s)

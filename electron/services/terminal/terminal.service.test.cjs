@@ -132,4 +132,72 @@ describe('terminal.service', () => {
     assert.equal(result.exitCode, 1)
     assert.equal(listRunningProcesses().length, 0)
   })
+
+  it('marks signal-cancelled runs instead of reporting failure', async () => {
+    const controller = new AbortController()
+    const pending = runCommand('node -e "setTimeout(() => {}, 30000)"', {
+      signal: controller.signal,
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    controller.abort()
+
+    const result = await pending
+
+    assert.equal(result.cancelled, true)
+    assert.equal(result.timedOut, false)
+    assert.match(result.output, /Cancelled by user/)
+    assert.equal(listRunningProcesses().length, 0)
+
+    // The registry is clean: a follow-up command runs normally.
+    const next = await runCommand('node -e "console.log(1 + 1)"')
+
+    assert.equal(next.cancelled, false)
+    assert.equal(next.exitCode, 0)
+    assert.match(next.output, /2/)
+  })
+
+  it('marks pre-aborted runs as cancelled', async () => {
+    const controller = new AbortController()
+
+    controller.abort()
+
+    const result = await runCommand('node -e "setTimeout(() => {}, 30000)"', {
+      signal: controller.signal,
+    })
+
+    assert.equal(result.cancelled, true)
+    assert.equal(result.timedOut, false)
+    assert.equal(listRunningProcesses().length, 0)
+  })
+
+  it('keeps timeouts distinct from cancellations', async () => {
+    const result = await runCommand('node -e "setTimeout(() => {}, 30000)"', {
+      timeoutMs: 100,
+    })
+
+    assert.equal(result.timedOut, true)
+    assert.equal(result.cancelled, false)
+    assert.match(result.output, /timed out/)
+    assert.equal(listRunningProcesses().length, 0)
+  })
+
+  it('tolerates repeated cancellation with an empty registry', async () => {
+    assert.deepEqual(cancelRunningProcesses(), { killed: 0 })
+
+    const pending = runCommand('node -e "setTimeout(() => {}, 30000)"')
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const first = cancelRunningProcesses()
+    const second = cancelRunningProcesses()
+
+    assert.ok(first.killed >= 1)
+    assert.deepEqual(second, { killed: 0 })
+
+    const result = await pending
+
+    assert.equal(result.cancelled, true)
+    assert.equal(listRunningProcesses().length, 0)
+  })
 })

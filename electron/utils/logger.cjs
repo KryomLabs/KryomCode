@@ -65,11 +65,52 @@ function format(scope, level, args) {
   return `[${timestamp}] [${scope}] [${level}] ${redactText(message)}`
 }
 
+const LOG_LEVELS = ['error', 'warn', 'info']
+
+function normalizeLevel(value) {
+  const text = String(value || '').trim().toLowerCase()
+
+  return LOG_LEVELS.includes(text) ? text : 'info'
+}
+
+// Reads KRYOM_LOG_LEVEL once per call so tests and late env changes
+// behave deterministically; explicit setLogLevel wins when set.
+let explicitLevel = null
+
+function setLogLevel(level) {
+  explicitLevel = normalizeLevel(level)
+
+  return explicitLevel
+}
+
+function currentLevel() {
+  if (explicitLevel) {
+    return explicitLevel
+  }
+
+  return normalizeLevel(process.env.KRYOM_LOG_LEVEL || 'info')
+}
+
+function enabled(level) {
+  return LOG_LEVELS.indexOf(level) <= LOG_LEVELS.indexOf(currentLevel())
+}
+
 function createLogger(scope) {
   return {
-    info: (...args) => console.log(format(scope, 'info', args)),
-    warn: (...args) => console.warn(format(scope, 'warn', args)),
-    error: (...args) => console.error(format(scope, 'error', args)),
+    info: (...args) => {
+      if (enabled('info')) {
+        console.log(format(scope, 'info', args))
+      }
+    },
+    warn: (...args) => {
+      if (enabled('warn')) {
+        console.warn(format(scope, 'warn', args))
+      }
+    },
+    error: (...args) => {
+      // Errors always emit: suppressing them hides crashes.
+      console.error(format(scope, 'error', args))
+    },
   }
 }
 
@@ -77,4 +118,6 @@ module.exports = {
   createLogger,
   redact,
   redactText,
+  setLogLevel,
+  currentLevel,
 }

@@ -4,6 +4,7 @@
 // No new database: one JSON file per session plus a markdown brief.
 // All reads and writes go through the storage-path layer, which
 // rejects symlinks and junctions in the chain and writes atomically.
+const crypto = require('node:crypto')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 
@@ -76,7 +77,7 @@ function nowIso() {
 
 function generateSessionId() {
   const stamp = Date.now().toString(36)
-  const random = Math.random().toString(36).slice(2, 8)
+  const random = crypto.randomBytes(3).toString('hex')
 
   return `rs-${stamp}-${random}`
 }

@@ -1,0 +1,17 @@
+{
+  "skillVersion": 1,
+  "id": "test-advisor",
+  "name": "Test Advisor",
+  "description": "Finds relevant tests and coverage gaps for changed code without executing anything.",
+  "version": "1.0.0",
+  "instructions": "Identify the tests relevant to the changed code, name coverage gaps precisely, and suggest concrete new tests with file, title, and rationale. Cite test files from the evidence; never invent test files. Suggest commands only — execution is never automatic.",
+  "tasks": ["coverage review", "test planning"],
+  "inputSchema": { "type": "object", "properties": {}, "required": [] },
+  "outputSchema": { "type": "object", "properties": {}, "required": [] },
+  "tools": ["specialist.testing"],
+  "entryTool": "specialist.testing",
+  "permissions": ["ai.provider", "ai.tools"],
+  "models": { "provider": null, "model": null },
+  "dependencies": [],
+  "owner": "builtin"
+}

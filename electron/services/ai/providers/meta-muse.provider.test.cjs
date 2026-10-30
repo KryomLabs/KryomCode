@@ -76,6 +76,22 @@ describe('meta-muse.provider', () => {
     ])
   })
 
+  it('refuses to follow redirects with the Bearer [REDACTED]', async () => {
+    const { calls, fetchImpl } = successFetch('Hi there.')
+    const provider = new MetaMuseProvider({
+      apiKey: 'test-key',
+      fetchImpl,
+    })
+
+    await provider.chat({
+      model: 'muse-spark-1.3',
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].options.redirect, 'error')
+  })
+
   it('uses the same request format for Muse Wonder', async () => {
     const { calls, fetchImpl } = successFetch('Wonder answer.')
     const provider = new MetaMuseProvider({
@@ -152,6 +168,56 @@ describe('meta-muse.provider', () => {
           messages: [{ role: 'user', content: 'hi' }],
         }),
       /failed \(500\)/
+    )
+  })
+
+  it('bounds server error detail in user-facing messages', async () => {
+    const provider = new MetaMuseProvider({
+      apiKey: 'test-key',
+      fetchImpl: async () =>
+        jsonResponse({
+          ok: false,
+          status: 500,
+          body: { error: { message: `  ${'x'.repeat(2000)}  ` } },
+        }),
+    })
+
+    await assert.rejects(
+      () =>
+        provider.chat({
+          model: 'muse-spark-1.3',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      (error) => {
+        assert.equal(error.message, 'x'.repeat(500))
+
+        return true
+      }
+    )
+  })
+
+  it('falls back to static wording for non-string server detail', async () => {
+    const provider = new MetaMuseProvider({
+      apiKey: 'test-key',
+      fetchImpl: async () =>
+        jsonResponse({
+          ok: false,
+          status: 500,
+          body: { error: { message: { nested: true } } },
+        }),
+    })
+
+    await assert.rejects(
+      () =>
+        provider.chat({
+          model: 'muse-spark-1.3',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      (error) => {
+        assert.equal(error.message, 'Meta API request failed (500).')
+
+        return true
+      }
     )
   })
 

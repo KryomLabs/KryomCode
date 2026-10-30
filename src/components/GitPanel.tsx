@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { kryom, errorMessage } from '../api/kryom'
+import { kryom, errorMessage, isCancelError } from '../api/kryom'
 import { useDialogs } from './dialogs'
 
 export interface GitPanelProps {
@@ -254,7 +254,11 @@ export function GitPanel(props: GitPanelProps) {
       await loadStatus()
       props.onStatus(`Pushed ${result.branch} to ${result.remote}`)
     } catch (e) {
-      setError(errorMessage(e))
+      if (isCancelError(e)) {
+        props.onStatus('Git push cancelled')
+      } else {
+        setError(errorMessage(e))
+      }
     } finally {
       setOperating(null)
     }
@@ -285,10 +289,22 @@ export function GitPanel(props: GitPanelProps) {
       await loadStatus()
       props.onStatus(`Pulled ${result.branch} from ${result.remote}`)
     } catch (e) {
-      setError(errorMessage(e))
+      if (isCancelError(e)) {
+        props.onStatus('Git pull cancelled')
+      } else {
+        setError(errorMessage(e))
+      }
     } finally {
       setOperating(null)
     }
+  }
+
+  function cancelOperation() {
+    if (!operating) {
+      return
+    }
+
+    kryom().cancelGit().catch(() => undefined)
   }
 
   const busy = loading || operating !== null || diffLoading
@@ -440,6 +456,9 @@ export function GitPanel(props: GitPanelProps) {
                   <button onClick={() => void pull()} disabled={busy}>
                     {operating === 'pull' ? 'Pulling…' : 'Pull'}
                   </button>
+                  {(operating === 'push' || operating === 'pull') && (
+                    <button onClick={cancelOperation}>Cancel</button>
+                  )}
                 </div>
               </div>
             </div>

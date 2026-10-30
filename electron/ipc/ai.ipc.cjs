@@ -8,6 +8,9 @@ const {
   saveChat,
   restoreChat,
 } = require('../services/ai/chat-store.cjs')
+const {
+  assertOptionalString,
+} = require('../security/validate-input.cjs')
 
 module.exports = function registerAIIPC({
   isTrustedSender,
@@ -37,7 +40,9 @@ module.exports = function registerAIIPC({
       throw new Error('Invalid chat history.')
     }
 
-    return saveChat(payload.messages)
+    const root = assertOptionalString(payload.root, 'root', 2000)
+
+    return saveChat(payload.messages, { root: root ?? undefined })
   })
 
   ipcMain.handle('chat:restore', async (event) => {

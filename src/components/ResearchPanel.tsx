@@ -8,6 +8,12 @@ export interface ResearchPanelProps {
   onImplement: (session: KryomResearchSession) => void
   onAsk: (session: KryomResearchSession) => void
   pendingStart?: { objective: string; nonce: number } | null
+  // Meta AI session embedding (Level 3C): reports the viewed research
+  // session so the session timeline can query real research steps.
+  onSessionChange?: (sessionId: string | null) => void
+  // When embedded, restores this linked session instead of the global
+  // active one, so tabs never steal each other's research view.
+  sessionId?: string | null
 }
 
 function stepIcon(status: KryomResearchStep['status']): string {
@@ -60,6 +66,15 @@ export function ResearchPanel(props: ResearchPanelProps) {
     []
   )
 
+  // Ref mirrors: the poll interval below must not reset on every
+  // parent render (a `props` dep would starve it while typing).
+  const loadSessionRef = useRef(loadSession)
+  loadSessionRef.current = loadSession
+  const refreshListRef = useRef(refreshList)
+  refreshListRef.current = refreshList
+  const statusRef = useRef(props.onStatus)
+  statusRef.current = props.onStatus
+
   useEffect(() => {
     if (!props.workspaceRoot) {
       setSession(null)
@@ -67,16 +82,27 @@ export function ResearchPanel(props: ResearchPanelProps) {
       return
     }
 
-    kryom()
-      .getActiveResearch()
-      .then((active) => {
-        if (active) {
-          setSession(active)
-        }
+    // Embedded sessions restore their linked research; standalone use
+    // keeps the global active session. A stale link clears the view
+    // with an honest error instead of showing another session.
+    if (props.sessionId) {
+      loadSession(props.sessionId).catch((e) => {
+        setSession(null)
+        setError(`Linked research session is unavailable: ${errorMessage(e)}`)
       })
-      .catch(() => undefined)
+    } else {
+      kryom()
+        .getActiveResearch()
+        .then((active) => {
+          if (active) {
+            setSession(active)
+          }
+        })
+        .catch(() => undefined)
+    }
+
     void refreshList()
-  }, [props.workspaceRoot, refreshList])
+  }, [props.workspaceRoot, props.sessionId, refreshList, loadSession])
 
   useEffect(() => {
     if (pollRef.current !== null) {
@@ -88,12 +114,14 @@ export function ResearchPanel(props: ResearchPanelProps) {
       return
     }
 
+    const watchedId = session.id
+
     pollRef.current = window.setInterval(() => {
-      loadSession(session.id)
+      loadSessionRef.current(watchedId)
         .then((loaded) => {
           if (loaded.status !== 'running') {
-            void refreshList()
-            props.onStatus(`Research ${loaded.status}: ${loaded.statusDetail}`)
+            void refreshListRef.current()
+            statusRef.current(`Research ${loaded.status}: ${loaded.statusDetail}`)
           }
         })
         .catch((e) => setError(errorMessage(e)))
@@ -105,7 +133,7 @@ export function ResearchPanel(props: ResearchPanelProps) {
         pollRef.current = null
       }
     }
-  }, [session?.id, session?.status, loadSession, refreshList, props])
+  }, [session?.id, session?.status])
 
   async function exportBrief(id: string) {
     if (exporting) {
@@ -264,6 +292,14 @@ export function ResearchPanel(props: ResearchPanelProps) {
   const resumable =
     session !== null &&
     ['cancelled', 'failed', 'blocked'].includes(session.status)
+
+  const viewedSessionId = session?.id ?? null
+
+  useEffect(() => {
+    props.onSessionChange?.(viewedSessionId)
+    // The callback identity is the parent's concern; the id drives it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewedSessionId])
 
   return (
     <section className="agent-panel">

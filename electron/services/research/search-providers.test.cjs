@@ -7,6 +7,7 @@ const {
   arxivSearch,
   openAlexSearch,
   duckDuckGoSearch,
+  tavilySearch,
   searchAll,
   toArxivQuery,
 } = require('./search-providers.cjs')
@@ -180,6 +181,28 @@ describe('research search providers', () => {
       searchAll('q', { signal: controller.signal, providers: [] }),
       /cancelled/
     )
+  })
+
+  it('tavilySearch requires a key and refuses redirects', async () => {
+    await assert.rejects(
+      tavilySearch('q', { fetchImpl: async () => { throw new Error('unused') } }),
+      /not configured/
+    )
+
+    const calls = []
+    const fetchImpl = async (url, options) => {
+      calls.push({ url, options })
+
+      return jsonResponse({ results: [] })
+    }
+
+    await tavilySearch('llama', { fetchImpl, apiKey: 'test-key' })
+
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].url, 'https://api.tavily.com/search')
+    assert.equal(calls[0].options.method, 'POST')
+    assert.equal(calls[0].options.redirect, 'error')
+    assert.equal(JSON.parse(calls[0].options.body).api_key, 'test-key')
   })
 })
 

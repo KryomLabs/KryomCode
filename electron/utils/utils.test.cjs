@@ -6,6 +6,7 @@ const {
   createError,
   validationError,
   isCodedError,
+  boundDetail,
 } = require('./errors.cjs')
 const { createLogger, redact, redactText } = require('./logger.cjs')
 
@@ -18,6 +19,16 @@ describe('utils', () => {
     assert.equal(isCodedError(error), true)
     assert.equal(isCodedError(new Error('plain')), false)
     assert.equal(validationError('Bad input.').code, CODES.VALIDATION)
+  })
+
+  it('bounds untrusted detail text for user-facing messages', () => {
+    assert.equal(boundDetail('  padded  ', 100), 'padded')
+    assert.equal(boundDetail('x'.repeat(2000), 500), 'x'.repeat(500))
+    assert.equal(boundDetail('', 500), '')
+    assert.equal(boundDetail(undefined, 500), '')
+    assert.equal(boundDetail(null, 500), '')
+    assert.equal(boundDetail({ nested: true }, 500), '')
+    assert.equal(boundDetail(42, 500), '')
   })
 
   it('redacts secrets from text and objects', () => {

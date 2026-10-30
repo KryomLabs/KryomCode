@@ -50,7 +50,10 @@ describe('project-intelligence', () => {
   })
 
   it('excludes dependencies, build output, and secrets from the index', async () => {
-    await openFixture()
+    const root = await openFixture()
+
+    await fs.mkdir(path.join(root, '.kryom'), { recursive: true })
+    await fs.writeFile(path.join(root, '.kryom', 'chat.json'), '{"messages":[]}')
 
     const summary = await getWorkspaceSummary()
     const names = summary.fileIndex.map((entry) => entry.relativePath)
@@ -59,6 +62,7 @@ describe('project-intelligence', () => {
     assert.ok(!names.some((name) => name.includes('node_modules')))
     assert.ok(!names.some((name) => name.startsWith('dist')))
     assert.ok(!names.some((name) => name.startsWith('.env')))
+    assert.ok(!names.some((name) => name.includes('.kryom')))
   })
 
   it('builds bounded context without secret contents', async () => {

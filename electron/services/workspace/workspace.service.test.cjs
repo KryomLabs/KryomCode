@@ -7,6 +7,8 @@ const fs = require('node:fs/promises')
 const {
   setWorkspaceRoot,
   getWorkspaceRoot,
+  getPreviousWorkspaceRoot,
+  closeWorkspace,
   isInsideWorkspace,
   isInsideScope,
   buildTree,
@@ -37,6 +39,27 @@ describe('workspace.service', () => {
     )
   })
 
+  it('tracks the previously opened root for in-flight saves', async () => {
+    const dirA = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-prev-a-'))
+    const dirB = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-prev-b-'))
+    const rootA = await setWorkspaceRoot(dirA)
+    const rootB = await setWorkspaceRoot(dirB)
+
+    assert.equal(getWorkspaceRoot(), rootB)
+    assert.equal(getPreviousWorkspaceRoot(), rootA)
+
+    closeWorkspace()
+
+    assert.equal(getWorkspaceRoot(), null)
+    assert.equal(getPreviousWorkspaceRoot(), rootB)
+
+    // Opening over an empty root keeps the closed root available.
+    const dirC = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-prev-c-'))
+    await setWorkspaceRoot(dirC)
+
+    assert.equal(getPreviousWorkspaceRoot(), rootB)
+  })
+
   it('builds a tree while skipping ignored entries', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-tree-'))
     await fs.writeFile(path.join(dir, 'a.txt'), 'a')
@@ -45,6 +68,8 @@ describe('workspace.service', () => {
       path.join(dir, 'node_modules', 'x.js'),
       'x'
     )
+    await fs.mkdir(path.join(dir, '.kryom'), { recursive: true })
+    await fs.writeFile(path.join(dir, '.kryom', 'chat.json'), '{}')
 
     const root = await setWorkspaceRoot(dir)
     const tree = await buildTree(root)
@@ -52,6 +77,7 @@ describe('workspace.service', () => {
 
     assert.ok(names.includes('a.txt'))
     assert.ok(!names.includes('node_modules'))
+    assert.ok(!names.includes('.kryom'))
   })
 
   it('skips unreadable directories instead of failing the tree', async () => {

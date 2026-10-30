@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { kryom, errorMessage } from '../api/kryom'
+import { kryom, errorMessage, isCancelError } from '../api/kryom'
 import { modelDisplayName } from '../utils/models'
 import { baseName } from '../utils/paths'
 import { useDialogs } from './dialogs'
@@ -11,7 +11,7 @@ export interface ConnectionsPanelProps {
   activeFileContent: string
   onStatus: (status: string) => void
   onOpenSourceControl: () => void
-  onCloneRepository: (url: string) => void
+  onCloneRepository: (url: string) => Promise<void>
   onCreateReport: (template: string) => void
   onExportActiveFile: (template: string) => void
   onImportSave: (text: string, fileName: string) => void
@@ -35,6 +35,7 @@ export function ConnectionsPanel(props: ConnectionsPanelProps) {
   const [aiStatus, setAiStatus] = useState<KryomAIStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [verifying, setVerifying] = useState(false)
+  const [cloning, setCloning] = useState(false)
   const [verifyError, setVerifyError] = useState('')
   const [verified, setVerified] = useState<VerifiedSession | null>(null)
   const [customUrl, setCustomUrl] = useState('')
@@ -115,10 +116,21 @@ export function ConnectionsPanel(props: ConnectionsPanelProps) {
       props.onStatus(`Remote verified (${result.refs.length} branch(es) readable)`)
     } catch (e) {
       setVerified(null)
-      setVerifyError(errorMessage(e))
+
+      if (isCancelError(e)) {
+        props.onStatus('Remote verification cancelled')
+      } else {
+        setVerifyError(errorMessage(e))
+      }
     } finally {
       setVerifying(false)
     }
+  }
+
+  // Verify and clone share one git kill switch: cancelling stops
+  // whichever git child is running.
+  function cancelGitOperation() {
+    kryom().cancelGit().catch(() => undefined)
   }
 
   async function clone() {
@@ -129,11 +141,17 @@ export function ConnectionsPanel(props: ConnectionsPanelProps) {
       confirmLabel: 'Choose folder & clone',
     })
 
-    if (!url) {
+    if (!url || cloning) {
       return
     }
 
-    props.onCloneRepository(url)
+    setCloning(true)
+
+    try {
+      await props.onCloneRepository(url)
+    } finally {
+      setCloning(false)
+    }
   }
 
   async function importFile() {
@@ -283,10 +301,20 @@ export function ConnectionsPanel(props: ConnectionsPanelProps) {
               type="button"
               className="secondary-button"
               onClick={() => void clone()}
+              disabled={cloning}
               title="Clone a GitHub repository into a new folder and open it"
             >
-              Clone / Open…
+              {cloning ? 'Cloning…' : 'Clone / Open…'}
             </button>
+            {(verifying || cloning) && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={cancelGitOperation}
+              >
+                Cancel
+              </button>
+            )}
           </div>
 
           {!verified && (
@@ -459,6 +487,18 @@ export function ConnectionsPanel(props: ConnectionsPanelProps) {
               <dd>{modelDisplayName(props.defaultModel)}</dd>
             </div>
             <div>
+              <dt>Key source</dt>
+              <dd>
+                {aiStatus === null
+                  ? 'unknown'
+                  : aiStatus.modelKeySource === 'environment'
+                    ? 'environment (.env)'
+                    : aiStatus.modelKeySource === 'vault'
+                      ? 'OS vault (Settings)'
+                      : 'not configured'}
+              </dd>
+            </div>
+            <div>
               <dt>Research search</dt>
               <dd>
                 {aiStatus === null
@@ -471,10 +511,11 @@ export function ConnectionsPanel(props: ConnectionsPanelProps) {
           </dl>
 
           <p className="muted">
-            Keys live in your local <code>.env</code> file (
-            <code>MODEL_API_KEY</code>, <code>TAVILY_API_KEY</code>) and
-            are never displayed here. Restart KryomCode after editing
-            it.
+            Add your own key in Settings → Providers (encrypted on
+            this machine), or keep a development key in your local{' '}
+            <code>.env</code> file (<code>MODEL_API_KEY</code>,{' '}
+            <code>TAVILY_API_KEY</code>). Keys are never displayed
+            here. Restart KryomCode after editing <code>.env</code>.
           </p>
         </article>
 

@@ -180,24 +180,27 @@ function buildMenuTemplate(deps) {
           accelerator: 'CmdOrCtrl+Shift+D',
         }),
         commandItem('view.home', {
-          label: 'AI Workspace',
+          label: 'Welcome',
           accelerator: 'CmdOrCtrl+Shift+A',
         }),
-        commandItem('view.chat', {
-          label: 'AI Chat',
-          accelerator: 'CmdOrCtrl+Shift+C',
+        commandItem('view.metaAI', {
+          label: 'New Meta AI Session',
+          accelerator: 'CmdOrCtrl+Shift+M',
         }),
-        commandItem('view.agent', {
-          label: 'Agent',
-          accelerator: 'CmdOrCtrl+Shift+X',
+        commandItem('view.intel', {
+          label: 'Intelligence',
         }),
-        commandItem('view.research', {
-          label: 'Research',
-          accelerator: 'CmdOrCtrl+Shift+R',
+        commandItem('view.platform', {
+          label: 'Platform',
         }),
         commandItem('view.focusEditor', {
           label: 'Focus Editor',
           accelerator: 'CmdOrCtrl+1',
+          enabled: hasEditor,
+        }),
+        commandItem('view.splitRight', {
+          label: 'Split Editor Right',
+          accelerator: 'CmdOrCtrl+\\',
           enabled: hasEditor,
         }),
         commandItem('view.terminal', {
@@ -289,6 +292,9 @@ function buildMenuTemplate(deps) {
       submenu: [
         commandItem('help.shortcuts', {
           label: 'Keyboard Shortcuts…',
+        }),
+        commandItem('help.diagnostics', {
+          label: 'Export Diagnostics…',
         }),
         {
           label: 'Open Documentation Folder',

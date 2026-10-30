@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react'
 import { kryom, errorMessage } from '../api/kryom'
+import { SUPPORTED_LOCALES, localeLabel, setLocale, useLocale } from '../i18n'
+import { ProviderSettings } from './ProviderSettings'
+
+export type SettingsSection = 'general' | 'providers'
 
 export interface SettingsModalProps {
   open: boolean
   initial: KryomSettings
+  initialSection?: SettingsSection
   onClose: () => void
   onSaved: (settings: KryomSettings) => void
+  onStatus: (status: string) => void
   fontSize: number
   onFontSizeChange: (size: number) => void
   autoSave: boolean
@@ -20,20 +26,27 @@ const FONT_MIN = 10
 const FONT_MAX = 24
 
 export function SettingsModal(props: SettingsModalProps) {
+  const { locale, t } = useLocale()
   const [defaultModel, setDefaultModel] = useState(props.initial.defaultModel)
   const [aiContextEnabled, setAiContextEnabled] = useState(
     props.initial.aiContextEnabled
   )
+  const [confirmAllCommands, setConfirmAllCommands] = useState(
+    props.initial.confirmAllCommands
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [section, setSection] = useState<SettingsSection>('general')
 
   useEffect(() => {
     if (props.open) {
       setDefaultModel(props.initial.defaultModel)
       setAiContextEnabled(props.initial.aiContextEnabled)
+      setConfirmAllCommands(props.initial.confirmAllCommands)
       setError('')
+      setSection(props.initialSection ?? 'general')
     }
-  }, [props.open, props.initial])
+  }, [props.open, props.initial, props.initialSection])
 
   useEffect(() => {
     if (!props.open) {
@@ -63,6 +76,7 @@ export function SettingsModal(props: SettingsModalProps) {
       const saved = await kryom().updateSettings({
         defaultModel,
         aiContextEnabled,
+        confirmAllCommands,
       })
       props.onSaved(saved)
       props.onClose()
@@ -85,6 +99,33 @@ export function SettingsModal(props: SettingsModalProps) {
       <div className="dialog settings-dialog" role="dialog" aria-modal="true" aria-label="Settings">
         <h2>Settings</h2>
 
+        <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={section === 'general'}
+            className={section === 'general' ? 'panel-tab active' : 'panel-tab'}
+            onClick={() => setSection('general')}
+          >
+            GENERAL
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={section === 'providers'}
+            className={section === 'providers' ? 'panel-tab active' : 'panel-tab'}
+            onClick={() => setSection('providers')}
+          >
+            PROVIDERS
+          </button>
+        </div>
+
+        {section === 'providers' && (
+          <ProviderSettings onStatus={props.onStatus} />
+        )}
+
+        {section === 'general' && (
+          <>
         <label className="field-label">
           Default AI model
           <select
@@ -107,6 +148,16 @@ export function SettingsModal(props: SettingsModalProps) {
             onChange={(event) => setAiContextEnabled(event.target.checked)}
           />
           Include active file context in AI requests by default
+        </label>
+
+        <label className="context-toggle">
+          <input
+            type="checkbox"
+            checked={confirmAllCommands}
+            onChange={(event) => setConfirmAllCommands(event.target.checked)}
+          />
+          Confirm every terminal and diagnostics command before running
+          (warning-bearing commands always confirm)
         </label>
 
         <div className="settings-row">
@@ -170,6 +221,22 @@ export function SettingsModal(props: SettingsModalProps) {
         <p className="muted settings-note">Light theme — Coming soon.</p>
 
         <div className="settings-row">
+          <span>{t('settings.language')}</span>
+          <select
+            value={locale}
+            onChange={(event) => setLocale(event.target.value)}
+            aria-label={t('settings.language')}
+          >
+            {SUPPORTED_LOCALES.map((entry) => (
+              <option key={entry} value={entry}>
+                {localeLabel(entry)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="muted settings-note">{t('settings.languageNote')}</p>
+
+        <div className="settings-row">
           <span>Panel sizes</span>
           <button
             type="button"
@@ -187,8 +254,9 @@ export function SettingsModal(props: SettingsModalProps) {
         </p>
 
         <p className="muted">
-          API credentials live in your local .env file and are never shown
-          here.
+          API keys are managed under Providers and are never shown
+          here. A development key in your local .env file keeps
+          working and takes precedence.
         </p>
 
         {error && (
@@ -196,18 +264,22 @@ export function SettingsModal(props: SettingsModalProps) {
             <p>{error}</p>
           </div>
         )}
+          </>
+        )}
 
         <div className="dialog-actions">
           <button className="secondary-button" onClick={props.onClose}>
-            Cancel
+            {section === 'providers' ? 'Close' : 'Cancel'}
           </button>
-          <button
-            className="primary-button"
-            onClick={() => void save()}
-            disabled={saving}
-          >
-            {saving ? 'Saving…' : 'Save settings'}
-          </button>
+          {section === 'general' && (
+            <button
+              className="primary-button"
+              onClick={() => void save()}
+              disabled={saving}
+            >
+              {saving ? 'Saving…' : 'Save settings'}
+            </button>
+          )}
         </div>
       </div>
     </div>

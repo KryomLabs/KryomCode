@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { kryom, errorMessage, isCancelError } from '../api/kryom'
+import { classifyIntent } from './intent'
 import { AiKeyNotice } from './AiKeyNotice'
 import { MarkdownLite } from './MarkdownLite'
 
@@ -22,9 +23,31 @@ export interface AiChatProps {
   researchSessionId?: string | null
   onDetachResearch?: () => void
   onOpenConnections?: () => void
+  // Workbench routing: offered explicitly on user messages that look
+  // like coding tasks. Never fires silently — the user chooses.
+  onOpenInAgent?: (text: string) => void
 }
 
 const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
+
+// Appends stashed messages that are not already in the restored
+// history (exact match), keeping the newest last. The backend caps
+// stored history at 50 messages; the merged view matches.
+function mergeMessages(disk: ChatMessage[], stashed: ChatMessage[]): ChatMessage[] {
+  const seen = new Set(disk.map((entry) => JSON.stringify(entry)))
+  const merged = [...disk]
+
+  for (const entry of stashed) {
+    const key = JSON.stringify(entry)
+
+    if (!seen.has(key)) {
+      seen.add(key)
+      merged.push(entry)
+    }
+  }
+
+  return merged.slice(-50)
+}
 
 export function AiChat(props: AiChatProps) {
   const [model, setModel] = useState(props.defaultModel)
@@ -44,6 +67,12 @@ export function AiChat(props: AiChatProps) {
   // already near the bottom; scrolling up pins the view so older
   // messages can be read undisturbed.
   const stickRef = useRef(true)
+  // Saves rejected as stale (two rapid project switches) wait here,
+  // keyed by the root they belong to, until that project reopens.
+  const pendingSavesRef = useRef(new Map<string, ChatMessage[]>())
+  // Request generation: Stop invalidates the in-flight request so a
+  // late provider response can never overwrite cancelled state.
+  const sendGenerationRef = useRef(0)
 
   function onMessagesScroll() {
     const element = messagesRef.current
@@ -102,8 +131,11 @@ export function AiChat(props: AiChatProps) {
   // is needed). The ready gate keeps the pre-restore empty state
   // from wiping stored history. A mid-request close restores
   // without the pending answer: in-flight requests are never faked.
+  // Saves carry the root they were written for; a rejected stale
+  // save is stashed and merged back when its project reopens.
   useEffect(() => {
     let cancelled = false
+    const root = props.workspaceRoot
 
     setRestored(false)
 
@@ -111,7 +143,15 @@ export function AiChat(props: AiChatProps) {
       .restoreChat()
       .then((result) => {
         if (!cancelled) {
-          setMessages(result.restored ? result.messages : [])
+          const disk = result.restored ? result.messages : []
+          const stashed = root ? pendingSavesRef.current.get(root) : undefined
+
+          if (root && stashed && stashed.length > 0) {
+            pendingSavesRef.current.delete(root)
+            setMessages(mergeMessages(disk, stashed))
+          } else {
+            setMessages(disk)
+          }
         }
       })
       .catch(() => {
@@ -135,8 +175,23 @@ export function AiChat(props: AiChatProps) {
       return
     }
 
-    kryom().saveChat(messages).catch(() => undefined)
-  }, [messages, restored])
+    const root = props.workspaceRoot
+
+    kryom()
+      .saveChat(messages, root)
+      .then((result) => {
+        // Only the longest stash per root wins: stale saves can
+        // resolve out of order, and newer arrays are supersets.
+        if (!result.saved && root) {
+          const prev = pendingSavesRef.current.get(root)
+
+          if (!prev || messages.length >= prev.length) {
+            pendingSavesRef.current.set(root, messages)
+          }
+        }
+      })
+      .catch(() => undefined)
+  }, [messages, restored, props.workspaceRoot])
 
   const consumedPromptNonce = useRef<number | null>(null)
 
@@ -188,10 +243,25 @@ export function AiChat(props: AiChatProps) {
       // Fall through to the request path.
     }
 
+    // Offline pre-flight: fail fast with a clear message instead of
+    // appending the message and reporting a network error. A wrong
+    // offline reading only delays the send; the request path still
+    // reports its own error when online.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setPrompt(userPrompt)
+      setError(
+        'You appear to be offline. Meta AI needs a network connection; your local workspace is unaffected.'
+      )
+      props.onStatus('Meta AI is offline')
+      return
+    }
+
     setError('')
     setKeyMissing(false)
     setLoading(true)
 
+    const generation = sendGenerationRef.current + 1
+    sendGenerationRef.current = generation
     const userMessage: ChatMessage = { role: 'user', content: userPrompt }
 
     try {
@@ -213,6 +283,10 @@ export function AiChat(props: AiChatProps) {
         ...(attachedResearch ? { researchSessionId: attachedResearch } : {}),
       })
 
+      if (generation !== sendGenerationRef.current) {
+        return
+      }
+
       setMessages((previous) => [
         ...previous,
         userMessage,
@@ -220,6 +294,20 @@ export function AiChat(props: AiChatProps) {
       ])
       props.onStatus(`AI response received (${result.model})`)
     } catch (e) {
+      // Pure stop (no newer send): keep the user's message and only
+      // drop the provider answer. Superseded sends drop everything.
+      if (
+        isCancelError(e) &&
+        sendGenerationRef.current === generation + 1
+      ) {
+        setMessages((previous) => [...previous, userMessage])
+        return
+      }
+
+      if (generation !== sendGenerationRef.current) {
+        return
+      }
+
       setMessages((previous) => [...previous, userMessage])
 
       if (isCancelError(e)) {
@@ -228,11 +316,16 @@ export function AiChat(props: AiChatProps) {
         setError(errorMessage(e))
       }
     } finally {
-      setLoading(false)
+      if (generation === sendGenerationRef.current) {
+        setLoading(false)
+      }
     }
   }
 
   function stopRequest() {
+    sendGenerationRef.current += 1
+    setLoading(false)
+    props.onStatus('AI request cancelled')
     kryom().cancelAI().catch(() => undefined)
   }
 
@@ -355,14 +448,8 @@ export function AiChat(props: AiChatProps) {
       >
         {messages.length === 0 && (
           <div className="ai-empty">
-            <div className="ai-empty-icon">✦</div>
-            <h3>What are we building?</h3>
-            <p>
-              Ask for code explanations, debugging help, implementation
-              ideas or tests.
-            </p>
             <p className="muted">
-              AI suggestions do not change files automatically.
+              Ask about your code or request an explanation.
             </p>
           </div>
         )}
@@ -386,6 +473,18 @@ export function AiChat(props: AiChatProps) {
               >
                 {copiedMessage === index ? 'Copied' : 'Copy'}
               </button>
+              {message.role === 'user' &&
+                props.onOpenInAgent &&
+                classifyIntent(message.content) === 'agent' && (
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => props.onOpenInAgent?.(message.content)}
+                    title="Open this request as a Meta AI Agent task in an editor tab"
+                  >
+                    Open in Agent
+                  </button>
+                )}
             </div>
             {message.role === 'user' ? (
               <p className="md-para">{message.content}</p>
@@ -441,7 +540,7 @@ export function AiChat(props: AiChatProps) {
         />
 
         <div className="composer-footer">
-          <span className="muted">{prompt.length}/12000</span>
+          <span className="spacer" />
           {loading ? (
             <button type="button" onClick={stopRequest}>
               Stop

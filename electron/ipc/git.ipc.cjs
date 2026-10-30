@@ -11,6 +11,7 @@ const {
   commitChanges,
   pushChanges,
   pullChanges,
+  cancelGitProcesses,
 } = require('../services/git/git.service.cjs')
 const {
   setWorkspaceRoot,
@@ -56,6 +57,14 @@ module.exports = function registerGitIPC({
     }
 
     return getStatus()
+  })
+
+  ipcMain.handle('git:cancel', async (event) => {
+    if (!isTrustedSender(event)) {
+      throw new Error('Unauthorized git request.')
+    }
+
+    return cancelGitProcesses()
   })
 
   ipcMain.handle('git:diff', async (event, payload = {}) => {

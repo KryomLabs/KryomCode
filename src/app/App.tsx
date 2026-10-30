@@ -1,58 +1,100 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { kryom, errorMessage, isWriteConflict } from '../api/kryom'
-import { baseName, joinName, parentDir } from '../utils/paths'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { kryom, errorMessage, isWriteConflict, isCancelError } from '../api/kryom'
+import { baseName, joinName, parentDir, resolveAgainstRoot } from '../utils/paths'
 import { detectLanguage } from '../utils/languages'
+import { modelDisplayName } from '../utils/models'
 import { logOutput } from '../utils/output-log'
 import {
+  activateTab,
+  closeGroup,
+  closeOtherTabs,
+  closeTab,
+  codeTabId,
   dirtyTabs,
+  findCodeTabByPath,
   findTab,
-  isDirty,
-  nextActivePath,
+  focusGroup,
+  getActiveGroup,
+  groupTabs,
+  initialWorkbench,
+  isCodeTab,
+  isMetaTab,
+  isTabDirty,
+  metaTabId,
   openTab,
-  removeTabs,
-  repathTabs,
-  tabsUnder,
-  updateTab,
-  type TabState,
-} from '../utils/tabs'
+  repathCodeTabs,
+  splitGroupRight,
+  tabsUnderPath,
+  updateCodeTab,
+  type CodeTab,
+  type EditorGroup,
+  type WorkbenchTab,
+  type WorkbenchState,
+} from '../state/workbench-tabs'
+import {
+  createMetaSession,
+  deleteMetaSession,
+  deriveSessionTitle,
+  loadMetaSessions,
+  saveMetaSession,
+  touchSession,
+  type MetaSession,
+} from '../state/meta-sessions'
+import {
+  getActivity,
+  hasActivity,
+  registerBuiltinActivities,
+} from '../components/activity-registry'
+import {
+  saveTabSnapshot,
+  loadTabSnapshot,
+  clearTabSnapshot,
+} from '../utils/session-restore'
 import { DialogProvider, useDialogs } from '../components/dialogs'
 import { TitleBar, StatusBar } from '../components/Chrome'
 import { ActivityBar, type ActivityId } from '../components/ActivityBar'
 import { ResizeHandle } from '../components/ResizeHandle'
-import { Explorer } from '../components/Explorer'
+import { Explorer, type GitBadge } from '../components/Explorer'
 import { SearchPanel } from '../components/SearchPanel'
-import { EditorPanel, type EditorApi } from '../components/EditorPanel'
-import { AiChat } from '../components/AiChat'
-import { AgentPanel } from '../components/AgentPanel'
-import { ResearchPanel } from '../components/ResearchPanel'
+import { EditorPanel, type EditorApi, type MetaTabContext } from '../components/EditorPanel'
+import { IntelligenceHub } from '../components/IntelligenceHub'
+import { PlatformHub } from '../components/PlatformHub'
+import { TasksPanel } from '../components/TasksPanel'
+import { TemplatePickerDialog } from '../components/TemplatePickerDialog'
+import type { MetaInitialPrompt } from '../components/MetaAIWorkspace'
 import {
   TerminalPanelView,
   useTerminalController,
 } from '../components/TerminalPanel'
 import { ProblemsPanel } from '../components/ProblemsPanel'
 import { GitPanel } from '../components/GitPanel'
-import { SettingsModal } from '../components/SettingsModal'
-import { WelcomePage } from '../components/WelcomePage'
+import { SettingsModal, type SettingsSection } from '../components/SettingsModal'
+import { WelcomePage, type DiscoveryMode } from '../components/WelcomePage'
 import { ConnectionsPanel } from '../components/ConnectionsPanel'
+import { MemoryPanel } from '../components/MemoryPanel'
 import { ExtensionsPanel } from '../components/ExtensionsPanel'
 import { ProfilePanel } from '../components/ProfilePanel'
 import { OutputPanel } from '../components/OutputPanel'
 import { AboutDialog } from '../components/AboutDialog'
 import { QuickOpen } from '../components/QuickOpen'
 import { ShortcutsDialog } from '../components/ShortcutsDialog'
+import { DiagnosticsDialog } from '../components/DiagnosticsDialog'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 
-type BottomTab = 'terminal' | 'problems' | 'git' | 'output'
-type CenterView = 'editor' | 'home' | 'chat' | 'agent' | 'research'
-type StageMode = 'chat' | 'agent' | 'research'
+type BottomTab = 'terminal' | 'problems' | 'git' | 'output' | 'tasks'
+type CenterView = 'editor' | 'home' | 'intel' | 'platform'
+type StageMode = 'intel' | 'platform'
 
-// Fixed homes, single-mounted: Git and Problems live in the sidebar,
-// Chat/Agent/Research live on the center stage, Terminal and Output
-// live in the right panel. Regions hide with `hidden` instead of
-// unmounting, so conversations, plans, and research survive every
-// navigation move without portal machinery.
+// Unified workbench (Level 3C): code files and Meta AI sessions share
+// one central tab system with split groups; Intel/Platform ride a
+// small center stage; Terminal/Problems/Source Control/Output/Tasks
+// live in the bottom panel. Bottom and stage regions hide with
+// `hidden` instead of unmounting so runs and hubs survive navigation,
+// while editor tabs persist their own state and remount freely.
 const FALLBACK_SETTINGS: KryomSettings = {
   defaultModel: 'muse-spark-1.3',
   aiContextEnabled: true,
+  confirmAllCommands: false,
   panelLeftWidth: 260,
   panelRightWidth: 360,
   panelBottomHeight: 264,
@@ -91,17 +133,26 @@ function clampFontSize(value: number): number {
 }
 
 function readLocalActivity(): ActivityId {
+  registerBuiltinActivities()
+
   const raw = window.localStorage.getItem('kryom.activity')
 
-  // Only sidebar-backed views persist here. Panel-backed
-  // destinations (git, run, home) open the bottom panel or center
-  // view instead, so a stale stored value falls back to Explorer.
+  // Only sidebar-backed views persist here. Panel/center/action
+  // destinations open the bottom panel, center view, or a Meta AI
+  // tab instead, so a stale stored value falls back to Explorer.
+  // Legacy 'connections'/'profile' ids map to their renamed homes.
+  if (raw === 'connections') {
+    return 'tools'
+  }
+
+  if (raw === 'profile') {
+    return 'account'
+  }
+
   if (
-    raw === 'explorer' ||
-    raw === 'search' ||
-    raw === 'extensions' ||
-    raw === 'connections' ||
-    raw === 'profile'
+    raw &&
+    hasActivity(raw) &&
+    getActivity(raw)?.area === 'sidebar'
   ) {
     return raw
   }
@@ -123,9 +174,17 @@ function AppShell() {
   const dialogs = useDialogs()
   const [workspace, setWorkspace] = useState<KryomWorkspace | null>(null)
   const [explorerLoading, setExplorerLoading] = useState(false)
-  const [tabs, setTabs] = useState<TabState[]>([])
-  const [activePath, setActivePath] = useState<string | null>(null)
-  const [pendingLine, setPendingLine] = useState<number | null>(null)
+  const [workbench, setWorkbench] = useState<WorkbenchState>(() =>
+    initialWorkbench()
+  )
+  const [sessions, setSessions] = useState<Record<string, MetaSession>>({})
+  const [metaPrompts, setMetaPrompts] = useState<
+    Record<string, MetaInitialPrompt>
+  >({})
+  const [pendingReveal, setPendingReveal] = useState<{
+    path: string
+    line: number
+  } | null>(null)
   const [settings, setSettings] = useState<KryomSettings>(FALLBACK_SETTINGS)
   const [leftWidth, setLeftWidth] = useState(FALLBACK_SETTINGS.panelLeftWidth)
   const [bottomHeight, setBottomHeight] = useState(
@@ -145,6 +204,14 @@ function AppShell() {
     () => window.localStorage.getItem('kryom.sidebarVisible') !== '0'
   )
   const [centerView, setCenterView] = useState<CenterView>('home')
+  // Discovery (home) workspace mode: Chat or Research hosted directly
+  // in the central workspace, switched from the title bar. Coding
+  // requests never switch this — they open Meta AI Agent tabs.
+  const [discoveryMode, setDiscoveryMode] =
+    useState<DiscoveryMode>('chat')
+  // Research brief attached to Discovery chat as cited context; the
+  // chat keeps its own history, the brief only grounds answers.
+  const [chatResearchId, setChatResearchId] = useState<string | null>(null)
   const [fontSize, setFontSize] = useState(() => readLocalFontSize())
   const [cursor, setCursor] = useState<{ line: number; column: number }>({
     line: 1,
@@ -154,12 +221,23 @@ function AppShell() {
     known: boolean
     branch: string | null
   }>({ known: false, branch: null })
+  const [gitBadges, setGitBadges] = useState<Record<string, GitBadge> | null>(
+    null
+  )
   const [autoSave, setAutoSave] = useState(false)
   const [recent, setRecent] = useState<string[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSection>('general')
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
+  const [providerStatus, setProviderStatus] = useState<{
+    ok: boolean | null
+    label: string | null
+  }>({ ok: null, label: null })
   const [aboutOpen, setAboutOpen] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [diagSummary, setDiagSummary] = useState<{
     count: number
     success: boolean
@@ -169,13 +247,14 @@ function AppShell() {
     nonce: number
   } | null>(null)
   const runNonce = useRef(0)
-  // Live mirrors: tabsRef keeps async flows (save-all) on fresh state,
-  // saveInflight coalesces concurrent saves of the same tab (e.g. a
-  // Monaco keybinding plus the matching native-menu accelerator).
-  const tabsRef = useRef<TabState[]>([])
-  tabsRef.current = tabs
-  const activePathRef = useRef<string | null>(null)
-  activePathRef.current = activePath
+  // Live mirrors: workbenchRef keeps async flows (save-all) on fresh
+  // state, saveInflight coalesces concurrent saves of the same tab
+  // (e.g. a Monaco keybinding plus the matching native-menu
+  // accelerator).
+  const workbenchRef = useRef<WorkbenchState>(workbench)
+  workbenchRef.current = workbench
+  const sessionsRef = useRef<Record<string, MetaSession>>(sessions)
+  sessionsRef.current = sessions
   const saveInflight = useRef(new Map<string, Promise<boolean>>())
 
   // Status and error reporters double as Output log writers so the
@@ -194,7 +273,8 @@ function AppShell() {
 
   const terminal = useTerminalController(
     workspace?.root ?? null,
-    reportStatus
+    reportStatus,
+    settings.confirmAllCommands
   )
   const [bottomTab, setBottomTab] = useState<BottomTab>('terminal')
   const [bottomOpen, setBottomOpen] = useState(
@@ -202,21 +282,7 @@ function AppShell() {
   )
   const [saving, setSaving] = useState(false)
   const [opening, setOpening] = useState(false)
-  const [welcomeChatPrompt, setWelcomeChatPrompt] = useState<{
-    text: string
-    nonce: number
-  } | null>(null)
-  const [welcomeAgentTask, setWelcomeAgentTask] = useState<{
-    text: string
-    nonce: number
-    researchSessionId?: string
-  } | null>(null)
-  const [welcomeResearchStart, setWelcomeResearchStart] = useState<{
-    objective: string
-    nonce: number
-  } | null>(null)
-  const [chatResearchId, setChatResearchId] = useState<string | null>(null)
-  const welcomeNonce = useRef(0)
+  const metaNonce = useRef(0)
   const editorApi = useRef<EditorApi | null>(null)
 
   // Navigation history over opened files for Go Back/Forward.
@@ -226,15 +292,27 @@ function AppShell() {
   })
   const navigatingRef = useRef(false)
 
-  const activeTab = activePath ? findTab(tabs, activePath) : null
-  const dirty = activeTab !== null && isDirty(activeTab)
-  const dirtyCount = dirtyTabs(tabs).length
-  const windowTitle = `${dirty ? '• ' : ''}${activeTab ? `${baseName(activeTab.path)} — ` : ''}${workspace ? `${baseName(workspace.root)} — ` : ''}KryomCode`
-  const showEditor = centerView === 'editor' && activeTab !== null
+  const activeGroup = getActiveGroup(workbench)
+  const activeTab: WorkbenchTab | null = activeGroup.activeId
+    ? findTab(workbench.tabs, activeGroup.activeId)
+    : null
+  const activeCodeTab =
+    activeTab && isCodeTab(activeTab) ? activeTab : null
+  const activeMetaTab =
+    activeTab && isMetaTab(activeTab) ? activeTab : null
+  const dirty = activeTab !== null && isTabDirty(activeTab)
+  const dirtyCount = dirtyTabs(workbench.tabs).length
+  const activeLabel = activeTab
+    ? isCodeTab(activeTab)
+      ? baseName(activeTab.path)
+      : isMetaTab(activeTab)
+        ? `Meta AI — ${sessions[activeTab.sessionId]?.title ?? 'New Task'}`
+        : activeTab.title
+    : null
+  const windowTitle = `${dirty ? '• ' : ''}${activeLabel ? `${activeLabel} — ` : ''}${workspace ? `${baseName(workspace.root)} — ` : ''}KryomCode`
+  const showEditor = centerView === 'editor'
   const staged: StageMode | null =
-    centerView === 'chat' || centerView === 'agent' || centerView === 'research'
-      ? centerView
-      : null
+    centerView === 'intel' || centerView === 'platform' ? centerView : null
 
   useEffect(() => {
     logOutput('app', 'KryomCode started')
@@ -264,6 +342,17 @@ function AppShell() {
         setRecent(state.recent)
       })
       .catch(() => undefined)
+
+    // Global (project-less) Meta AI sessions load at startup;
+    // project sessions load when their project opens.
+    const global = loadMetaSessions(null)
+    const record: Record<string, MetaSession> = {}
+
+    for (const entry of global) {
+      record[entry.id] = entry
+    }
+
+    setSessions(record)
 
     return kryom().onUIState((state) => {
       setAutoSave(state.autoSave)
@@ -357,6 +446,7 @@ function AppShell() {
   const refreshGitBranch = useCallback(async () => {
     if (!workspace) {
       setGitBranch({ known: false, branch: null })
+      setGitBadges(null)
       return
     }
 
@@ -364,14 +454,59 @@ function AppShell() {
       const state = await kryom().gitStatus()
 
       setGitBranch({ known: true, branch: state.branch })
+
+      // Explorer badges resolve status paths (relative to the repo
+      // top level) to absolute paths. Unstaged wins over staged for
+      // files present in both; untracked only when otherwise clean.
+      const badges: Record<string, GitBadge> = {}
+
+      for (const relative of state.untracked) {
+        badges[resolveAgainstRoot(state.toplevel, relative)] = 'untracked'
+      }
+
+      for (const relative of state.staged) {
+        badges[resolveAgainstRoot(state.toplevel, relative)] = 'staged'
+      }
+
+      for (const relative of state.unstaged) {
+        badges[resolveAgainstRoot(state.toplevel, relative)] = 'unstaged'
+      }
+
+      setGitBadges(badges)
     } catch {
       setGitBranch({ known: false, branch: null })
+      setGitBadges(null)
     }
   }, [workspace])
 
   useEffect(() => {
     void refreshGitBranch()
   }, [refreshGitBranch])
+
+  // Status-bar provider segment: real configured state plus the
+  // actual routed model. Refreshed on startup, project switches, and
+  // settings closes — never fabricated while loading.
+  const refreshProviderStatus = useCallback(async () => {
+    try {
+      const [status, selection] = await Promise.all([
+        kryom().getAIStatus(),
+        kryom().getProviderSelection(),
+      ])
+
+      setProviderStatus({
+        ok: status.modelKeyConfigured,
+        label: status.modelKeyConfigured
+          ? modelDisplayName(selection.route.modelId)
+          : null,
+      })
+    } catch {
+      setProviderStatus({ ok: null, label: null })
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshProviderStatus()
+  }, [refreshProviderStatus, workspace, settingsOpen])
 
   // Push coarse capability state so the native menu can enable and
   // disable workspace/editor/terminal commands accurately. The dirty
@@ -381,18 +516,19 @@ function AppShell() {
     kryom()
       .pushUIContext({
         hasWorkspace: workspace !== null,
-        hasEditor: activeTab !== null,
+        hasEditor: activeCodeTab !== null,
         terminalRunning: terminal.running,
         dirtyCount,
         title: windowTitle,
       })
       .catch(() => undefined)
-  }, [workspace, activeTab, terminal.running, dirtyCount, windowTitle])
+  }, [workspace, activeCodeTab, terminal.running, dirtyCount, windowTitle])
 
   // Reload guard (Ctrl+R and friends). Window close takes the richer
   // main-process Save/Discard/Cancel path instead; the main process
   // destroys approved windows so this never double-prompts there.
-  // Covers editor buffers only: chat and agent sessions are in-memory.
+  // Covers editor buffers only. Snapshots restore tabs after reload,
+  // but the prompt stays: recovery is a net, not a choice.
   useEffect(() => {
     if (dirtyCount === 0) {
       return
@@ -409,8 +545,10 @@ function AppShell() {
 
   // Track opened files for Go Back/Forward. History-driven activations
   // set the navigating flag so the effect does not re-record them.
+  const activeCodePath = activeCodeTab?.path ?? null
+
   useEffect(() => {
-    if (!activePath) {
+    if (!activeCodePath) {
       return
     }
 
@@ -421,17 +559,135 @@ function AppShell() {
       return
     }
 
-    if (history.entries[history.index] === activePath) {
+    if (history.entries[history.index] === activeCodePath) {
       return
     }
 
-    const entries = [...history.entries.slice(0, history.index + 1), activePath].slice(-100)
+    const entries = [...history.entries.slice(0, history.index + 1), activeCodePath].slice(-100)
 
     historyRef.current = { entries, index: entries.length - 1 }
-  }, [activePath])
+  }, [activeCodePath])
+
+  // Session snapshots (Level 2B.2 + 3C): open code tabs plus
+  // bounded dirty contents persist per project, debounced so typing
+  // does not write on every keystroke; open Meta AI tab ids persist
+  // alongside (sessions live in the session store). Restore runs once
+  // per opened root into an empty workbench only.
+  const restoredTabsForRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const root = workspace?.root ?? null
+
+    if (!root) {
+      return
+    }
+
+    const snapshotWorkbench = workbench
+
+    const timer = setTimeout(() => {
+      const codeTabs = snapshotWorkbench.tabs.filter(isCodeTab)
+      const metaIds = snapshotWorkbench.tabs
+        .filter(isMetaTab)
+        .map((tab) => tab.id)
+      const group = snapshotWorkbench.groups.find(
+        (entry) => entry.id === snapshotWorkbench.activeGroupId
+      )
+
+      saveTabSnapshot(root, codeTabs, group?.activeId ?? null, metaIds)
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [workspace, workbench])
+
+  useEffect(() => {
+    const root = workspace?.root ?? null
+
+    if (!root || restoredTabsForRef.current === root) {
+      return
+    }
+
+    restoredTabsForRef.current = root
+    void restoreTabsForRoot(root)
+  }, [workspace])
+
+  async function restoreTabsForRoot(root: string) {
+    const snapshot = loadTabSnapshot(root)
+
+    if (!snapshot || snapshot.tabs.length === 0) {
+      // Meta-only snapshots still restore their tabs below.
+      if (!snapshot || snapshot.metaTabIds.length === 0) {
+        return
+      }
+    }
+
+    if (workbenchRef.current.tabs.length > 0) {
+      return
+    }
+
+    const restored: CodeTab[] = []
+
+    for (const entry of snapshot.tabs) {
+      try {
+        const meta = await kryom().readFileMeta(entry.path)
+
+        restored.push({
+          kind: 'code',
+          id: codeTabId(meta.path),
+          path: meta.path,
+          content: entry.dirtyContent ?? meta.content,
+          savedContent: meta.content,
+          mtimeMs: meta.mtimeMs,
+        })
+      } catch {
+        // Vanished or unreadable files reopen as nothing, never faked.
+      }
+    }
+
+    // Meta AI tabs reopen only for sessions that still exist; stale
+    // ids are dropped, never faked.
+    const knownSessions = loadMetaSessions(root)
+    const knownIds = new Set(knownSessions.map((entry) => entry.id))
+    const metaTabs: WorkbenchTab[] = snapshot.metaTabIds
+      .filter((id) => knownIds.has(id.slice('meta-ai:'.length)))
+      .map((id) => ({
+        kind: 'meta-ai' as const,
+        id,
+        sessionId: id.slice('meta-ai:'.length),
+      }))
+
+    if (restored.length === 0 && metaTabs.length === 0) {
+      return
+    }
+
+    const tabs: WorkbenchTab[] = [...restored, ...metaTabs]
+    const activeId =
+      snapshot.activeId && tabs.some((tab) => tab.id === snapshot.activeId)
+        ? snapshot.activeId
+        : tabs[0].id
+
+    setWorkbench((current) => {
+      if (current.tabs.length > 0) {
+        return current
+      }
+
+      return {
+        tabs,
+        groups: [
+          {
+            id: 'group-1',
+            tabIds: tabs.map((tab) => tab.id),
+            activeId,
+          },
+        ],
+        activeGroupId: 'group-1',
+      }
+    })
+    setCenterView('editor')
+    reportStatus(`Restored ${tabs.length} tab(s) from last session`)
+  }
 
   const confirmDiscardTabs = useCallback(async (): Promise<boolean> => {
-    const dirty = dirtyTabs(tabs)
+    const dirty = dirtyTabs(workbench.tabs)
 
     if (dirty.length === 0) {
       return true
@@ -443,13 +699,21 @@ function AppShell() {
       .join(', ')
     const extra = dirty.length > 3 ? ` and ${dirty.length - 3} more` : ''
 
-    return dialogs.confirm({
+    const confirmed = await dialogs.confirm({
       title: 'Discard unsaved changes?',
       message: `${names}${extra} ${dirty.length === 1 ? 'has' : 'have'} unsaved edits that will be lost.`,
       confirmLabel: 'Discard changes',
       danger: true,
     })
-  }, [dialogs, tabs])
+
+    // Explicit discard drops the recovery snapshot too, so reopening
+    // the project does not resurrect discarded buffers.
+    if (confirmed && workspace?.root) {
+      clearTabSnapshot(workspace.root)
+    }
+
+    return confirmed
+  }, [dialogs, workbench.tabs, workspace])
 
   async function refreshExplorer() {
     if (!workspace || explorerLoading) {
@@ -469,13 +733,25 @@ function AppShell() {
 
   function resetForWorkspace(next: KryomWorkspace | null) {
     setWorkspace(next)
-    setTabs([])
-    setActivePath(null)
+    setWorkbench(initialWorkbench())
+    setMetaPrompts({})
     setCenterView('home')
     setCursor({ line: 1, column: 1 })
     setDiagSummary(null)
     setDiagnostics([])
     historyRef.current = { entries: [], index: -1 }
+
+    // Meta AI sessions are per-project: switching projects loads that
+    // project's sessions, closing unloads them (records persist).
+    const root = next?.root ?? null
+    const loaded = loadMetaSessions(root)
+    const record: Record<string, MetaSession> = {}
+
+    for (const entry of loaded) {
+      record[entry.id] = entry
+    }
+
+    setSessions(record)
 
     if (!next) {
       setSummary(null)
@@ -583,7 +859,11 @@ function AppShell() {
       setSidebarVisible(true)
       reportStatus('Repository cloned and opened')
     } catch (e) {
-      reportError(e)
+      if (isCancelError(e)) {
+        reportStatus('Clone cancelled')
+      } else {
+        reportError(e)
+      }
     }
   }
 
@@ -678,7 +958,7 @@ function AppShell() {
   }
 
   async function exportActiveFile(template: string) {
-    if (!activeTab) {
+    if (!activeCodeTab) {
       reportStatus('Open a file first')
       return
     }
@@ -686,10 +966,10 @@ function AppShell() {
     setError('')
 
     try {
-      const title = baseName(activeTab.path).replace(/\.[^.]+$/, '') || 'document'
+      const title = baseName(activeCodeTab.path).replace(/\.[^.]+$/, '') || 'document'
       const result = await kryom().exportTextDocx({
         title,
-        markdown: activeTab.content,
+        markdown: activeCodeTab.content,
         template,
       })
 
@@ -740,14 +1020,15 @@ function AppShell() {
   }
 
   async function openEditorFile(targetPath: string, line?: number) {
-    const existing = findTab(tabs, targetPath)
+    const existing = findCodeTabByPath(workbench.tabs, targetPath)
 
     if (existing) {
-      setActivePath(existing.path)
+      // openTab also reveals tabs that live in another group only.
+      setWorkbench((previous) => openTab(previous, existing))
       setCenterView('editor')
 
       if (line !== undefined) {
-        setPendingLine(line)
+        setPendingReveal({ path: existing.path, line })
       }
 
       return
@@ -758,21 +1039,21 @@ function AppShell() {
 
     try {
       const meta = await kryom().readFileMeta(targetPath)
+      const tab: CodeTab = {
+        kind: 'code',
+        id: codeTabId(meta.path),
+        path: meta.path,
+        content: meta.content,
+        savedContent: meta.content,
+        mtimeMs: meta.mtimeMs,
+      }
 
-      setTabs((previous) =>
-        openTab(previous, {
-          path: meta.path,
-          content: meta.content,
-          savedContent: meta.content,
-          mtimeMs: meta.mtimeMs,
-        })
-      )
-      setActivePath(meta.path)
+      setWorkbench((previous) => openTab(previous, tab))
       setCenterView('editor')
       setCursor({ line: 1, column: 1 })
 
       if (line !== undefined) {
-        setPendingLine(line)
+        setPendingReveal({ path: meta.path, line })
       }
 
       reportStatus('File opened')
@@ -783,31 +1064,29 @@ function AppShell() {
     }
   }
 
-  function selectTab(targetPath: string) {
-    if (findTab(tabs, targetPath)) {
-      setActivePath(targetPath)
-      setCenterView('editor')
-      setCursor({ line: 1, column: 1 })
-    }
+  function selectTab(groupId: string, id: string) {
+    setWorkbench((previous) => activateTab(previous, groupId, id))
+    setCenterView('editor')
+    setCursor({ line: 1, column: 1 })
   }
 
-  // Ctrl+Tab / Ctrl+Shift+Tab cycle through open tabs in strip order.
-  // No native accelerator is registered for these, so the window
-  // keydown listener below is the single handler.
+  // Ctrl+Tab / Ctrl+Shift+Tab cycle through the active group's tabs in
+  // strip order. No native accelerator is registered for these, so
+  // the window keydown listener below is the single handler.
   const cycleTab = useCallback((delta: 1 | -1) => {
-    const list = tabsRef.current
+    const state = workbenchRef.current
+    const group = getActiveGroup(state)
+    const list = groupTabs(state, group)
 
     if (list.length < 2) {
       return
     }
 
-    const index = list.findIndex(
-      (tab) => tab.path === activePathRef.current
-    )
+    const index = list.findIndex((tab) => tab.id === group.activeId)
     const base = index < 0 ? (delta > 0 ? -1 : 0) : index
     const next = list[(base + delta + list.length) % list.length]
 
-    setActivePath(next.path)
+    setWorkbench((previous) => activateTab(previous, group.id, next.id))
     setCenterView('editor')
     setCursor({ line: 1, column: 1 })
   }, [])
@@ -823,7 +1102,9 @@ function AppShell() {
         return
       }
 
-      if (tabsRef.current.length < 2) {
+      const state = workbenchRef.current
+
+      if (groupTabs(state, getActiveGroup(state)).length < 2) {
         return
       }
 
@@ -851,9 +1132,11 @@ function AppShell() {
     historyRef.current = { entries: history.entries, index: next }
 
     const target = history.entries[next]
+    const existing = findCodeTabByPath(workbench.tabs, target)
 
-    if (findTab(tabs, target)) {
-      setActivePath(target)
+    if (existing) {
+      // openTab also reveals tabs that live in another group only.
+      setWorkbench((previous) => openTab(previous, existing))
       setCenterView('editor')
     } else {
       void openEditorFile(target)
@@ -864,14 +1147,15 @@ function AppShell() {
     try {
       const meta = await kryom().readFileMeta(targetPath)
 
-      setTabs((previous) =>
-        updateTab(previous, meta.path, {
+      setWorkbench((previous) => ({
+        ...previous,
+        tabs: updateCodeTab(previous.tabs, codeTabId(targetPath), {
           path: meta.path,
           content: meta.content,
           savedContent: meta.content,
           mtimeMs: meta.mtimeMs,
-        })
-      )
+        }),
+      }))
       reportStatus('Reloaded from disk')
     } catch (e) {
       reportError(e)
@@ -883,54 +1167,60 @@ function AppShell() {
       await kryom().saveFile(targetPath, content)
       const meta = await kryom().readFileMeta(targetPath)
 
-      setTabs((previous) =>
-        updateTab(previous, meta.path, {
+      setWorkbench((previous) => ({
+        ...previous,
+        tabs: updateCodeTab(previous.tabs, codeTabId(targetPath), {
           path: meta.path,
           content: meta.content,
           savedContent: meta.content,
           mtimeMs: meta.mtimeMs,
-        })
-      )
+        }),
+      }))
       reportStatus('All changes saved')
     } catch (e) {
       reportError(e)
     }
   }
 
-  // Saves one tab by path. Returns true when the tab no longer holds
-  // unsaved work (saved, reloaded after a conflict, or already clean).
-  // Concurrent callers share one in-flight save per path, so a Monaco
-  // keybinding plus its native-menu accelerator can never double-save.
-  async function saveTab(targetPath: string): Promise<boolean> {
-    const inflight = saveInflight.current.get(targetPath)
+  // Saves one code tab by id. Returns true when the tab no longer
+  // holds unsaved work (saved, reloaded after a conflict, or already
+  // clean). Concurrent callers share one in-flight save per tab, so a
+  // Monaco keybinding plus its native-menu accelerator can never
+  // double-save.
+  async function saveTab(tabId: string): Promise<boolean> {
+    const inflight = saveInflight.current.get(tabId)
 
     if (inflight) {
       return inflight
     }
 
-    const run = saveTabInner(targetPath)
+    const run = saveTabInner(tabId)
 
-    saveInflight.current.set(targetPath, run)
+    saveInflight.current.set(tabId, run)
 
     try {
       return await run
     } finally {
-      saveInflight.current.delete(targetPath)
+      saveInflight.current.delete(tabId)
     }
   }
 
-  async function saveTabInner(targetPath: string): Promise<boolean> {
-    const tab = findTab(tabs, targetPath)
+  async function saveTabInner(tabId: string): Promise<boolean> {
+    const tab = findTab(workbenchRef.current.tabs, tabId)
 
-    if (!tab || saving) {
+    // No global `saving` check: per-tab saveInflight coalesces
+    // re-entrant saves, while different tabs save independently
+    // (conditional writes keep each file safe).
+    if (!tab || !isCodeTab(tab)) {
       return false
     }
 
-    if (!isDirty(tab)) {
+    if (!isTabDirty(tab)) {
       reportStatus('No changes to save')
       return true
     }
 
+    const targetPath = tab.path
     const content = tab.content
     const expectedMtimeMs = tab.mtimeMs
 
@@ -944,12 +1234,13 @@ function AppShell() {
         expectedMtimeMs
       )
 
-      setTabs((previous) =>
-        updateTab(previous, targetPath, {
+      setWorkbench((previous) => ({
+        ...previous,
+        tabs: updateCodeTab(previous.tabs, tabId, {
           savedContent: content,
           mtimeMs: result.mtimeMs,
-        })
-      )
+        }),
+      }))
       reportStatus('All changes saved')
 
       return true
@@ -985,24 +1276,25 @@ function AppShell() {
   const saveTabRef = useRef(saveTab)
   saveTabRef.current = saveTab
 
-  // Auto Save: persists the dirty active tab shortly after edits stop.
-  // Conflict dialogs still apply; nothing is silently discarded.
+  // Auto Save: persists the dirty active code tab shortly after
+  // edits stop. Conflict dialogs still apply; nothing is silently
+  // discarded.
   useEffect(() => {
-    if (!autoSave || !activeTab || !isDirty(activeTab)) {
+    if (!autoSave || !activeCodeTab || !isTabDirty(activeCodeTab)) {
       return
     }
 
-    const target = activeTab.path
+    const target = activeCodeTab.id
     const timer = window.setTimeout(() => {
       void saveTabRef.current(target)
     }, 1200)
 
     return () => window.clearTimeout(timer)
-  }, [autoSave, activeTab])
+  }, [autoSave, activeCodeTab])
 
   async function saveEditor() {
-    if (activePath) {
-      await saveTab(activePath)
+    if (activeCodeTab) {
+      await saveTab(activeCodeTab.id)
     }
   }
 
@@ -1011,11 +1303,11 @@ function AppShell() {
   // and the reported count aborts the close. The nonce echo lets the
   // main process settle promptly instead of waiting out its deadline.
   async function saveAllTabs(nonce: number) {
-    const snapshot = dirtyTabs(tabsRef.current)
+    const snapshot = dirtyTabs(workbenchRef.current.tabs)
     let failed = 0
 
     for (const tab of snapshot) {
-      const settled = await saveTabRef.current(tab.path)
+      const settled = await saveTabRef.current(tab.id)
 
       if (!settled) {
         failed += 1
@@ -1027,12 +1319,12 @@ function AppShell() {
     // doubt reports dirty and the close is retried, never forced.
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    const count = Math.max(dirtyTabs(tabsRef.current).length, failed)
+    const count = Math.max(dirtyTabs(workbenchRef.current.tabs).length, failed)
 
     kryom()
       .pushUIContext({
         hasWorkspace: workspace !== null,
-        hasEditor: activePath !== null,
+        hasEditor: activeCodeTab !== null,
         terminalRunning: terminal.running,
         dirtyCount: count,
         title: windowTitle,
@@ -1042,7 +1334,7 @@ function AppShell() {
   }
 
   async function saveAs() {
-    if (!activeTab) {
+    if (!activeCodeTab) {
       return
     }
 
@@ -1050,8 +1342,8 @@ function AppShell() {
 
     try {
       const result = await kryom().saveAs(
-        activeTab.content,
-        baseName(activeTab.path)
+        activeCodeTab.content,
+        baseName(activeCodeTab.path)
       )
 
       if (!result) {
@@ -1059,25 +1351,30 @@ function AppShell() {
         return
       }
 
-      if (result.path === activeTab.path) {
-        setTabs((previous) =>
-          updateTab(previous, result.path, {
-            savedContent: result.content,
-            mtimeMs: result.mtimeMs,
-          })
-        )
-      } else {
-        const oldPath = activeTab.path
+      if (result.path === activeCodeTab.path) {
+        const id = activeCodeTab.id
 
-        setTabs((previous) =>
-          openTab(removeTabs(previous, [oldPath]), {
-            path: result.path,
-            content: result.content,
+        setWorkbench((previous) => ({
+          ...previous,
+          tabs: updateCodeTab(previous.tabs, id, {
             savedContent: result.content,
             mtimeMs: result.mtimeMs,
-          })
+          }),
+        }))
+      } else {
+        const next: CodeTab = {
+          kind: 'code',
+          id: codeTabId(result.path),
+          path: result.path,
+          content: result.content,
+          savedContent: result.content,
+          mtimeMs: result.mtimeMs,
+        }
+        const oldId = activeCodeTab.id
+
+        setWorkbench((previous) =>
+          openTab(closeTab(previous, oldId), next)
         )
-        setActivePath(result.path)
       }
 
       await refreshExplorer()
@@ -1128,26 +1425,23 @@ function AppShell() {
     }
   }
 
-  function dropTabs(paths: string[]) {
-    setTabs((previous) => {
-      const next = removeTabs(previous, paths)
-
-      if (activePath && !next.some((tab) => tab.path === activePath)) {
-        setActivePath(next.length > 0 ? next[0].path : null)
-      }
-
-      return next
-    })
+  function dropTabs(ids: string[]) {
+    setWorkbench((previous) =>
+      ids.reduce((state, id) => closeTab(state, id), previous)
+    )
   }
 
-  async function closeTab(targetPath: string) {
-    const tab = findTab(tabs, targetPath)
+  // Closing a code tab with unsaved work confirms first; closing a
+  // Meta AI tab only closes the tab — the persistent session survives
+  // and reopens from the session record.
+  async function closeTabById(tabId: string) {
+    const tab = findTab(workbenchRef.current.tabs, tabId)
 
     if (!tab) {
       return
     }
 
-    if (isDirty(tab)) {
+    if (isCodeTab(tab) && isTabDirty(tab)) {
       const choice = await dialogs.confirmCloseDirty({
         fileName: baseName(tab.path),
       })
@@ -1157,7 +1451,7 @@ function AppShell() {
       }
 
       if (choice === 'save') {
-        const saved = await saveTab(tab.path)
+        const saved = await saveTab(tab.id)
 
         if (!saved) {
           return
@@ -1165,21 +1459,33 @@ function AppShell() {
       }
     }
 
-    const next = nextActivePath(tabs, targetPath, activePath)
+    setWorkbench((previous) => {
+      const next = closeTab(previous, tabId)
 
-    setTabs((previous) => removeTabs(previous, [targetPath]))
-    setActivePath(next)
+      if (next.tabs.length === 0) {
+        setCenterView('home')
+      }
 
-    if (!next) {
-      setCenterView('home')
-    }
+      return next
+    })
 
-    reportStatus('Tab closed')
+    reportStatus(isMetaTab(tab) ? 'Meta AI tab closed (session kept)' : 'Tab closed')
   }
 
-  async function closeOtherTabs(keepPath: string) {
-    const others = tabs.filter((tab) => tab.path !== keepPath)
-    const dirtyOthers = others.filter(isDirty)
+  async function closeOtherTabsById(groupId: string, keepId: string) {
+    const state = workbenchRef.current
+    const group = state.groups.find((entry) => entry.id === groupId)
+
+    if (!group) {
+      return
+    }
+
+    const dirtyOthers = group.tabIds
+      .map((id) => findTab(state.tabs, id))
+      .filter(
+        (tab): tab is CodeTab =>
+          !!tab && tab.id !== keepId && isCodeTab(tab) && isTabDirty(tab)
+      )
 
     if (dirtyOthers.length > 0) {
       const confirmed = await dialogs.confirm({
@@ -1196,9 +1502,20 @@ function AppShell() {
       }
     }
 
-    setTabs((previous) => previous.filter((tab) => tab.path === keepPath))
-    setActivePath(keepPath)
+    setWorkbench((previous) => closeOtherTabs(previous, groupId, keepId))
     reportStatus('Other tabs closed')
+  }
+
+  function splitGroupFromTab(groupId: string, tabId: string) {
+    setWorkbench((previous) =>
+      splitGroupRight(activateTab(previous, groupId, tabId), groupId)
+    )
+    reportStatus('Editor split right')
+  }
+
+  function closeEditorGroup(groupId: string) {
+    setWorkbench((previous) => closeGroup(previous, groupId))
+    reportStatus('Editor group closed')
   }
 
   async function createEntry(dir: string, type: 'file' | 'directory') {
@@ -1246,27 +1563,7 @@ function AppShell() {
 
     try {
       await kryom().renamePath({ oldPath, newPath })
-
-      setTabs((previous) => repathTabs(previous, oldPath, newPath))
-      setActivePath((previous) => {
-        if (!previous) {
-          return previous
-        }
-
-        if (previous === oldPath) {
-          return newPath
-        }
-
-        if (
-          previous.startsWith(`${oldPath}/`) ||
-          previous.startsWith(`${oldPath}\\`)
-        ) {
-          return newPath + previous.slice(oldPath.length)
-        }
-
-        return previous
-      })
-
+      setWorkbench((previous) => repathCodeTabs(previous, oldPath, newPath))
       await refreshExplorer()
       reportStatus('Renamed')
     } catch (e) {
@@ -1275,8 +1572,12 @@ function AppShell() {
   }
 
   async function deleteEntry(node: KryomNode) {
-    const affected = tabsUnder(tabs, node.path)
-    const dirtyAffected = affected.filter(isDirty)
+    const affectedIds = tabsUnderPath(workbench.tabs, node.path)
+    const dirtyAffected = affectedIds
+      .map((id) => findTab(workbench.tabs, id))
+      .filter(
+        (tab): tab is CodeTab => !!tab && isCodeTab(tab) && isTabDirty(tab)
+      )
     const confirmed = await dialogs.confirm({
       title: `Delete ${node.type}?`,
       message:
@@ -1295,8 +1596,8 @@ function AppShell() {
     try {
       await kryom().deletePath(node.path)
 
-      if (affected.length > 0) {
-        dropTabs(affected.map((tab) => tab.path))
+      if (affectedIds.length > 0) {
+        dropTabs(affectedIds)
       }
 
       await refreshExplorer()
@@ -1312,13 +1613,13 @@ function AppShell() {
     let warned = false
 
     for (const changed of changedPaths) {
-      const tab = findTab(tabs, changed)
+      const tab = findCodeTabByPath(workbenchRef.current.tabs, changed)
 
       if (!tab) {
         continue
       }
 
-      if (isDirty(tab)) {
+      if (isTabDirty(tab)) {
         warned = true
         continue
       }
@@ -1348,22 +1649,41 @@ function AppShell() {
   }
 
   function selectActivity(id: ActivityId) {
-    // Panel-backed destinations never take over the sidebar: Source
-    // Control and Run toggle bottom-panel tabs, AI Workspace centers
-    // the welcome/stage view. The sidebar keeps its own selection.
-    if (id === 'git') {
-      toggleBottom('git')
-      void refreshGitBranch()
+    const def = getActivity(id)
+
+    if (!def) {
       return
     }
 
-    if (id === 'run') {
+    // Panel destinations toggle bottom-panel tabs, center
+    // destinations switch the center view, actions run shell
+    // commands. The sidebar keeps its own selection throughout.
+    if (def.area === 'panel') {
+      if (id === 'git') {
+        toggleBottom('git')
+        void refreshGitBranch()
+        return
+      }
+
       toggleBottom('problems')
       return
     }
 
-    if (id === 'home') {
+    if (def.area === 'center') {
+      if (id === 'intel' || id === 'platform') {
+        setCenterView(id)
+        return
+      }
+
       setCenterView('home')
+      return
+    }
+
+    if (def.area === 'action') {
+      if (id === 'ai') {
+        newMetaAI()
+      }
+
       return
     }
 
@@ -1378,19 +1698,38 @@ function AppShell() {
   }
 
   function showSidebar(id: ActivityId) {
-    if (id === 'git') {
-      showBottom('git')
-      void refreshGitBranch()
+    const def = getActivity(id)
+
+    if (!def) {
       return
     }
 
-    if (id === 'run') {
+    if (def.area === 'panel') {
+      if (id === 'git') {
+        showBottom('git')
+        void refreshGitBranch()
+        return
+      }
+
       showBottom('problems')
       return
     }
 
-    if (id === 'home') {
+    if (def.area === 'center') {
+      if (id === 'intel' || id === 'platform') {
+        setCenterView(id)
+        return
+      }
+
       setCenterView('home')
+      return
+    }
+
+    if (def.area === 'action') {
+      if (id === 'ai') {
+        newMetaAI()
+      }
+
       return
     }
 
@@ -1398,11 +1737,20 @@ function AppShell() {
     setSidebarVisible(true)
   }
 
-  // Activity-bar active state: panel-backed destinations reflect the
-  // bottom panel and center view; sidebar views reflect the sidebar.
+  // Activity-bar active state: panel destinations reflect the bottom
+  // panel, center destinations the center view, sidebar views the
+  // sidebar. Meta AI lights while a Meta AI tab is active.
   function isActivitySelected(id: ActivityId): boolean {
     if (id === 'home') {
-      return centerView !== 'editor'
+      return centerView === 'home'
+    }
+
+    if (id === 'ai') {
+      return centerView === 'editor' && activeMetaTab !== null
+    }
+
+    if (id === 'intel' || id === 'platform') {
+      return centerView === id
     }
 
     if (id === 'git') {
@@ -1425,49 +1773,186 @@ function AppShell() {
   }
 
   function unstageCenter() {
-    setCenterView(tabs.length > 0 ? 'editor' : 'home')
+    setCenterView(workbench.tabs.length > 0 ? 'editor' : 'home')
   }
 
-  function handleWelcomeChat(prompt: string) {
-    welcomeNonce.current += 1
-    setWelcomeChatPrompt({ text: prompt, nonce: welcomeNonce.current })
-    stageCenter('chat')
-    reportStatus('AI request sent from welcome')
+  // Meta AI sessions (Level 3C, Phases 3–5): every tab owns an
+  // independent persistent session. Creating opens the tab; closing
+  // the tab keeps the session; deleting removes the record.
+  function newMetaAI(
+    initialPrompt?: {
+      text: string
+      intent: 'chat' | 'plan' | 'research'
+    },
+    titleSeed?: string
+  ) {
+    const root = workspace?.root ?? null
+    const session = createMetaSession(root, settings.defaultModel)
+
+    if (titleSeed) {
+      session.title = deriveSessionTitle(titleSeed)
+    }
+
+    saveMetaSession(session)
+    setSessions((previous) => ({ ...previous, [session.id]: session }))
+
+    const tabId = metaTabId(session.id)
+
+    if (initialPrompt) {
+      metaNonce.current += 1
+      setMetaPrompts((previous) => ({
+        ...previous,
+        [tabId]: { ...initialPrompt, nonce: metaNonce.current },
+      }))
+    }
+
+    setWorkbench((previous) =>
+      openTab(previous, { kind: 'meta-ai', id: tabId, sessionId: session.id })
+    )
+    setCenterView('editor')
+    reportStatus(
+      initialPrompt ? 'Meta AI session started' : 'Meta AI session opened'
+    )
   }
 
-  function handleWelcomeAgent(task: string) {
-    welcomeNonce.current += 1
-    setWelcomeAgentTask({ text: task, nonce: welcomeNonce.current })
-    stageCenter('agent')
-    reportStatus('Agent task started — review the plan before applying')
+  // Opens an existing session's tab (history "Open" action):
+  // re-activates the tab when already open, never duplicates it.
+  function openMetaSession(sessionId: string) {
+    const session = sessionsRef.current[sessionId]
+
+    if (!session) {
+      reportStatus('Session is no longer available')
+      return
+    }
+
+    setWorkbench((previous) =>
+      openTab(previous, {
+        kind: 'meta-ai',
+        id: metaTabId(sessionId),
+        sessionId,
+      })
+    )
+    setCenterView('editor')
+    reportStatus(`Meta AI session opened (${session.title})`)
   }
 
-  function handleWelcomeResearch(objective: string) {
-    welcomeNonce.current += 1
-    setWelcomeResearchStart({ objective, nonce: welcomeNonce.current })
-    stageCenter('research')
-    reportStatus('Research started from welcome')
-  }
+  function consumeMetaPrompt(tabId: string) {
+    setMetaPrompts((previous) => {
+      if (!(tabId in previous)) {
+        return previous
+      }
 
-  function handleResearchImplement(session: KryomResearchSession) {
-    welcomeNonce.current += 1
-    setWelcomeAgentTask({
-      text:
-        `Implement from research brief (session ${session.id}).\n` +
-        `Objective: ${session.objective}\n` +
-        'Follow the brief\'s ordered implementation tasks and acceptance criteria. ' +
-        'Cite the brief\'s sources when reporting which requirements are satisfied.',
-      nonce: welcomeNonce.current,
-      researchSessionId: session.id,
+      const next = { ...previous }
+
+      delete next[tabId]
+
+      return next
     })
-    stageCenter('agent')
-    reportStatus('Agent planning from research brief…')
   }
 
-  function handleResearchAsk(session: KryomResearchSession) {
-    setChatResearchId(session.id)
-    stageCenter('chat')
-    reportStatus(`AI chat attached to research ${session.id}`)
+  function updateSession(session: MetaSession) {
+    saveMetaSession(session)
+    setSessions((previous) => ({ ...previous, [session.id]: session }))
+  }
+
+  async function renameSession(sessionId: string) {
+    const session = sessionsRef.current[sessionId]
+
+    if (!session) {
+      return
+    }
+
+    const title = await dialogs.prompt({
+      title: 'Rename session',
+      label: 'Session title',
+      initialValue: session.title,
+      confirmLabel: 'Rename',
+    })
+
+    if (title) {
+      updateSession(touchSession({ ...session, title: title.slice(0, 80) }))
+    }
+  }
+
+  // Applies a session deletion without confirming: callers confirm
+  // first (the workspace and the tab menu each ask).
+  function applySessionDelete(sessionId: string) {
+    const session = sessionsRef.current[sessionId]
+
+    if (!session) {
+      return
+    }
+
+    deleteMetaSession(session.root, sessionId)
+    setSessions((previous) => {
+      const next = { ...previous }
+
+      delete next[sessionId]
+
+      return next
+    })
+    setWorkbench((previous) => closeTab(previous, metaTabId(sessionId)))
+    reportStatus('Meta AI session deleted')
+  }
+
+  async function deleteSession(sessionId: string) {
+    const session = sessionsRef.current[sessionId]
+
+    if (!session) {
+      return
+    }
+
+    const confirmed = await dialogs.confirm({
+      title: 'Delete session?',
+      message:
+        'The conversation and session record are removed. Linked plans, research, and files on disk are kept.',
+      confirmLabel: 'Delete session',
+      danger: true,
+    })
+
+    if (!confirmed) {
+      return
+    }
+
+    applySessionDelete(sessionId)
+  }
+
+  // Discovery routing: explicit user actions only. Ordinary chat
+  // and research stay in the central workspace; these handlers open
+  // Meta AI Agent tabs for coding work.
+  function handleDiscoveryOpenInAgent(text: string) {
+    // The tab title seeds immediately from the request.
+    newMetaAI({ text, intent: 'plan' }, text)
+  }
+
+  function handleDiscoveryResearchImplement(research: KryomResearchSession) {
+    newMetaAI(
+      {
+        text:
+          `Implement from research brief (session ${research.id}).\n` +
+          `Objective: ${research.objective}\n` +
+          "Follow the brief's ordered implementation tasks and acceptance criteria. " +
+          "Cite the brief's sources when reporting which requirements are satisfied.",
+        intent: 'plan',
+      },
+      `Implement: ${research.objective}`
+    )
+  }
+
+  function handleDiscoveryResearchAsk(research: KryomResearchSession) {
+    setChatResearchId(research.id)
+    setDiscoveryMode('chat')
+    reportStatus(`Research ${research.id} attached to Discovery chat`)
+  }
+
+  function openProviderSettings() {
+    setSettingsSection('providers')
+    setSettingsOpen(true)
+  }
+
+  function openGeneralSettings() {
+    setSettingsSection('general')
+    setSettingsOpen(true)
   }
 
   function runDiagnosticsNow() {
@@ -1483,7 +1968,7 @@ function AppShell() {
   }
 
   async function goToLine() {
-    if (!activeTab) {
+    if (!activeCodeTab) {
       reportStatus('Open a file first')
       return
     }
@@ -1507,7 +1992,7 @@ function AppShell() {
     }
 
     setCenterView('editor')
-    setPendingLine(line)
+    setPendingReveal({ path: activeCodeTab.path, line })
   }
 
   function openQuickOpen() {
@@ -1561,19 +2046,28 @@ function AppShell() {
         case 'file.saveAll':
           void saveAllTabs(command.payload?.nonce ?? 0)
           break
+        case 'session.discardSnapshots':
+          if (workspace?.root) {
+            clearTabSnapshot(workspace.root)
+          }
+
+          break
         case 'file.toggleAutoSave':
           void toggleAutoSave()
           break
-        case 'file.closeEditor':
-          if (activePath) {
-            void closeTab(activePath)
+        case 'file.closeEditor': {
+          const group = getActiveGroup(workbenchRef.current)
+
+          if (group.activeId) {
+            void closeTabById(group.activeId)
           }
           break
+        }
         case 'file.closeFolder':
           void closeProject()
           break
         case 'edit.find':
-          if (editorApi.current && activeTab) {
+          if (editorApi.current && activeCodeTab) {
             setCenterView('editor')
             editorApi.current.find()
           } else {
@@ -1581,7 +2075,7 @@ function AppShell() {
           }
           break
         case 'edit.replace':
-          if (editorApi.current && activeTab) {
+          if (editorApi.current && activeCodeTab) {
             setCenterView('editor')
             editorApi.current.replace()
           } else {
@@ -1589,14 +2083,14 @@ function AppShell() {
           }
           break
         case 'select.expand':
-          if (editorApi.current && activeTab) {
+          if (editorApi.current && activeCodeTab) {
             editorApi.current.expandSelection()
           } else {
             reportStatus('Open a file to change the selection')
           }
           break
         case 'select.shrink':
-          if (editorApi.current && activeTab) {
+          if (editorApi.current && activeCodeTab) {
             editorApi.current.shrinkSelection()
           } else {
             reportStatus('Open a file to change the selection')
@@ -1617,17 +2111,34 @@ function AppShell() {
         case 'view.home':
           showHome()
           break
+        case 'view.metaAI':
+          newMetaAI()
+          break
         case 'view.chat':
-          stageCenter('chat')
-          break
         case 'view.agent':
-          stageCenter('agent')
-          break
         case 'view.research':
-          stageCenter('research')
+          // Legacy accelerators predate the unified workspace; all of
+          // them open a Meta AI session tab now.
+          newMetaAI()
           break
+        case 'view.intel':
+          stageCenter('intel')
+          break
+        case 'view.platform':
+          stageCenter('platform')
+          break
+        case 'view.splitRight': {
+          const group = getActiveGroup(workbenchRef.current)
+
+          if (group.activeId) {
+            splitGroupFromTab(group.id, group.activeId)
+          } else {
+            reportStatus('Open a tab to split')
+          }
+          break
+        }
         case 'view.focusEditor':
-          if (activeTab) {
+          if (activeCodeTab || activeMetaTab) {
             setCenterView('editor')
           } else {
             showHome()
@@ -1680,6 +2191,9 @@ function AppShell() {
         case 'help.shortcuts':
           setShortcutsOpen(true)
           break
+        case 'help.diagnostics':
+          setDiagnosticsOpen(true)
+          break
         default:
           reportStatus(`Unknown command: ${command.id}`)
           break
@@ -1689,14 +2203,15 @@ function AppShell() {
     // callback identity; the subscription below always calls through.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
-      tabs,
-      activePath,
-      activeTab,
+      workbench,
+      activeCodeTab,
+      activeMetaTab,
       workspace,
       bottomTab,
       bottomOpen,
       autoSave,
       saving,
+      settings,
       dialogs,
       terminal,
     ]
@@ -1719,21 +2234,20 @@ function AppShell() {
 
   const scripts = summary ? Object.keys(summary.scripts) : []
 
-  const sidebarTitle: Record<ActivityId, string> = {
+  // Sidebar views with their own headers map to ''; center/panel
+  // destinations never render here.
+  const sidebarTitle: Record<string, string> = {
     explorer: 'EXPLORER',
     search: 'SEARCH',
-    git: 'SOURCE CONTROL',
-    run: 'RUN AND DIAGNOSTICS',
     extensions: '',
-    connections: '',
-    home: 'AI WORKSPACE',
-    profile: '',
+    tools: '',
+    memory: '',
+    account: '',
   }
 
   const STAGE_TABS: Array<{ id: StageMode; label: string }> = [
-    { id: 'chat', label: 'CHAT' },
-    { id: 'agent', label: 'AGENT' },
-    { id: 'research', label: 'RESEARCH' },
+    { id: 'intel', label: 'INTEL' },
+    { id: 'platform', label: 'PLATFORM' },
   ]
 
   const BOTTOM_TABS: Array<{ id: BottomTab; label: string }> = [
@@ -1741,15 +2255,83 @@ function AppShell() {
     { id: 'problems', label: 'PROBLEMS' },
     { id: 'git', label: 'SOURCE CONTROL' },
     { id: 'output', label: 'OUTPUT' },
+    { id: 'tasks', label: 'TASKS' },
   ]
+
+  // Same-root session buckets for history attach. Memoized so the
+  // Agent workspace's history resolution does not refire on every
+  // shell render.
+  const siblingsByRoot = useMemo(() => {
+    const buckets = new Map<string | null, MetaSession[]>()
+
+    for (const entry of Object.values(sessions)) {
+      const bucket = buckets.get(entry.root) ?? []
+
+      bucket.push(entry)
+      buckets.set(entry.root, bucket)
+    }
+
+    return buckets
+  }, [sessions])
+
+  // Meta AI file context prefers a code tab in the same group, then
+  // any open code tab, so the session indicator names a real file.
+  function metaContextFor(
+    group: EditorGroup,
+    sessionId: string
+  ): MetaTabContext | null {
+    const session = sessions[sessionId]
+
+    if (!session) {
+      return null
+    }
+
+    const groupTabsList = groupTabs(workbench, group)
+    const sameGroup =
+      groupTabsList.find(
+        (tab): tab is CodeTab => isCodeTab(tab)
+      ) ?? null
+    const anywhere =
+      sameGroup ??
+      workbench.tabs.find((tab): tab is CodeTab => isCodeTab(tab)) ??
+      null
+
+    return {
+      session,
+      // History isolation boundary: only sessions bound to this
+      // session's root reach the workspace. The bucket always holds
+      // this session itself, so the lookup never misses.
+      siblings: siblingsByRoot.get(session.root) ?? [],
+      activeFile: anywhere?.path ?? null,
+      fileName: anywhere ? baseName(anywhere.path) : '',
+      fileContent: anywhere?.content ?? '',
+      fileDirty: anywhere ? isTabDirty(anywhere) : false,
+      contextEnabled: settings.aiContextEnabled,
+      workspaceRoot: workspace?.root ?? null,
+      onStatus: reportStatus,
+      onUpdateSession: updateSession,
+      onOpenFile: (path: string, line?: number) => void openEditorFile(path, line),
+      onOpenSession: openMetaSession,
+      onFilesChanged: (paths: string[]) => void handleAgentFilesChanged(paths),
+      onOpenProviderSettings: openProviderSettings,
+      initialPrompt: metaPrompts[metaTabId(sessionId)] ?? null,
+      onInitialPromptConsumed: () => consumeMetaPrompt(metaTabId(sessionId)),
+    }
+  }
 
   return (
     <main className="ide">
       <TitleBar
         workspaceRoot={workspace?.root ?? null}
-        activeFile={showEditor ? (activeTab?.path ?? null) : null}
+        activeLabel={showEditor ? activeLabel : null}
         dirty={dirty}
         autoSave={autoSave}
+        sidebarVisible={sidebarVisible}
+        bottomOpen={bottomOpen}
+        onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
+        onToggleBottom={() => setBottomOpen((open) => !open)}
+        discoveryMode={discoveryMode}
+        onDiscoveryModeChange={setDiscoveryMode}
       />
 
       <div className="shell">
@@ -1757,12 +2339,13 @@ function AppShell() {
           active={activity}
           sidebarVisible={sidebarVisible}
           onSelect={selectActivity}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={openGeneralSettings}
           isSelected={isActivitySelected}
         />
 
-        {/* Always mounted (hidden when collapsed) so Git and
-            Problems state survives collapsing the sidebar. */}
+        {/* Always mounted (hidden when collapsed) so sidebar views
+            keep their state while collapsed. */}
+        <ErrorBoundary compact title="The sidebar crashed.">
         <aside hidden={!sidebarVisible} className="sidebar" style={{ width: leftWidth }}>
           {sidebarTitle[activity] && (
             <div className="side-header">
@@ -1773,11 +2356,13 @@ function AppShell() {
               <div hidden={activity !== 'explorer'} className="tab-body">
                 <Explorer
                   workspace={workspace}
-                  activeFile={activePath}
+                  activeFile={activeCodePath}
                   loading={explorerLoading}
                   projectInfo={projectInfo}
+                  gitBadges={gitBadges}
                   onOpenFile={(node) => void openEditorFile(node.path)}
                   onOpenProject={() => void openProject()}
+                  onCreateProject={() => setTemplatePickerOpen(true)}
                   onRefresh={() => void refreshExplorer()}
                   onNewFile={(dir) => void createEntry(dir, 'file')}
                   onNewFolder={(dir) => void createEntry(dir, 'directory')}
@@ -1801,31 +2386,39 @@ function AppShell() {
                 />
               </div>
 
-              <div hidden={activity !== 'connections'} className="tab-body">
+              <div hidden={activity !== 'tools'} className="tab-body">
                 <ConnectionsPanel
                   workspaceRoot={workspace?.root ?? null}
                   defaultModel={settings.defaultModel}
-                  activeFileName={activeTab ? baseName(activeTab.path) : ''}
-                  activeFileContent={activeTab?.content ?? ''}
+                  activeFileName={activeCodeTab ? baseName(activeCodeTab.path) : ''}
+                  activeFileContent={activeCodeTab?.content ?? ''}
                   onStatus={reportStatus}
                   onOpenSourceControl={() => showBottom('git')}
-                  onCloneRepository={(url) => void cloneRepository(url)}
+                  onCloneRepository={(url) => cloneRepository(url)}
                   onCreateReport={(template) => void createReport(template)}
                   onExportActiveFile={(template) => void exportActiveFile(template)}
                   onImportSave={(text, fileName) => void importSave(text, fileName)}
                 />
               </div>
 
-              <div hidden={activity !== 'profile'} className="tab-body">
+              <div hidden={activity !== 'memory'} className="tab-body">
+                <MemoryPanel
+                  workspaceRoot={workspace?.root ?? null}
+                  onStatus={reportStatus}
+                />
+              </div>
+
+              <div hidden={activity !== 'account'} className="tab-body">
                 <ProfilePanel
                   workspaceRoot={workspace?.root ?? null}
                   defaultModel={settings.defaultModel}
                   summary={summary}
-                  onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenSettings={openGeneralSettings}
                   onOpenAbout={() => setAboutOpen(true)}
                 />
               </div>
         </aside>
+        </ErrorBoundary>
 
         {sidebarVisible && (
           <ResizeHandle
@@ -1841,40 +2434,107 @@ function AppShell() {
         )}
 
         <section className="center">
-          {showEditor && activeTab && (
-            <EditorPanel
-              tabs={tabs}
-              activeTabPath={activeTab.path}
-              onSelectTab={selectTab}
-              onCloseTab={(path) => void closeTab(path)}
-              onCloseOthers={(path) => void closeOtherTabs(path)}
-              filePath={activeTab.path}
-              fileName={baseName(activeTab.path)}
-              content={activeTab.content}
-              dirty={dirty}
-              saving={saving}
-              pendingLine={pendingLine}
-              onChange={(value) =>
-                setTabs((previous) =>
-                  updateTab(previous, activeTab.path, { content: value })
+          {showEditor && (
+            <div className="editor-groups">
+              {workbench.groups.map((group) => {
+                const list = groupTabs(workbench, group)
+                const groupActive = group.activeId
+                  ? (findTab(workbench.tabs, group.activeId) ?? null)
+                  : null
+                const groupCode =
+                  groupActive && isCodeTab(groupActive) ? groupActive : null
+                const groupMeta =
+                  groupActive && isMetaTab(groupActive) ? groupActive : null
+                const isActiveGroup = group.id === activeGroup.id
+
+                return (
+                  <div
+                    key={group.id}
+                    className={
+                      isActiveGroup
+                        ? 'editor-group active-group'
+                        : 'editor-group'
+                    }
+                    onMouseDown={() =>
+                      setWorkbench((previous) =>
+                        focusGroup(previous, group.id)
+                      )
+                    }
+                  >
+                    <EditorPanel
+                      groupId={group.id}
+                      tabs={list}
+                      activeTab={groupActive}
+                      sessions={sessions}
+                      onSelectTab={(id) => selectTab(group.id, id)}
+                      onCloseTab={(id) => void closeTabById(id)}
+                      onCloseOthers={(keepId) =>
+                        void closeOtherTabsById(group.id, keepId)
+                      }
+                      onSplitRight={(id) => splitGroupFromTab(group.id, id)}
+                      onCloseGroup={() => closeEditorGroup(group.id)}
+                      canCloseGroup={workbench.groups.length > 1}
+                      onNewMetaAI={() => newMetaAI()}
+                      onRenameSession={(sessionId) =>
+                        void renameSession(sessionId)
+                      }
+                      onDeleteSession={(sessionId) =>
+                        void deleteSession(sessionId)
+                      }
+                      content={groupCode?.content ?? ''}
+                      dirty={groupCode ? isTabDirty(groupCode) : false}
+                      saving={saving}
+                      pendingLine={
+                        pendingReveal &&
+                        groupCode &&
+                        pendingReveal.path === groupCode.path
+                          ? pendingReveal.line
+                          : null
+                      }
+                      onChange={(value) => {
+                        if (!groupCode) {
+                          return
+                        }
+
+                        const id = groupCode.id
+
+                        setWorkbench((previous) => ({
+                          ...previous,
+                          tabs: updateCodeTab(previous.tabs, id, {
+                            content: value,
+                          }),
+                        }))
+                      }}
+                      onSave={() => void saveEditor()}
+                      onRevealConsumed={() => setPendingReveal(null)}
+                      meta={
+                        groupMeta
+                          ? metaContextFor(group, groupMeta.sessionId)
+                          : null
+                      }
+                      panelActive={isActiveGroup}
+                      registerApi={(api) => {
+                        editorApi.current = api
+                      }}
+                      fontSize={fontSize}
+                      onCursorChange={
+                        isActiveGroup
+                          ? (line, column) => setCursor({ line, column })
+                          : undefined
+                      }
+                      workspaceRoot={workspace?.root ?? null}
+                      markers={diagnostics}
+                    />
+                  </div>
                 )
-              }
-              onSave={() => void saveEditor()}
-              onRevealConsumed={() => setPendingLine(null)}
-              registerApi={(api) => {
-                editorApi.current = api
-              }}
-              fontSize={fontSize}
-              onCursorChange={(line, column) => setCursor({ line, column })}
-              workspaceRoot={workspace?.root ?? null}
-              markers={diagnostics}
-            />
+              })}
+            </div>
           )}
 
-          {/* Always mounted (hidden unless staged) so the Chat, Agent,
-              and Research sessions survive editor and home visits. */}
+          {/* Always mounted (hidden unless staged) so Intel and
+              Platform sessions survive editor and home visits. */}
           <section hidden={!staged} className="editor-panel stage">
-            <div className="stage-tabs" role="tablist" aria-label="AI workspace">
+            <div className="stage-tabs" role="tablist" aria-label="Developer tools">
               {STAGE_TABS.map((tab) => (
                 <button
                   key={tab.id}
@@ -1893,50 +2553,38 @@ function AppShell() {
                 className="panel-tab stage-close"
                 onClick={unstageCenter}
                 title="Back to editor or home"
-                aria-label="Close AI stage"
+                aria-label="Close tools stage"
               >
                 ×
               </button>
             </div>
 
             <div className="stage-body">
-              <div hidden={staged !== 'chat'} className="tab-body">
-                <AiChat
-                  workspaceRoot={workspace?.root ?? null}
-                  activeFile={activeTab?.path ?? null}
-                  fileName={activeTab ? baseName(activeTab.path) : ''}
-                  fileContent={activeTab?.content ?? ''}
-                  dirty={dirty}
-                  defaultModel={settings.defaultModel}
-                  contextEnabled={settings.aiContextEnabled}
-                  onStatus={reportStatus}
-                  pendingPrompt={welcomeChatPrompt}
-                  researchSessionId={chatResearchId}
-                  onDetachResearch={() => setChatResearchId(null)}
-                  onOpenConnections={() => showSidebar('connections')}
-                />
-              </div>
-              <div hidden={staged !== 'agent'} className="tab-body">
-                <AgentPanel
+              <div hidden={staged !== 'intel'} className="tab-body">
+                <IntelligenceHub
                   workspaceRoot={workspace?.root ?? null}
                   defaultModel={settings.defaultModel}
-                  defaultIncludeContext={settings.aiContextEnabled}
-                  activeFile={activeTab?.path ?? null}
-                  activeFileDirty={dirty}
-                  onFilesChanged={(paths) => void handleAgentFilesChanged(paths)}
                   onStatus={reportStatus}
-                  pendingTask={welcomeAgentTask}
-                  onOpenConnections={() => showSidebar('connections')}
-                  onOpenFile={(path) => void openEditorFile(path)}
+                  onOpenConnections={() => showSidebar('tools')}
+                  onOpenFile={(path, line) =>
+                    void openEditorFile(
+                      resolveAgainstRoot(workspace?.root ?? null, path),
+                      line
+                    )
+                  }
+                  onFilesChanged={(paths) =>
+                    void handleAgentFilesChanged(
+                      paths.map((entry) =>
+                        resolveAgainstRoot(workspace?.root ?? null, entry)
+                      )
+                    )
+                  }
                 />
               </div>
-              <div hidden={staged !== 'research'} className="tab-body">
-                <ResearchPanel
+              <div hidden={staged !== 'platform'} className="tab-body">
+                <PlatformHub
                   workspaceRoot={workspace?.root ?? null}
                   onStatus={reportStatus}
-                  onImplement={handleResearchImplement}
-                  onAsk={handleResearchAsk}
-                  pendingStart={welcomeResearchStart}
                 />
               </div>
             </div>
@@ -1944,28 +2592,37 @@ function AppShell() {
 
           {!showEditor && !staged && (
             <section className="editor-panel">
-              {tabs.length > 0 && (
+              {workbench.tabs.length > 0 && (
                 <div className="tabbar home-tabbar">
                   <button
                     type="button"
                     className="mini-btn"
                     onClick={() => setCenterView('editor')}
                   >
-                    ← Back to editor ({tabs.length} file{tabs.length === 1 ? '' : 's'} open)
+                    ← Back to editor ({workbench.tabs.length} tab{workbench.tabs.length === 1 ? '' : 's'} open)
                   </button>
                 </div>
               )}
               <WelcomePage
+                mode={discoveryMode}
                 workspaceRoot={workspace?.root ?? null}
                 defaultModel={settings.defaultModel}
-                recent={recent}
-                onOpenProject={() => void openProject()}
-                onOpenRecent={(path) => void openRecentPath(path)}
-                onClearRecent={() => void clearRecent()}
-                onSubmitChat={handleWelcomeChat}
-                onSubmitAgent={handleWelcomeAgent}
-                onSubmitResearch={handleWelcomeResearch}
-                onOpenConnections={() => showSidebar('connections')}
+                activeFile={activeCodePath}
+                fileName={
+                  activeCodeTab ? baseName(activeCodeTab.path) : ''
+                }
+                fileContent={activeCodeTab?.content ?? ''}
+                fileDirty={
+                  activeCodeTab ? isTabDirty(activeCodeTab) : false
+                }
+                contextEnabled={settings.aiContextEnabled}
+                chatResearchId={chatResearchId}
+                onDetachChatResearch={() => setChatResearchId(null)}
+                onOpenInAgent={handleDiscoveryOpenInAgent}
+                onResearchImplement={handleDiscoveryResearchImplement}
+                onResearchAsk={handleDiscoveryResearchAsk}
+                onStatus={reportStatus}
+                onOpenProviderSettings={openProviderSettings}
               />
             </section>
           )}
@@ -1973,8 +2630,9 @@ function AppShell() {
           {/* Bottom dock: single mounts for Terminal, Problems, Source
               Control, and Output. The sidebar no longer mounts Git or
               Problems; their activity-bar entries toggle these tabs. */}
-          {bottomOpen && (
-            <>
+          {/* Always mounted (hidden when closed) so terminal runs, diagnostics, and git state survive docking. */}
+          {(
+            <div hidden={!bottomOpen} className="bottom-dock">
               <ResizeHandle
                 orientation="horizontal"
                 direction={-1}
@@ -1986,6 +2644,7 @@ function AppShell() {
                 onResizeEnd={persistPanels}
               />
 
+              <ErrorBoundary compact title="The bottom panel crashed.">
               <aside
                 className="bottom-panel"
                 style={{ height: bottomHeight }}
@@ -2037,6 +2696,7 @@ function AppShell() {
                   <div hidden={bottomTab !== 'problems'} className="tab-body">
                     <ProblemsPanel
                       workspaceRoot={workspace?.root ?? null}
+                      requireConfirmAll={settings.confirmAllCommands}
                       scripts={scripts}
                       onOpenFileAtLine={(path, line) =>
                         void openEditorFile(path, line)
@@ -2060,9 +2720,17 @@ function AppShell() {
                   <div hidden={bottomTab !== 'output'} className="tab-body">
                     <OutputPanel />
                   </div>
+                  <div hidden={bottomTab !== 'tasks'} className="tab-body">
+                    <TasksPanel
+                      workspaceRoot={workspace?.root ?? null}
+                      onStatus={reportStatus}
+                      onOpenFile={(path, line) => void openEditorFile(path, line)}
+                    />
+                  </div>
                 </div>
               </aside>
-            </>
+              </ErrorBoundary>
+            </div>
           )}
         </section>
       </div>
@@ -2073,12 +2741,15 @@ function AppShell() {
         branch={gitBranch.branch}
         branchKnown={gitBranch.known}
         onBranchRefresh={() => void refreshGitBranch()}
-        fileName={activeTab ? baseName(activeTab.path) : null}
+        fileName={activeCodeTab ? baseName(activeCodeTab.path) : null}
         dirty={dirty}
-        language={activeTab ? detectLanguage(baseName(activeTab.path)) : null}
+        language={activeCodeTab ? detectLanguage(baseName(activeCodeTab.path)) : null}
         line={showEditor ? cursor.line : null}
         column={showEditor ? cursor.column : null}
         model={settings.defaultModel}
+        providerLabel={providerStatus.label}
+        providerOk={providerStatus.ok}
+        onOpenProviderSettings={openProviderSettings}
         autoSave={autoSave}
         terminalRunning={terminal.running}
         diagnostics={diagSummary}
@@ -2102,10 +2773,19 @@ function AppShell() {
         onClose={() => setQuickOpen(false)}
       />
 
+      <TemplatePickerDialog
+        open={templatePickerOpen}
+        onClose={() => setTemplatePickerOpen(false)}
+        onGenerated={(destination) => void openRecentPath(destination)}
+        onStatus={reportStatus}
+      />
+
       <SettingsModal
         open={settingsOpen}
         initial={settings}
+        initialSection={settingsSection}
         onClose={() => setSettingsOpen(false)}
+        onStatus={reportStatus}
         onSaved={(next) => {
           setSettings(next)
           reportStatus('Settings saved')
@@ -2124,6 +2804,12 @@ function AppShell() {
       <ShortcutsDialog
         open={shortcutsOpen}
         onClose={() => setShortcutsOpen(false)}
+      />
+
+      <DiagnosticsDialog
+        open={diagnosticsOpen}
+        onClose={() => setDiagnosticsOpen(false)}
+        onStatus={reportStatus}
       />
     </main>
   )

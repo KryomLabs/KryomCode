@@ -8,8 +8,79 @@ on:
 
 jobs:
   verify:
-    name: Test and build (Windows)
-    runs-on: windows-latest
+    name: Test and build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Node 22 matches the Electron 45 runtime bundled with the app.
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run automated tests
+        run: npm test
+
+      - name: Check backend syntax
+        run: npm run check:syntax
+
+      - name: Check test manifest
+        run: npm run check:test-manifest
+
+      - name: Check renderer-state gate
+        run: npm run check:workbench
+
+      - name: Typecheck
+        run: npx tsc -b
+
+      - name: Scan for committed secrets
+        shell: pwsh
+        run: |
+          $hits = @()
+          if (Test-Path .env) { $hits += '.env file present' }
+          $patterns = @('BEGIN PRIVATE KEY', 'AKIA[0-9A-Z]{16}')
+          foreach ($pattern in $patterns) {
+            $found = Get-ChildItem -Recurse -File -Include *.cjs,*.ts,*.tsx,*.js,*.json,*.md -Exclude *.test.cjs |
+              Select-String -Pattern $pattern -List |
+              Where-Object { $_.Path -notlike '*node_modules*' }
+            foreach ($match in $found) { $hits += "$($match.Path): $($match.LineNumber)" }
+          }
+          if ($hits.Count -gt 0) {
+            Write-Error ("Secret scan hits:`n" + ($hits -join "`n"))
+            exit 1
+          }
+          Write-Host 'Secret scan clean.'
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Build production renderer
+        run: npm run build
+
+  pack:
+    name: Pack and verify unpacked app (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            pack_script: pack
+          - os: macos-latest
+            pack_script: pack:mac
+          - os: ubuntu-latest
+            pack_script: pack:linux
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Check out repository
@@ -24,11 +95,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run automated tests
-        run: npm test
+      - name: Pack unpacked app
+        run: npm run ${{ matrix.pack_script }}
 
-      - name: Check backend syntax
-        run: npm run check:syntax
+      # Full layout gate is Windows-only: check-release-contents.cjs
+      # asserts the win-unpacked layout (KryomCode.exe). Other platforms
+      # assert the deterministic app.asar output path instead.
+      - name: Verify release contents (Windows)
+        if: runner.os == 'Windows'
+        run: npm run check:release
 
-      - name: Build production renderer
-        run: npm run build
+      - name: Verify app bundle (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: test -f 'release/mac/KryomCode.app/Contents/Resources/app.asar'
+
+      - name: Verify unpacked app (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: test -f 'release/linux-unpacked/resources/app.asar'

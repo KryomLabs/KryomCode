@@ -15,11 +15,12 @@ export function AiKeyNotice(props: AiKeyNoticeProps) {
 
   return (
     <div className="ai-error" role="alert">
-      <strong>AI model is not configured</strong>
+      <strong>Meta AI is not configured</strong>
       <p>
-        Add <code>MODEL_API_KEY</code> to your local <code>.env</code> file,
-        then restart KryomCode. Keys stay on your machine and are never
-        shown here.
+        Add your API key in Settings → Providers, or set{' '}
+        <code>MODEL_API_KEY</code> in your local <code>.env</code> file
+        and restart. Keys stay on your machine and are never shown
+        here.
       </p>
       <div className="notice-actions">
         {props.onOpenConnections && (
@@ -28,7 +29,7 @@ export function AiKeyNotice(props: AiKeyNoticeProps) {
             className="secondary-button"
             onClick={props.onOpenConnections}
           >
-            Open Connections
+            Open Provider Settings
           </button>
         )}
         <button

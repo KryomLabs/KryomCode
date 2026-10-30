@@ -19,12 +19,34 @@ falls back to `dist/index.html` and logs a warning.
 ## Before every pull request
 
 ```powershell
-npm test             # 15 backend test files, must be green
-npm run check:syntax # node --check over electron/**/*.cjs
-npm run build        # tsc -b + vite build into dist/
+npm test                    # backend suite (see TESTING.md), must be green
+npm run check:syntax        # node --check over electron/**/*.cjs
+npm run check:test-manifest # every *.test.cjs listed in the test script
+npm run check:workbench     # pure renderer-state gate (tabs, sessions, registry, timeline, intent, history relevance)
+npm run test:renderer     # renderer DOM suite (vitest; needs npm install first)
+npm run build               # tsc -b + vite build into dist/
 ```
 
-CI runs the same three gates on Windows with a clean `npm ci`.
+CI runs the same gates on Windows with a clean `npm ci`, plus a
+production-dependency audit (`npm audit --omit=dev
+--audit-level=high`, fails on high/critical) and a separate `pack`
+job that runs `npm run pack` followed by `npm run check:release`
+(unpacked layout, asar contents, and secret/test exclusions).
+
+## Dependency audit
+
+Triage process when the audit gate fails:
+
+1. Upgrade the affected dependency (`npm update <name>` or a
+   version bump) and re-run the audit.
+2. If no fixed release exists, assess exploitability in KryomCode's
+   usage (main-process only vs renderer-reachable) and note it in
+   the pull request.
+3. Temporary exceptions (advisory id, why it cannot be fixed yet,
+   review date) go in the list below; each exception expires and
+   must be re-audited by its review date.
+
+Known audit exceptions: none.
 
 ## Backend conventions
 
@@ -51,8 +73,12 @@ CI runs the same three gates on Windows with a clean `npm ci`.
   save-conflict dialog.
 - `src/app/App.tsx` owns workspace and editor state. Panels own only
   their local UI state and report status through `onStatus`.
-- Styling lives in the single global `src/styles/app.css`. Do not
-  reintroduce per-component stylesheets without discussion.
+- Styling lives in the global stylesheets (`src/styles/app.css` plus
+  the Level 3C `src/styles/meta-ai.css` layer). Do not reintroduce
+  per-component stylesheets without discussion.
+- The unified tab model (`src/state/workbench-tabs.ts`) and Meta AI
+  sessions (`src/state/meta-sessions.ts`) are pure modules covered by
+  `npm run check:workbench`; keep them dependency-free.
 - `src/electron.d.ts` is the contract: if the UI needs a new bridge
   method, add the preload method, the `KryomAPI` declaration, and the
   IPC channel together.
@@ -65,14 +91,15 @@ CI runs the same three gates on Windows with a clean `npm ci`.
   the supported list.
 - User preferences persist to `kryomcode-settings.json` in the Electron
   `userData` directory. Unknown or corrupt files fall back to defaults.
-- Packaged builds have no `.env`: the key must come from the
+- Packaged builds have no `.env`: the key comes from the user's own
+  entry in Settings → Providers (OS-encrypted vault) or from the
   `MODEL_API_KEY` user environment variable. See the README.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
-| `Meta API key is not configured` | `.env` missing, key empty, or app not restarted after editing it. |
+| `Meta API key is not configured` | No vault key and no env key. Add one in Settings → Providers, or set `.env` and restart. |
 | `Open a project folder first` | No workspace is open; use Open Project. |
 | `Path is outside the selected workspace` | Absolute path outside the root, or a symlink. |
 | `Symbolic links are not followed` | By design; copy the target into the workspace. |

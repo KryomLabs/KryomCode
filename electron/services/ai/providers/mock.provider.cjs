@@ -65,6 +65,28 @@ class MockProvider {
   }
 }
 
+// Test-only descriptor. Registered explicitly by tests that need
+// routing behavior without network; never registered in production.
+const mockDescriptor = {
+  id: 'mock',
+  displayName: 'Mock (tests)',
+  description: 'Deterministic test double. Never touches the network.',
+  version: '1.0.0',
+  auth: { kind: 'none' },
+  models: [
+    {
+      id: 'mock',
+      displayName: 'Mock model',
+      capabilities: { text: true, streaming: false, vision: false, tools: false },
+      contextWindow: null,
+      tokenUsage: false,
+      isDefault: true,
+    },
+  ],
+  createInstance: (options = {}) => new MockProvider(options),
+}
+
 module.exports = {
   MockProvider,
+  mockDescriptor,
 }

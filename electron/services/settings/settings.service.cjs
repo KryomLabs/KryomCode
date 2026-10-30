@@ -22,6 +22,7 @@ const PANEL_MAX = 2000
 const DEFAULTS = {
   defaultModel: 'muse-spark-1.3',
   aiContextEnabled: true,
+  confirmAllCommands: false,
   panelLeftWidth: 260,
   panelRightWidth: 360,
   panelBottomHeight: 264,
@@ -62,6 +63,9 @@ function sanitizeSettings(value) {
     aiContextEnabled: typeof value.aiContextEnabled === 'boolean'
       ? value.aiContextEnabled
       : DEFAULTS.aiContextEnabled,
+    confirmAllCommands: typeof value.confirmAllCommands === 'boolean'
+      ? value.confirmAllCommands
+      : DEFAULTS.confirmAllCommands,
   }
 
   for (const key of PANEL_KEYS) {
@@ -98,6 +102,13 @@ function validatePatch(patch) {
     validated.aiContextEnabled = assertBoolean(
       patch.aiContextEnabled,
       'aiContextEnabled'
+    )
+  }
+
+  if (patch.confirmAllCommands !== undefined) {
+    validated.confirmAllCommands = assertBoolean(
+      patch.confirmAllCommands,
+      'confirmAllCommands'
     )
   }
 

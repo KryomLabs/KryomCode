@@ -15,6 +15,7 @@
 // must never be shared or committed.
 const {
   getWorkspaceRoot,
+  getPreviousWorkspaceRoot,
 } = require('../workspace/workspace.service.cjs')
 const {
   readStorageFile,
@@ -48,17 +49,25 @@ function sanitizeMessages(value) {
     }))
 }
 
-async function saveChat(messages) {
-  const root = getWorkspaceRoot()
+async function saveChat(messages, { root } = {}) {
+  const current = getWorkspaceRoot()
+  const target = root ?? current
 
-  if (!root) {
+  if (!target) {
     return { saved: false, reason: 'No project is open.' }
+  }
+
+  // Generation guard: a save bound to a project that is neither open
+  // nor the just-replaced one is stale (two rapid switches). Report
+  // honestly instead of writing another project's history.
+  if (target !== current && target !== getPreviousWorkspaceRoot()) {
+    return { saved: false, reason: 'Project changed during save.' }
   }
 
   const clean = sanitizeMessages(messages)
 
   await writeStorageFile(
-    root,
+    target,
     CHAT_SEGMENTS,
     JSON.stringify({ version: 1, savedAt: new Date().toISOString(), messages: clean })
   )

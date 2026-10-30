@@ -1,9 +1,24 @@
+// One editor group: unified tab strip plus the active tab's content
+// (Monaco for code, the Meta AI workspace for AI sessions). App.tsx
+// renders one panel per split group; only the focused group registers
+// its editor API for menu commands.
 import { useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import { detectLanguage } from '../utils/languages'
-import { resolveAgainstRoot, samePath } from '../utils/paths'
+import { baseName, resolveAgainstRoot, samePath } from '../utils/paths'
+import {
+  isCodeTab,
+  isExtensionTab,
+  isMetaTab,
+  type WorkbenchTab,
+} from '../state/workbench-tabs'
+import type { MetaSession } from '../state/meta-sessions'
 import { EditorTabs } from './EditorTabs'
-import type { TabState } from '../utils/tabs'
+import { ErrorBoundary } from './ErrorBoundary'
+import {
+  MetaAIWorkspace,
+  type MetaInitialPrompt,
+} from './MetaAIWorkspace'
 
 export interface EditorApi {
   revealLine: (line: number) => void
@@ -56,20 +71,49 @@ interface MonacoApi {
   }
 }
 
-export interface EditorPanelProps {
-  tabs: TabState[]
-  activeTabPath: string
-  onSelectTab: (path: string) => void
-  onCloseTab: (path: string) => void
-  onCloseOthers: (keepPath: string) => void
-  filePath: string | null
+export interface MetaTabContext {
+  session: MetaSession
+  // Same-root sessions for history attach; pre-filtered by the shell
+  // so the workspace can never see another project's sessions.
+  siblings: MetaSession[]
+  activeFile: string | null
   fileName: string
+  fileContent: string
+  fileDirty: boolean
+  contextEnabled: boolean
+  workspaceRoot: string | null
+  onStatus: (status: string) => void
+  onUpdateSession: (session: MetaSession) => void
+  onOpenFile: (path: string, line?: number) => void
+  onOpenSession: (sessionId: string) => void
+  onFilesChanged: (changedPaths: string[]) => void
+  onOpenProviderSettings: () => void
+  initialPrompt: MetaInitialPrompt | null
+  onInitialPromptConsumed: () => void
+}
+
+export interface EditorPanelProps {
+  groupId: string
+  tabs: WorkbenchTab[]
+  activeTab: WorkbenchTab | null
+  sessions: Record<string, MetaSession>
+  onSelectTab: (id: string) => void
+  onCloseTab: (id: string) => void
+  onCloseOthers: (keepId: string) => void
+  onSplitRight: (id: string) => void
+  onCloseGroup: () => void
+  canCloseGroup: boolean
+  onNewMetaAI: () => void
+  onRenameSession: (sessionId: string) => void
+  onDeleteSession: (sessionId: string) => void
   content: string
   dirty: boolean
   pendingLine: number | null
   onChange: (value: string) => void
   onSave: () => void
   onRevealConsumed: () => void
+  meta: MetaTabContext | null
+  panelActive: boolean
   registerApi: (api: EditorApi | null) => void
   fontSize?: number
   onCursorChange?: (line: number, column: number) => void
@@ -78,28 +122,81 @@ export interface EditorPanelProps {
   saving?: boolean
 }
 
+function breadcrumbs(
+  filePath: string,
+  workspaceRoot: string | null
+): string[] {
+  let relative = filePath
+
+  if (workspaceRoot) {
+    const prefix = workspaceRoot.endsWith('/')
+      || workspaceRoot.endsWith('\\')
+      ? workspaceRoot
+      : `${workspaceRoot}/`
+    const normalized = filePath.replace(/\\/g, '/')
+
+    if (normalized.startsWith(prefix.replace(/\\/g, '/'))) {
+      relative = filePath.slice(prefix.length)
+    } else if (
+      workspaceRoot.includes('\\') &&
+      filePath.startsWith(`${workspaceRoot}\\`)
+    ) {
+      relative = filePath.slice(workspaceRoot.length + 1)
+    }
+  }
+
+  return relative.split(/[/\\]/).filter((segment) => segment.length > 0)
+}
+
 export function EditorPanel(props: EditorPanelProps) {
   const editorRef = useRef<MonacoEditorInstance | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
+  const apiRef = useRef<EditorApi | null>(null)
   const saveRef = useRef(props.onSave)
   saveRef.current = props.onSave
   const registerRef = useRef(props.registerApi)
   registerRef.current = props.registerApi
+  const panelActiveRef = useRef(props.panelActive)
+  panelActiveRef.current = props.panelActive
   // Live mirrors so marker application (triggered from mount and
   // effects) always sees the latest diagnostics and file identity.
   const markersRef = useRef(props.markers)
   markersRef.current = props.markers
+  const activeTab = props.activeTab
+  const codeTab = activeTab && isCodeTab(activeTab) ? activeTab : null
+  const metaTab = activeTab && isMetaTab(activeTab) ? activeTab : null
+  const extensionTab =
+    activeTab && isExtensionTab(activeTab) ? activeTab : null
+  const filePath = codeTab?.path ?? null
   const fileRef = useRef({
-    path: props.filePath,
+    path: filePath,
     root: props.workspaceRoot ?? null,
   })
   fileRef.current = {
-    path: props.filePath,
+    path: filePath,
     root: props.workspaceRoot ?? null,
   }
 
+  // Editor API ownership follows the focused group and the active
+  // code tab: the active group's Monaco registers for menu commands
+  // (Find, Go to Line), and anything else unregisters. Inactive
+  // groups never clear a registration they do not own.
   useEffect(() => {
-    return () => registerRef.current(null)
+    if (panelActiveRef.current && apiRef.current && fileRef.current.path) {
+      registerRef.current(apiRef.current)
+    } else if (panelActiveRef.current && !fileRef.current.path) {
+      registerRef.current(null)
+    }
+  }, [props.panelActive, filePath])
+
+  useEffect(() => {
+    return () => {
+      apiRef.current = null
+
+      if (panelActiveRef.current) {
+        registerRef.current(null)
+      }
+    }
   }, [])
 
   // Applies the diagnostics that belong to the open file as gutter
@@ -110,9 +207,9 @@ export function EditorPanel(props: EditorPanelProps) {
     const editor = editorRef.current
     const monaco = monacoRef.current
     const model = editor?.getModel() ?? null
-    const filePath = fileRef.current.path
+    const currentPath = fileRef.current.path
 
-    if (!editor || !monaco || !model || !filePath) {
+    if (!editor || !monaco || !model || !currentPath) {
       return
     }
 
@@ -121,7 +218,7 @@ export function EditorPanel(props: EditorPanelProps) {
       .filter((diagnostic) =>
         samePath(
           resolveAgainstRoot(fileRef.current.root, diagnostic.file),
-          filePath
+          currentPath
         )
       )
       .map((diagnostic) => {
@@ -150,12 +247,16 @@ export function EditorPanel(props: EditorPanelProps) {
     monaco.editor.setModelMarkers(model, 'kryom', data)
   }
 
+  // Deliberately runs after every render (not only when markers
+  // change): Monaco mounts asynchronously without a re-render, so a
+  // dep-scoped effect could miss the mount and leave the gutter
+  // stale. setModelMarkers with an identical set is cheap.
   useEffect(() => {
     applyMarkers()
   })
 
   useEffect(() => {
-    if (props.pendingLine === null || !props.filePath) {
+    if (props.pendingLine === null || !filePath) {
       return
     }
 
@@ -173,20 +274,7 @@ export function EditorPanel(props: EditorPanelProps) {
 
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.pendingLine, props.filePath])
-
-  if (!props.filePath) {
-    return (
-      <section className="editor-panel">
-        <div className="tabbar">No file open</div>
-        <div className="welcome">
-          <h1>Your workspace.</h1>
-          <p>Open a project and select a file to start editing.</p>
-          <p>Use AI Chat to ask questions about your code.</p>
-        </div>
-      </section>
-    )
-  }
+  }, [props.pendingLine, filePath])
 
   const cursorRef = useRef(props.onCursorChange)
   cursorRef.current = props.onCursorChange
@@ -212,7 +300,7 @@ export function EditorPanel(props: EditorPanelProps) {
         event.position.column
       )
     })
-    registerRef.current({
+    apiRef.current = {
       revealLine: (line: number) => {
         const model = editor.getModel()
         const maxLine = model?.getLineCount() ?? line
@@ -227,57 +315,172 @@ export function EditorPanel(props: EditorPanelProps) {
         editor.trigger('menu', 'editor.action.smartSelect.expand'),
       shrinkSelection: () =>
         editor.trigger('menu', 'editor.action.smartSelect.shrink'),
-    })
+    }
+
+    if (panelActiveRef.current) {
+      registerRef.current(apiRef.current)
+    }
   }
 
+  const crumbs =
+    codeTab !== null
+      ? breadcrumbs(codeTab.path, props.workspaceRoot ?? null)
+      : []
+
   return (
-    <section className="editor-panel">
+    <ErrorBoundary compact title="This editor group crashed.">
+    <section className="editor-panel" aria-label="Editor group">
       <EditorTabs
         tabs={props.tabs}
-        activePath={props.activeTabPath}
+        activeId={activeTab?.id ?? null}
+        sessions={props.sessions}
         onSelect={props.onSelectTab}
         onClose={props.onCloseTab}
         onCloseOthers={props.onCloseOthers}
+        onSplitRight={props.onSplitRight}
+        onNewMetaAI={props.onNewMetaAI}
+        onRenameSession={props.onRenameSession}
+        onDeleteSession={props.onDeleteSession}
+        onCopyPath={() => undefined}
       />
-      <div className="tabbar">
-        <span className="tab-name">
-          {props.fileName}
-          {props.dirty ? ' •' : ''}
-        </span>
-        <span className="spacer" />
-        <span className="muted">{detectLanguage(props.fileName)}</span>
-        <button
-          type="button"
-          className="mini-btn"
-          onClick={props.onSave}
-          disabled={!props.dirty || props.saving === true}
-          title="Save the active file (Ctrl+S)"
-          aria-label={
-            props.dirty ? 'Save the active file' : 'No unsaved changes'
-          }
-        >
-          {props.saving === true ? 'Saving…' : 'Save'}
-        </button>
-      </div>
 
-      <Editor
-        height="100%"
-        path={props.filePath}
-        language={detectLanguage(props.fileName)}
-        theme="vs-dark"
-        value={props.content}
-        onChange={(value) => props.onChange(value ?? '')}
-        onMount={handleMount}
-        options={{
-          minimap: { enabled: false },
-          fontSize: props.fontSize ?? 14,
-          automaticLayout: true,
-          scrollBeyondLastLine: false,
-          readOnly: false,
-          padding: { top: 12 },
-          renderLineHighlight: 'all',
-        }}
-      />
+      {codeTab !== null && (
+        <>
+          <div className="tabbar">
+            <nav className="breadcrumbs" aria-label="File path" title={codeTab.path}>
+              {crumbs.map((segment, index) => (
+                <span key={`${segment}-${index}`} className="crumb">
+                  {index > 0 && <span className="crumb-sep" aria-hidden="true">›</span>}
+                  <span
+                    className={
+                      index === crumbs.length - 1 ? 'crumb current' : 'crumb'
+                    }
+                  >
+                    {segment}
+                  </span>
+                </span>
+              ))}
+              {props.dirty && (
+                <span className="tab-dirty" aria-hidden="true">
+                  •
+                </span>
+              )}
+            </nav>
+            <span className="spacer" />
+            <span className="muted">{detectLanguage(baseName(codeTab.path))}</span>
+            <button
+              type="button"
+              className="mini-btn"
+              onClick={props.onSave}
+              disabled={!props.dirty || props.saving === true}
+              title="Save the active file (Ctrl+S)"
+              aria-label={
+                props.dirty ? 'Save the active file' : 'No unsaved changes'
+              }
+            >
+              {props.saving === true ? 'Saving…' : 'Save'}
+            </button>
+            {props.canCloseGroup && (
+              <button
+                type="button"
+                className="mini-btn"
+                onClick={props.onCloseGroup}
+                title="Close this editor group"
+                aria-label="Close this editor group"
+              >
+                ×
+              </button>
+            )}
+          </div>
+
+          <Editor
+            height="100%"
+            path={codeTab.path}
+            language={detectLanguage(baseName(codeTab.path))}
+            theme="vs-dark"
+            value={props.content}
+            onChange={(value) => props.onChange(value ?? '')}
+            onMount={handleMount}
+            options={{
+              minimap: { enabled: false },
+              fontSize: props.fontSize ?? 14,
+              automaticLayout: true,
+              scrollBeyondLastLine: false,
+              readOnly: false,
+              padding: { top: 12 },
+              renderLineHighlight: 'all',
+            }}
+          />
+        </>
+      )}
+
+      {activeTab !== null && codeTab === null && props.canCloseGroup && (
+        <div className="tabbar group-bar">
+          <span className="spacer" />
+          <button
+            type="button"
+            className="mini-btn"
+            onClick={props.onCloseGroup}
+            title="Close this editor group"
+            aria-label="Close this editor group"
+          >
+            Close group ×
+          </button>
+        </div>
+      )}
+
+      {metaTab !== null && props.meta !== null && (
+        <MetaAIWorkspace
+          key={metaTab.sessionId}
+          session={props.meta.session}
+          siblings={props.meta.siblings}
+          workspaceRoot={props.meta.workspaceRoot}
+          activeFile={props.meta.activeFile}
+          fileName={props.meta.fileName}
+          fileContent={props.meta.fileContent}
+          fileDirty={props.meta.fileDirty}
+          contextEnabled={props.meta.contextEnabled}
+          onStatus={props.meta.onStatus}
+          onUpdateSession={props.meta.onUpdateSession}
+          onOpenFile={props.meta.onOpenFile}
+          onOpenSession={props.meta.onOpenSession}
+          onFilesChanged={props.meta.onFilesChanged}
+          onOpenProviderSettings={props.meta.onOpenProviderSettings}
+          initialPrompt={props.meta.initialPrompt}
+          onInitialPromptConsumed={props.meta.onInitialPromptConsumed}
+        />
+      )}
+
+      {metaTab !== null && props.meta === null && (
+        <div className="welcome">
+          <h1>Session unavailable.</h1>
+          <p>This Meta AI session record is missing. Close the tab and open a new session.</p>
+        </div>
+      )}
+
+      {extensionTab !== null && (
+        <div className="welcome">
+          <h1>Extension views are not available yet.</h1>
+          <p>The extension view contract exists for future modules; nothing provides views today.</p>
+        </div>
+      )}
+
+      {activeTab === null && (
+        <div className="welcome">
+          <h1>No open editors.</h1>
+          <p>Open a file from the Explorer or start a Meta AI session.</p>
+          <p>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={props.onNewMetaAI}
+            >
+              New Meta AI session
+            </button>
+          </p>
+        </div>
+      )}
     </section>
+    </ErrorBoundary>
   )
 }

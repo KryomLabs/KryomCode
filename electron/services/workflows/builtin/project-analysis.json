@@ -1,0 +1,16 @@
+{
+  "workflowVersion": 1,
+  "id": "project-analysis",
+  "name": "Project Analysis",
+  "description": "Understands a project's architecture and answers a focus question with file evidence.",
+  "version": "1.0.0",
+  "inputs": [
+    { "name": "focus", "description": "Question or area to focus on", "default": "overall architecture" }
+  ],
+  "steps": [
+    { "id": "architecture", "kind": "intelligence.architecture", "title": "Analyze architecture" },
+    { "id": "search", "kind": "intelligence.search", "title": "Search focus area", "params": { "query": "{{inputs.focus}}" } },
+    { "id": "report", "kind": "report", "title": "Summarize findings" }
+  ],
+  "owner": "builtin"
+}

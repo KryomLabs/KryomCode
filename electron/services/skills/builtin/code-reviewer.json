@@ -1,0 +1,17 @@
+{
+  "skillVersion": 1,
+  "id": "code-reviewer",
+  "name": "Code Reviewer",
+  "description": "Independently reviews a tracked plan or proposal for coverage, consistency, and risk.",
+  "version": "1.0.0",
+  "instructions": "Review the proposal against its stated requirements and the project evidence. Judge requirement coverage, architectural consistency, and risk. Never approve what you cannot verify from the evidence; say exactly what is missing.",
+  "tasks": ["plan review", "proposal review"],
+  "inputSchema": { "type": "object", "properties": {}, "required": [] },
+  "outputSchema": { "type": "object", "properties": {}, "required": [] },
+  "tools": ["specialist.review"],
+  "entryTool": "specialist.review",
+  "permissions": ["ai.provider", "ai.tools"],
+  "models": { "provider": null, "model": null },
+  "dependencies": [],
+  "owner": "builtin"
+}

@@ -1,0 +1,19 @@
+{
+  "templateVersion": 1,
+  "id": "node-typescript",
+  "name": "Node.js + TypeScript",
+  "description": "Minimal Node.js service with TypeScript, strict config, and node:test layout.",
+  "version": "1.0.0",
+  "category": "backend",
+  "language": "TypeScript",
+  "framework": "Node.js",
+  "runtime": "Node.js 20+",
+  "variables": [
+    { "name": "project_name", "description": "Package and project name", "default": "my-app", "required": true, "pattern": "[a-z0-9-]+" },
+    { "name": "description", "description": "Package description", "default": "A TypeScript project." }
+  ],
+  "setup": {
+    "instructions": "Install dependencies, then run the test suite. Commands are for your terminal — KryomCode never runs them automatically.",
+    "commands": ["npm install", "npm test"]
+  }
+}

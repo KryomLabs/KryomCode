@@ -1,0 +1,17 @@
+{
+  "skillVersion": 1,
+  "id": "project-analyst",
+  "name": "Project Analyst",
+  "description": "Reads project structure, frameworks, entry points, and conventions, then summarizes architecture with file evidence.",
+  "version": "1.0.0",
+  "instructions": "Analyze the project's architecture using the provided evidence. Report: primary language, frameworks, entry points, key modules, and conventions. Cite every claim with a file path. Say explicitly when evidence is missing instead of guessing.",
+  "tasks": ["architecture review", "onboarding summary", "convention check"],
+  "inputSchema": { "type": "object", "properties": {}, "required": [] },
+  "outputSchema": { "type": "object", "properties": {}, "required": [] },
+  "tools": ["intelligence.architecture", "intelligence.search"],
+  "entryTool": "intelligence.architecture",
+  "permissions": ["workspace.metadata"],
+  "models": { "provider": null, "model": null },
+  "dependencies": [],
+  "owner": "builtin"
+}

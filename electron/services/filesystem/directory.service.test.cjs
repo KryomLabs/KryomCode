@@ -116,9 +116,18 @@ describe('directory.service', () => {
 
     assert.equal(saved.success, true)
 
+    // Exact pin: the renderer classifies write conflicts on this
+    // wording (see docs/ERROR_TAXONOMY.md).
     await assert.rejects(
       () => writeFileIfUnchanged(file, 'v3', meta.mtimeMs),
-      /changed on disk/
+      (error) => {
+        assert.equal(
+          error.message,
+          'File changed on disk since it was opened. Reload before saving.'
+        )
+
+        return true
+      }
     )
     assert.equal(await fs.readFile(file, 'utf8'), 'v2')
   })

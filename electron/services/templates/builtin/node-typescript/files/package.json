@@ -1,0 +1,14 @@
+{
+  "name": "{{project_name}}",
+  "version": "0.1.0",
+  "description": "{{description}}",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "node --test ./dist/**/*.test.js",
+    "start": "node ./dist/index.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "workflowVersion": 1,
+  "id": "feature-implementation",
+  "name": "Feature Implementation",
+  "description": "Understand request, analyze project, build plan, research, review, propose, approve, apply, test, verify, report.",
+  "version": "1.0.0",
+  "inputs": [
+    { "name": "requirement", "description": "Feature requirement in plain language", "default": "" }
+  ],
+  "steps": [
+    { "id": "architecture", "kind": "intelligence.architecture", "title": "Analyze project" },
+    { "id": "plan", "kind": "planning.build", "title": "Build implementation plan", "params": { "requirement": "{{inputs.requirement}}" } },
+    { "id": "research", "kind": "specialist.run", "title": "Research existing code", "specialist": "research", "task": "Investigate the project for existing implementations related to: {{inputs.requirement}}" },
+    { "id": "review-plan", "kind": "approval.checkpoint", "title": "Review plan and research", "message": "Review the implementation plan and research findings before generating proposals." },
+    { "id": "propose", "kind": "agent.propose", "title": "Generate change proposal", "params": { "task": "{{inputs.requirement}}" } },
+    { "id": "review-proposal", "kind": "approval.checkpoint", "title": "Review proposal", "message": "Review the proposed edits before anything is applied." },
+    { "id": "apply", "kind": "agent.apply", "title": "Apply approved edits", "params": { "edits": "{{steps.propose.edits}}" } },
+    { "id": "quality", "kind": "quality.build", "title": "Verify quality", "onFailure": "continue" },
+    { "id": "report", "kind": "report", "title": "Report outcome" }
+  ],
+  "owner": "builtin"
+}

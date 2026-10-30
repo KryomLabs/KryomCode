@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { kryom, errorMessage, isCancelError } from '../api/kryom'
+import { saveAgentDraft, loadAgentDraft } from '../utils/session-restore'
 import { diffLines } from '../utils/diff'
 import { baseName } from '../utils/paths'
 import { useDialogs } from './dialogs'
@@ -16,15 +17,51 @@ export interface AgentPanelProps {
   pendingTask?: { text: string; nonce: number; researchSessionId?: string } | null
   onOpenConnections?: () => void
   onOpenFile?: (path: string) => void
+  // Meta AI session embedding (Level 3C): scopes the recovered draft
+  // to one session instead of the whole project, and reports the
+  // tracked plan + applied files so the session timeline and
+  // changed-file manifest stay backed by real events.
+  draftKey?: string | null
+  onPlanTracked?: (planId: string | null) => void
+  onApplyCompleted?: (
+    applied: Array<{ path: string; action: string }>,
+    checkpointId: string | null
+  ) => void
+  // User-selected history resolved to bounded text by the embedding
+  // session. Appended to the planned task as a delimited block so the
+  // planner grounds on prior sessions; the visible draft is unchanged
+  // and server-derived titles (from the task start) stay clean.
+  historyContext?: string | null
 }
 
 const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
 
-const MAX_REPAIR_ATTEMPTS = 2
 const MAX_FILE_RESULTS = 8
 const MAX_SCRIPTS = 8
-const MAX_FAILURE_CHARS = 4000
 const MAX_OUTPUT_CHARS = 8000
+
+// Delimits user-selected history appended to a planned task. The
+// review view splits on it so the task reads cleanly while the
+// attached history stays disclosed (never silently bundled).
+const HISTORY_BLOCK_MARKER =
+  'Relevant selected history (prior sessions, may be stale):'
+
+function splitHistoryBlock(task: string): {
+  head: string
+  historyChars: number
+} {
+  const marker = `\n\n${HISTORY_BLOCK_MARKER}\n`
+  const at = task.indexOf(marker)
+
+  if (at === -1) {
+    return { head: task, historyChars: 0 }
+  }
+
+  return {
+    head: task.slice(0, at),
+    historyChars: task.length - at - marker.length,
+  }
+}
 
 type AgentStatus =
   | 'idle'
@@ -65,6 +102,45 @@ function isStaleError(error: unknown): boolean {
   return error instanceof Error && /changed since the plan/i.test(error.message)
 }
 
+// Orders approved edits by the change-set manifest. Members missing
+// from the order (defensive; the backend always returns a full
+// permutation) keep plan order at the end.
+function orderEditsByManifest(
+  edits: KryomAgentEdit[],
+  order: number[]
+): KryomAgentEdit[] {
+  const byIndex = new Map(edits.map((edit) => [edit.index ?? 0, edit]))
+  const ordered = order
+    .map((index) => byIndex.get(index))
+    .filter((edit): edit is KryomAgentEdit => edit !== undefined)
+  const missing = edits.filter((edit) => !order.includes(edit.index ?? 0))
+
+  return [...ordered, ...missing]
+}
+
+const REPAIR_TERMINAL_STATES: KryomRepairState[] = [
+  'passed',
+  'exhausted',
+  'expired',
+  'cancelled',
+  'approval-denied',
+  'stale',
+  'checkpoint-failed',
+  'error',
+]
+
+function isRepairTerminal(state: KryomRepairState): boolean {
+  return REPAIR_TERMINAL_STATES.includes(state)
+}
+
+function formatRepairMs(valueMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(valueMs / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
 function EditDiff({ oldText, newText }: { oldText: string; newText: string }) {
   const { lines, truncated } = diffLines(oldText, newText)
   const shown = lines.slice(0, 300)
@@ -86,6 +162,117 @@ function EditDiff({ oldText, newText }: { oldText: string; newText: string }) {
   )
 }
 
+// Provenance-labelled view of the exact context snapshot sent with
+// a planning request. `live` snapshots (from the tracked plan) carry
+// re-checked freshness; proposal snapshots show recorded values.
+function ContextSnapshotView(props: {
+  snapshot: KryomContextSnapshot | null | undefined
+  live: boolean
+}) {
+  const snapshot = props.snapshot
+
+  if (!snapshot) {
+    return (
+      <p className="muted padded">
+        Context snapshot not recorded (plan predates tracking).
+      </p>
+    )
+  }
+
+  const staleFiles = snapshot.files.filter(
+    (file) => file.status === 'stale' || file.status === 'missing'
+  )
+  const researchStale =
+    snapshot.research != null &&
+    (snapshot.research.freshness === 'stale' ||
+      snapshot.research.freshness === 'missing')
+
+  return (
+    <div className="plan-context">
+      <strong>Attached context</strong>
+      <p className="muted">
+        Recorded {new Date(snapshot.at).toLocaleString()} for project{' '}
+        {snapshot.projectName}
+        {props.live ? '' : ' (proposal values; freshness unknown)'}
+      </p>
+
+      {(staleFiles.length > 0 || researchStale) && (
+        <p className="plan-context-warning" role="status">
+          Context changed since planning: please re-check before applying.
+        </p>
+      )}
+
+      {snapshot.research && snapshot.research.status !== 'completed' && (
+        <p className="plan-context-warning" role="status">
+          Research session {snapshot.research.sessionId} is{' '}
+          {snapshot.research.status}; findings may be incomplete.
+        </p>
+      )}
+
+      <ul className="plan-context-list">
+        {snapshot.files.map((file) => (
+          <li key={file.relativePath}>
+            <span className="context-kind">file</span> {file.relativePath}{' '}
+            <span className="muted">
+              ({formatBytes(file.bytes)} · {file.digest.slice(0, 12)}
+              {file.status ? ` · ${file.status}` : ''}
+              {file.reason ? ` — ${file.reason}` : ''})
+            </span>
+          </li>
+        ))}
+        {snapshot.research && (
+          <li>
+            <span className="context-kind">research</span>{' '}
+            {snapshot.research.sessionId}{' '}
+            <span className="muted">
+              (brief v{snapshot.research.briefVersion} ·{' '}
+              {snapshot.research.objective.slice(0, 80)} · status{' '}
+              {snapshot.research.status}
+              {snapshot.research.freshness
+                ? ` · ${snapshot.research.freshness}`
+                : ''}
+              {snapshot.research.freshnessReason
+                ? ` — ${snapshot.research.freshnessReason}`
+                : ''}
+              )
+            </span>
+          </li>
+        )}
+        {snapshot.chat && (
+          <li>
+            <span className="context-kind">chat</span>{' '}
+            {snapshot.chat.messageCount} message(s){' '}
+            <span className="muted">
+              ({formatBytes(snapshot.chat.chars)}
+              {snapshot.chat.truncated ? ', truncated' : ''} · point-in-time
+              excerpt)
+            </span>
+          </li>
+        )}
+        {snapshot.workspace && (
+          <li>
+            <span className="context-kind">workspace</span>{' '}
+            {snapshot.workspace.projectName}{' '}
+            <span className="muted">(project brief reference)</span>
+          </li>
+        )}
+        {snapshot.files.length === 0 &&
+          !snapshot.research &&
+          !snapshot.chat && (
+            <li>
+              <span className="muted">
+                No files, research, or chat attached (task only).
+              </span>
+            </li>
+          )}
+      </ul>
+      <p className="muted">
+        Context informs the plan; only verification reports prove execution.
+      </p>
+    </div>
+  )
+}
+
 export function AgentPanel(props: AgentPanelProps) {
   const dialogs = useDialogs()
   const [model, setModel] = useState(props.defaultModel)
@@ -98,6 +285,13 @@ export function AgentPanel(props: AgentPanelProps) {
   const [planning, setPlanning] = useState(false)
   const [applying, setApplying] = useState(false)
   const [applyResult, setApplyResult] = useState<KryomAgentApplyResult | null>(null)
+  // Dependency-aware change set (3B.6): read-only manifest over the
+  // approved edits. Blockers disable Apply; analysis failures fall
+  // back to plan order since the apply path guards remain.
+  const [changeSet, setChangeSet] = useState<KryomChangeSetManifest | null>(null)
+  const [changeSetError, setChangeSetError] = useState('')
+  const [changeSetLoading, setChangeSetLoading] = useState(false)
+  const changeSetGenerationRef = useRef(0)
   const [stale, setStale] = useState(false)
   const [error, setError] = useState('')
   const [keyMissing, setKeyMissing] = useState(false)
@@ -107,6 +301,9 @@ export function AgentPanel(props: AgentPanelProps) {
   // Source context selection. Only explicitly chosen files are read,
   // in the main process, after validation.
   const [includeActive, setIncludeActive] = useState(props.defaultIncludeContext)
+  const [includeChat, setIncludeChat] = useState(false)
+  const [chatExcerpt, setChatExcerpt] = useState<KryomChatExcerpt | null>(null)
+  const [chatExcerptError, setChatExcerptError] = useState('')
   const [selectedFiles, setSelectedFiles] = useState<string[]>([])
   const [fileQuery, setFileQuery] = useState('')
   const [fileResults, setFileResults] = useState<KryomSearchMatch[]>([])
@@ -123,7 +320,27 @@ export function AgentPanel(props: AgentPanelProps) {
   const [verifyResult, setVerifyResult] =
     useState<KryomDiagnosticsResult | null>(null)
   const [verifyError, setVerifyError] = useState('')
-  const [repairAttempt, setRepairAttempt] = useState(0)
+  // Backend repair cycle (3B.4): the backend owns attempt counts,
+  // deadlines, and state; the renderer only displays and advances.
+  const [repairCycle, setRepairCycle] = useState<KryomRepairCycle | null>(null)
+  const [repairBusy, setRepairBusy] = useState(false)
+  const [repairError, setRepairError] = useState('')
+  const [checkpoints, setCheckpoints] = useState<KryomCheckpoint[]>([])
+  const [undoing, setUndoing] = useState(false)
+  const [undoResult, setUndoResult] = useState<KryomUndoResult | null>(null)
+  const [undoError, setUndoError] = useState('')
+  // Tracked execution plan (3A.3). Progress calls are evidence, never
+  // gates: a tracking failure is reported but never blocks review,
+  // apply, or verification.
+  const [trackedPlan, setTrackedPlan] = useState<KryomTrackedPlan | null>(null)
+  const [progressError, setProgressError] = useState('')
+  // Operation generation: Stop invalidates the in-flight plan or
+  // apply so late responses can never overwrite cancelled state.
+  const opGenerationRef = useRef(0)
+
+  // Draft scope defaults to the project root; embedded Meta AI
+  // sessions pass their own key so drafts never mix between tabs.
+  const draftScope = props.draftKey ?? props.workspaceRoot
 
   useEffect(() => {
     setModel(props.defaultModel)
@@ -132,6 +349,45 @@ export function AgentPanel(props: AgentPanelProps) {
   useEffect(() => {
     setIncludeActive(props.defaultIncludeContext)
   }, [props.defaultIncludeContext])
+
+  // Rebuilds the change-set manifest whenever the plan or the
+  // approved subset changes. Repair attempts skip analysis: they
+  // apply through the repair cycle's own verified path.
+  useEffect(() => {
+    if (!plan || approved.size === 0 || repairAttemptId() !== null) {
+      setChangeSet(null)
+      setChangeSetError('')
+      setChangeSetLoading(false)
+      return
+    }
+
+    const generation = changeSetGenerationRef.current + 1
+    changeSetGenerationRef.current = generation
+    setChangeSetLoading(true)
+    setChangeSetError('')
+
+    const edits = plan.edits.filter((edit) => approved.has(edit.index ?? 0))
+
+    kryom()
+      .buildAgentChangeSet({ edits })
+      .then((manifest) => {
+        if (generation !== changeSetGenerationRef.current) {
+          return
+        }
+
+        setChangeSet(manifest)
+        setChangeSetLoading(false)
+      })
+      .catch((e: unknown) => {
+        if (generation !== changeSetGenerationRef.current) {
+          return
+        }
+
+        setChangeSet(null)
+        setChangeSetError(errorMessage(e))
+        setChangeSetLoading(false)
+      })
+  }, [plan, approved, repairCycle])
 
   const consumedTaskNonce = useRef<number | null>(null)
 
@@ -159,6 +415,188 @@ export function AgentPanel(props: AgentPanelProps) {
     // this render's closure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.pendingTask, props.workspaceRoot])
+
+  // Agent draft recovery (Level 2B.2): task inputs and the
+  // awaiting-review plan persist per project. Restore applies only
+  // to a pristine panel; an explicit pending task always wins.
+  const restoredDraftForRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const root = draftScope
+
+    if (!root || restoredDraftForRef.current === root) {
+      return
+    }
+
+    restoredDraftForRef.current = root
+
+    if (task !== '' || plan !== null || planning || status !== 'idle') {
+      return
+    }
+
+    const draft = loadAgentDraft(root)
+
+    if (!draft) {
+      return
+    }
+
+    setTask(draft.task)
+    setSelectedFiles(draft.selectedFiles)
+    setIncludeActive(draft.includeActive)
+    setIncludeChat(draft.includeChat)
+    setResearchSessionId(draft.researchSessionId)
+
+    if (draft.plan) {
+      const restored = draft.plan
+      setPlan(restored)
+      setApproved(new Set(restored.edits.map((edit) => edit.index ?? 0)))
+      setStatus('review')
+      props.onStatus(
+        `Agent plan restored: ${restored.edits.length} edit(s) awaiting review`
+      )
+      void loadOldContents(restored)
+
+      if (draft.planId) {
+        kryom()
+          .getAgentPlan({ id: draft.planId })
+          .then(setTrackedPlan)
+          .catch((e: unknown) => setProgressError(errorMessage(e)))
+      } else {
+        // Legacy v1 draft: track once so progress persists going forward.
+        void trackProposal(restored)
+      }
+    }
+
+    // Repair cycles are durable backend-side; only the id needs
+    // restoring, and a failed fetch simply drops the reference.
+    if (draft.repairCycleId) {
+      kryom()
+        .getRepairCycle({ cycleId: draft.repairCycleId })
+        .then((fetched) => setRepairCycle(fetched.cycle))
+        .catch(() => undefined)
+    }
+    // Pristine check uses this render's closure intentionally.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftScope])
+
+  useEffect(() => {
+    const root = draftScope
+
+    if (!root) {
+      return
+    }
+
+    const timer = setTimeout(() => {
+      saveAgentDraft(root, {
+        task,
+        selectedFiles,
+        includeActive,
+        includeChat,
+        researchSessionId,
+        // Consumed plans are not re-offered after reload.
+        plan: applyResult?.completed ? null : plan,
+        planId: applyResult?.completed ? null : (trackedPlan?.id ?? null),
+        repairCycleId: repairCycle?.id ?? null,
+      })
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [
+    draftScope,
+    task,
+    selectedFiles,
+    includeActive,
+    includeChat,
+    researchSessionId,
+    plan,
+    applyResult,
+    trackedPlan,
+    repairCycle,
+  ])
+
+  // Reports the tracked plan id to embedding Meta AI sessions so the
+  // session timeline can query real plan steps by id.
+  const trackedPlanId = trackedPlan?.id ?? null
+
+  useEffect(() => {
+    props.onPlanTracked?.(trackedPlanId)
+    // The callback identity is the parent's concern; the id drives it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackedPlanId])
+
+  // Durable checkpoints (Level 2B.3): every apply persists its
+  // pre-apply bytes, so earlier batches stay undoable across
+  // sessions. Undo always confirms and never overwrites files the
+  // user touched since the apply.
+  async function refreshCheckpoints() {
+    if (!props.workspaceRoot) {
+      setCheckpoints([])
+      return
+    }
+
+    try {
+      const result = await kryom().listCheckpoints()
+      setCheckpoints(result.checkpoints)
+    } catch {
+      setCheckpoints([])
+    }
+  }
+
+  useEffect(() => {
+    void refreshCheckpoints()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.workspaceRoot])
+
+  function displayUndoPath(absolute: string): string {
+    const root = props.workspaceRoot
+
+    if (root && absolute.startsWith(root)) {
+      const relative = absolute.slice(root.length).replace(/^[/\\]+/, '')
+
+      if (relative) {
+        return relative
+      }
+    }
+
+    return absolute
+  }
+
+  async function undoApply(checkpointId: string) {
+    if (undoing) {
+      return
+    }
+
+    const confirmed = await dialogs.confirm({
+      title: 'Undo this apply?',
+      message:
+        'Files changed since the apply are kept; only untouched files ' +
+        'are restored to their pre-apply contents.',
+      confirmLabel: 'Undo apply',
+      danger: true,
+    })
+
+    if (!confirmed) {
+      return
+    }
+
+    setUndoing(true)
+    setUndoError('')
+
+    try {
+      const result = await kryom().undoCheckpoint(checkpointId)
+      setUndoResult(result)
+      props.onFilesChanged(result.restored)
+      props.onStatus(
+        `Undo: ${result.restored.length} restored, ` +
+          `${result.skipped.length} skipped, ${result.failures.length} failed`
+      )
+      void refreshCheckpoints()
+    } catch (e) {
+      setUndoError(errorMessage(e))
+    } finally {
+      setUndoing(false)
+    }
+  }
 
   function effectiveContextPaths(): string[] {
     const paths =
@@ -212,8 +650,78 @@ export function AgentPanel(props: AgentPanelProps) {
     )
   }
 
+  async function trackProposal(next: KryomAgentPlan): Promise<void> {
+    try {
+      const tracked = await kryom().trackAgentPlan({ proposal: next })
+
+      setTrackedPlan(tracked)
+      setProgressError('')
+
+      try {
+        setTrackedPlan(
+          await kryom().setAgentPlanStep({
+            id: tracked.id,
+            stepId: 'review',
+            state: 'in_progress',
+          })
+        )
+      } catch (e) {
+        setProgressError(errorMessage(e))
+      }
+    } catch (e) {
+      setProgressError(errorMessage(e))
+      props.onStatus('Plan ready (progress tracking unavailable)')
+    }
+  }
+
+  async function moveTrackedStep(
+    stepId: string,
+    state: KryomPlanStepState,
+    detail?: string
+  ): Promise<void> {
+    if (!trackedPlan || trackedPlan.status !== 'active') {
+      return
+    }
+
+    try {
+      setTrackedPlan(
+        await kryom().setAgentPlanStep({
+          id: trackedPlan.id,
+          stepId,
+          state,
+          ...(detail === undefined ? {} : { detail }),
+        })
+      )
+    } catch (e) {
+      setProgressError(errorMessage(e))
+    }
+  }
+
+  async function cancelTrackedPlan(reason: string): Promise<void> {
+    if (!trackedPlan || trackedPlan.status !== 'active') {
+      return
+    }
+
+    try {
+      setTrackedPlan(
+        await kryom().cancelAgentPlanRecord({ id: trackedPlan.id, reason })
+      )
+    } catch (e) {
+      setProgressError(errorMessage(e))
+    }
+  }
+
   function clearRound() {
+    // A fresh plan supersedes any active repair cycle.
+    if (repairCycle && !isRepairTerminal(repairCycle.state)) {
+      kryom()
+        .cancelRepairCycle({ cycleId: repairCycle.id })
+        .catch(() => undefined)
+    }
+
     setPlan(null)
+    setTrackedPlan(null)
+    setProgressError('')
     setApproved(new Set())
     setApplyResult(null)
     setStale(false)
@@ -224,6 +732,27 @@ export function AgentPanel(props: AgentPanelProps) {
     setVerifyCommand('')
     setVerifyResult(null)
     setVerifyError('')
+    setRepairCycle(null)
+    setRepairError('')
+  }
+
+  async function loadOldContents(next: KryomAgentPlan) {
+    const loaded: Record<number, string> = {}
+
+    for (const edit of next.edits) {
+      if (edit.action !== 'modify') {
+        continue
+      }
+
+      try {
+        const meta = await kryom().readFileMeta(edit.path)
+        loaded[edit.index ?? 0] = meta.content
+      } catch {
+        // Preview falls back to new content only; apply still validates.
+      }
+    }
+
+    setOldContents(loaded)
   }
 
   async function requestPlan() {
@@ -257,6 +786,8 @@ export function AgentPanel(props: AgentPanelProps) {
     setKeyMissing(false)
     clearRound()
 
+    const generation = opGenerationRef.current + 1
+    opGenerationRef.current = generation
     const contextPaths = effectiveContextPaths()
 
     try {
@@ -269,17 +800,32 @@ export function AgentPanel(props: AgentPanelProps) {
           paths: contextPaths,
         })
 
+        if (generation !== opGenerationRef.current) {
+          return
+        }
+
         setContextPreview(preview)
       }
 
       setStatus('planning')
 
+      const historyBlock =
+        props.historyContext && props.historyContext.trim() !== ''
+          ? `\n\n${HISTORY_BLOCK_MARKER}\n${props.historyContext}`
+          : ''
+
       const next = await kryom().planAgentTask({
-        task: trimmed,
+        task: `${trimmed}${historyBlock}`,
         model,
         ...(contextPaths.length > 0 ? { contextPaths } : {}),
         ...(researchId ? { researchSessionId: researchId } : {}),
+        ...(includeChat ? { includeChat: true } : {}),
       })
+
+      if (generation !== opGenerationRef.current) {
+        return
+      }
+
       setPlan(next)
       setApproved(new Set(next.edits.map((edit) => edit.index ?? 0)))
       setStatus('review')
@@ -287,23 +833,13 @@ export function AgentPanel(props: AgentPanelProps) {
         `Agent plan ready: ${next.edits.length} edit(s), ${next.commands.length} command(s)`
       )
 
-      const loaded: Record<number, string> = {}
-
-      for (const edit of next.edits) {
-        if (edit.action !== 'modify') {
-          continue
-        }
-
-        try {
-          const meta = await kryom().readFileMeta(edit.path)
-          loaded[edit.index ?? 0] = meta.content
-        } catch {
-          // Preview falls back to new content only; apply still validates.
-        }
+      await trackProposal(next)
+      await loadOldContents(next)
+    } catch (e) {
+      if (generation !== opGenerationRef.current) {
+        return
       }
 
-      setOldContents(loaded)
-    } catch (e) {
       if (isCancelError(e)) {
         setStatus('cancelled')
         props.onStatus('Planning cancelled')
@@ -312,11 +848,28 @@ export function AgentPanel(props: AgentPanelProps) {
         setError(errorMessage(e))
       }
     } finally {
-      setPlanning(false)
+      if (generation === opGenerationRef.current) {
+        setPlanning(false)
+      }
     }
   }
 
+  // Diagnostics share the terminal process registry, so Stop uses
+  // the same kill-all cancel as the terminal panel. The run then
+  // resolves cancelled and records a cancelled report normally.
+  function stopVerification() {
+    if (!verifying) {
+      return
+    }
+
+    kryom().cancelCommand().catch(() => undefined)
+  }
+
   function stopPlanning() {
+    opGenerationRef.current += 1
+    setPlanning(false)
+    setStatus('cancelled')
+    props.onStatus('Planning cancelled')
     kryom().cancelAgentPlan().catch(() => undefined)
   }
 
@@ -353,11 +906,48 @@ export function AgentPanel(props: AgentPanelProps) {
       return
     }
 
+    const edits = plan.edits.filter((edit) => approved.has(edit.index ?? 0))
+    const pendingAttempt = repairAttemptId()
+    const cycleForApply = repairCycle
+
+    // Fresh change-set validation at apply time: dependencies may
+    // have changed while the user reviewed. Blockers abort before
+    // the confirm dialog; analysis failures fall back to plan
+    // order since the apply path guards remain. Repair attempts
+    // keep their verified path untouched.
+    let ordered = edits
+    let orderNote = ''
+
+    if (!pendingAttempt && !cycleForApply) {
+      try {
+        const fresh = await kryom().buildAgentChangeSet({
+          edits,
+          baseline: changeSet,
+        })
+
+        setChangeSet(fresh)
+        setChangeSetError('')
+
+        if (!fresh.validation.ok) {
+          setError(
+            `Apply blocked by the change-set check: ${fresh.validation.blockers[0].reason}`
+          )
+          return
+        }
+
+        orderNote = ` ${fresh.orderReason}`
+        ordered = orderEditsByManifest(edits, fresh.order)
+      } catch (e: unknown) {
+        setChangeSet(null)
+        setChangeSetError(errorMessage(e))
+      }
+    }
+
     const confirmed = await dialogs.confirm({
       title: 'Apply agent edits?',
       message:
         `This writes ${approved.size} approved file change(s) to your ` +
-        `project. The batch rolls back automatically if any edit fails.`,
+        `project.${orderNote} The batch rolls back automatically if any edit fails.`,
       confirmLabel: 'Apply changes',
     })
 
@@ -370,27 +960,148 @@ export function AgentPanel(props: AgentPanelProps) {
     setStale(false)
     setStatus('applying')
 
+    const generation = opGenerationRef.current + 1
+    opGenerationRef.current = generation
+
+    // Approval exits review and starts the apply step (evidence only).
+    await moveTrackedStep('review', 'completed', 'User approved the plan.')
+    await moveTrackedStep('apply', 'in_progress')
+
     try {
-      const edits = plan.edits.filter((edit) => approved.has(edit.index ?? 0))
-      const result = await kryom().applyAgentEdits({ edits })
+      let result: KryomAgentApplyResult
+
+      if (pendingAttempt && cycleForApply) {
+        const repaired = await kryom().applyRepairCycle({
+          cycleId: cycleForApply.id,
+          attemptId: pendingAttempt,
+          edits,
+          task,
+        })
+
+        if (generation !== opGenerationRef.current) {
+          return
+        }
+
+        setRepairCycle(repaired.cycle)
+        result = repaired.apply
+      } else {
+        result = await kryom().applyAgentEdits({ edits: ordered, task })
+      }
+
+      if (generation !== opGenerationRef.current) {
+        return
+      }
+
       setApplyResult(result)
       props.onFilesChanged(result.applied.map((entry) => entry.path))
+      props.onApplyCompleted?.(
+        result.applied.map((entry) => ({
+          path: entry.path,
+          action: entry.action,
+        })),
+        result.checkpoint && 'id' in result.checkpoint
+          ? result.checkpoint.id
+          : null
+      )
+      void refreshCheckpoints()
 
       if (result.completed) {
         setStatus('verifyApproval')
         props.onStatus(`Agent applied ${result.applied.length} edit(s)`)
         await loadVerifyOptions(plan)
+
+        // A repair re-verifies the cycle's own check, not the
+        // proposal's suggested commands.
+        if (pendingAttempt && cycleForApply) {
+          setVerifyCommand(cycleForApply.check)
+        }
+
+        if (trackedPlan && result.checkpoint && 'id' in result.checkpoint) {
+          try {
+            setTrackedPlan(
+              await kryom().attachAgentPlanEvidence({
+                id: trackedPlan.id,
+                stepId: 'apply',
+                evidence: {
+                  kind: 'checkpoint',
+                  ref: result.checkpoint.id,
+                  summary: `${result.applied.length} edit(s) applied.`,
+                },
+              })
+            )
+          } catch (e) {
+            setProgressError(errorMessage(e))
+          }
+        }
+
+        // Change-set linkage (3B.6): the applied order joins the
+        // apply-step evidence so later verification cites what ran
+        // in which order. Evidence only, never a gate.
+        if (trackedPlan && !pendingAttempt && orderNote) {
+          try {
+            setTrackedPlan(
+              await kryom().attachAgentPlanEvidence({
+                id: trackedPlan.id,
+                stepId: 'apply',
+                evidence: {
+                  kind: 'note',
+                  ref: `change-set@${new Date().toISOString()}`,
+                  summary: (
+                    `Change set: ${ordered.length} edit(s) applied in ` +
+                    `dependency order (${ordered.map((edit) => baseName(edit.path)).join(', ')}).` +
+                    orderNote
+                  ).slice(0, 500),
+                },
+              })
+            )
+          } catch (e) {
+            setProgressError(errorMessage(e))
+          }
+        }
+
+        await moveTrackedStep(
+          'apply',
+          'completed',
+          `${result.applied.length} edit(s) applied.`
+        )
+      } else if (result.cancelled) {
+        setStatus('cancelled')
+        props.onStatus(
+          `Agent apply cancelled after ${result.applied.length} edit(s)` +
+            (result.checkpoint && 'id' in result.checkpoint
+              ? ' (checkpoint saved)'
+              : '')
+        )
+        await cancelTrackedPlan('Apply cancelled by user.')
       } else if (result.failed) {
         setStatus('failed')
 
-        if (/changed since the plan/i.test(result.failed.message)) {
+        // The pre-apply gate reports structured findings; message
+        // sniffing stays only as a backstop for the per-edit race
+        // check, which still throws the legacy wording.
+        const gateBlocked = (result.stale ?? []).length > 0
+
+        if (gateBlocked || /changed since the plan/i.test(result.failed.message)) {
           setStale(true)
           props.onStatus('Agent plan is stale; request a fresh plan')
+          await moveTrackedStep(
+            'apply',
+            'blocked',
+            (result.stale ?? [])
+              .map((entry) => `${entry.path} (${entry.reason})`)
+              .join('; ')
+              .slice(0, 500) || result.failed.message
+          )
         } else {
           props.onStatus('Agent apply failed and rolled back')
+          await moveTrackedStep('apply', 'failed', result.failed.message)
         }
       }
     } catch (e) {
+      if (generation !== opGenerationRef.current) {
+        return
+      }
+
       setStatus('failed')
 
       if (isStaleError(e)) {
@@ -399,8 +1110,19 @@ export function AgentPanel(props: AgentPanelProps) {
 
       setError(errorMessage(e))
     } finally {
-      setApplying(false)
+      if (generation === opGenerationRef.current) {
+        setApplying(false)
+      }
     }
+  }
+
+  function stopApplying() {
+    opGenerationRef.current += 1
+    setApplying(false)
+    setStatus('cancelled')
+    props.onStatus('Agent apply cancelled')
+    kryom().cancelAgentPlan().catch(() => undefined)
+    void cancelTrackedPlan('Apply stopped by user.')
   }
 
   async function loadVerifyOptions(current: KryomAgentPlan) {
@@ -450,51 +1172,374 @@ export function AgentPanel(props: AgentPanelProps) {
     setVerifyResult(null)
     setStatus('verifying')
     props.onStatus('Verification running…')
+    await moveTrackedStep('verify', 'in_progress')
 
     try {
       const result = await kryom().runDiagnostics({ command })
 
       setVerifyResult(result)
 
+      const recordId = repairRecordId()
+      const cycleForRecord = repairCycle
+
+      if (recordId && cycleForRecord && trackedPlan) {
+        let cycle: KryomRepairCycle = cycleForRecord
+
+        try {
+          const recorded = await kryom().recordRepairCycle({
+            cycleId: cycleForRecord.id,
+            attemptId: recordId,
+            executionRunId: result.diagnosis.runId,
+          })
+
+          cycle = recorded.cycle
+
+          setRepairCycle(recorded.cycle)
+          setTrackedPlan(recorded.plan)
+
+          // Steps move only on terminal cycle states: failed→verified
+          // is an illegal transition, so a mid-cycle failure must not
+          // mark the step failed while attempt two is still open.
+          if (isRepairTerminal(recorded.cycle.state)) {
+            await moveTrackedStep(
+              'verify',
+              recorded.cycle.state === 'passed' ? 'verified' : 'failed',
+              `Repair cycle ${recorded.cycle.state}: ${recorded.cycle.detail}`
+            )
+          }
+        } catch (e) {
+          setProgressError(errorMessage(e))
+        }
+
+        if (cycle.state === 'passed') {
+          setStatus('succeeded')
+          props.onStatus(`Repair passed (exit ${result.exitCode})`)
+
+          try {
+            setTrackedPlan(
+              await kryom().completeAgentPlan({ id: trackedPlan.id })
+            )
+          } catch {
+            // Stays active; the progress section offers completion.
+          }
+        } else if (cycle.state === 'awaiting-proposal') {
+          setStatus('failed')
+          props.onStatus(
+            `Check failed (exit ${result.exitCode}); repair attempt ` +
+              `${cycle.attempts.length + 1} of 2 available`
+          )
+        } else {
+          setStatus('failed')
+          props.onStatus(`Repair ${cycle.state}: ${cycle.detail}`)
+        }
+
+        return
+      }
+
+      if (trackedPlan) {
+        try {
+          const recorded = await kryom().recordAgentVerification({
+            planId: trackedPlan.id,
+            stepId: 'verify',
+            check: command,
+            result: result.success ? 'pass' : result.timedOut || result.cancelled ? 'error' : 'fail',
+            executionRunId: result.diagnosis.runId,
+            markStep: result.success ? 'verified' : 'failed',
+          })
+
+          setTrackedPlan(recorded.plan)
+        } catch (e) {
+          setProgressError(errorMessage(e))
+        }
+      }
+
       if (result.success) {
         setStatus('succeeded')
         props.onStatus(`Check passed (exit ${result.exitCode})`)
+
+        if (trackedPlan) {
+          // Best-effort completion: open task steps keep the plan
+          // active until the user finishes them explicitly.
+          try {
+            setTrackedPlan(
+              await kryom().completeAgentPlan({ id: trackedPlan.id })
+            )
+          } catch {
+            // Stays active; the progress section offers completion.
+          }
+        }
       } else {
         setStatus('failed')
         props.onStatus(
           result.timedOut
             ? 'Check timed out'
-            : `Check failed (exit ${result.exitCode})`
+            : result.cancelled
+              ? 'Check cancelled'
+              : `Check failed (exit ${result.exitCode})`
         )
       }
     } catch (e) {
       setStatus('failed')
       setVerifyError(errorMessage(e))
+
+      if (trackedPlan) {
+        try {
+          // The check never executed: record the blockage with its
+          // reason instead of manufacturing an outcome.
+          const recorded = await kryom().recordAgentVerification({
+            planId: trackedPlan.id,
+            stepId: 'verify',
+            check: command,
+            result: 'error',
+            output: errorMessage(e),
+            markStep: 'blocked',
+          })
+
+          setTrackedPlan(recorded.plan)
+        } catch (progress) {
+          setProgressError(errorMessage(progress))
+        }
+      }
     } finally {
       setVerifying(false)
     }
   }
 
-  function requestFix() {
-    if (!plan || !verifyResult || repairAttempt >= MAX_REPAIR_ATTEMPTS) {
+  async function skipVerification(): Promise<void> {
+    const command = verifyCommand.trim()
+
+    if (!command || !trackedPlan || busy) {
       return
     }
 
-    const followUp = [
-      'The previous change failed verification. Analyze the failure and propose a fix.',
-      `Original task: ${plan.task}`,
-      `Failed command: ${verifyCommand.trim()}`,
-      `Exit code: ${verifyResult.exitCode}${verifyResult.timedOut ? ' (timed out)' : ''}`,
-      'Command output (truncated):',
-      verifyResult.output.slice(0, MAX_FAILURE_CHARS),
-    ].join('\n')
+    const confirmed = await dialogs.confirm({
+      title: 'Skip this check?',
+      message:
+        `No command runs. The plan records "${command}" as skipped, ` +
+        `which never counts as verification.`,
+      confirmLabel: 'Skip check',
+    })
 
-    setRepairAttempt((previous) => previous + 1)
-    setTask(followUp)
-    void requestPlanFor(followUp, researchSessionId)
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      const recorded = await kryom().recordAgentVerification({
+        planId: trackedPlan.id,
+        stepId: 'verify',
+        check: command,
+        result: 'skip',
+        output: 'Skipped by the user without running.',
+      })
+
+      setTrackedPlan(recorded.plan)
+      props.onStatus('Check skipped (not verified)')
+    } catch (e) {
+      setProgressError(errorMessage(e))
+    }
+  }
+
+  function repairAttemptId(): string | null {
+    if (repairCycle?.state !== 'awaiting-approval') {
+      return null
+    }
+
+    const last = repairCycle.attempts[repairCycle.attempts.length - 1]
+
+    return last ? last.attemptId : null
+  }
+
+  function repairRecordId(): string | null {
+    if (repairCycle?.state !== 'awaiting-verification') {
+      return null
+    }
+
+    const last = repairCycle.attempts[repairCycle.attempts.length - 1]
+
+    return last ? last.attemptId : null
+  }
+
+  async function showRepairProposal(
+    cycle: KryomRepairCycle,
+    proposal: KryomAgentPlan,
+    generation: number
+  ): Promise<void> {
+    if (generation !== opGenerationRef.current) {
+      return
+    }
+
+    setRepairCycle(cycle)
+    setPlan(proposal)
+    setApproved(new Set(proposal.edits.map((edit) => edit.index ?? 0)))
+    setApplyResult(null)
+    setStale(false)
+    setStatus('review')
+    props.onStatus(
+      `Repair proposal ready: ${proposal.edits.length} edit(s) awaiting review`
+    )
+
+    await loadOldContents(proposal)
+  }
+
+  async function runProposal(cycleId: string, generation: number): Promise<void> {
+    try {
+      const { cycle, proposal } = await kryom().proposeRepairCycle({ cycleId })
+
+      await showRepairProposal(cycle, proposal, generation)
+    } catch (e) {
+      if (generation !== opGenerationRef.current) {
+        return
+      }
+
+      setRepairError(errorMessage(e))
+
+      try {
+        const { cycle } = await kryom().getRepairCycle({ cycleId })
+
+        setRepairCycle(cycle)
+      } catch {
+        // The cycle read is best-effort; the error above stands.
+      }
+    }
+  }
+
+  async function requestRepairProposal(cycleId: string): Promise<void> {
+    if (repairBusy) {
+      return
+    }
+
+    setRepairBusy(true)
+    setRepairError('')
+
+    const generation = opGenerationRef.current + 1
+    opGenerationRef.current = generation
+
+    try {
+      await runProposal(cycleId, generation)
+    } finally {
+      if (generation === opGenerationRef.current) {
+        setRepairBusy(false)
+      }
+    }
+  }
+
+  async function startRepair(): Promise<void> {
+    const command = verifyCommand.trim()
+
+    if (
+      !trackedPlan ||
+      !verifyResult ||
+      verifyResult.success ||
+      !command ||
+      repairBusy ||
+      (repairCycle && !isRepairTerminal(repairCycle.state))
+    ) {
+      return
+    }
+
+    setRepairBusy(true)
+    setRepairError('')
+
+    const generation = opGenerationRef.current + 1
+    opGenerationRef.current = generation
+
+    try {
+      const { cycle } = await kryom().startRepairCycle({
+        planId: trackedPlan.id,
+        check: command,
+        diagnosis: verifyResult.diagnosis,
+      })
+
+      if (generation !== opGenerationRef.current) {
+        return
+      }
+
+      setRepairCycle(cycle)
+
+      // Chain straight into the first proposal: one user gesture,
+      // with the cap and deadline still enforced server-side.
+      await runProposal(cycle.id, generation)
+    } catch (e) {
+      if (generation !== opGenerationRef.current) {
+        return
+      }
+
+      setRepairError(errorMessage(e))
+    } finally {
+      if (generation === opGenerationRef.current) {
+        setRepairBusy(false)
+      }
+    }
+  }
+
+  async function denyRepair(): Promise<void> {
+    if (!repairCycle || repairBusy) {
+      return
+    }
+
+    const confirmed = await dialogs.confirm({
+      title: 'Deny this repair?',
+      message:
+        'The repair cycle stops with reason approval-denied. ' +
+        'No further attempts will be proposed.',
+      confirmLabel: 'Deny repair',
+      danger: true,
+    })
+
+    if (!confirmed) {
+      return
+    }
+
+    setRepairBusy(true)
+    setRepairError('')
+
+    try {
+      const { cycle } = await kryom().cancelRepairCycle({
+        cycleId: repairCycle.id,
+        reason: 'approval-denied',
+      })
+
+      setRepairCycle(cycle)
+      props.onStatus('Repair denied by user')
+    } catch (e) {
+      setRepairError(errorMessage(e))
+    } finally {
+      setRepairBusy(false)
+    }
+  }
+
+  async function cancelRepairUi(): Promise<void> {
+    if (!repairCycle || repairBusy) {
+      return
+    }
+
+    setRepairBusy(true)
+    setRepairError('')
+
+    try {
+      const { cycle } = await kryom().cancelRepairCycle({
+        cycleId: repairCycle.id,
+      })
+
+      setRepairCycle(cycle)
+      props.onStatus('Repair cycle cancelled')
+    } catch (e) {
+      setRepairError(errorMessage(e))
+    } finally {
+      setRepairBusy(false)
+    }
   }
 
   function reset() {
+    // A reset abandons the panel, so an active backend cycle is
+    // cancelled best-effort rather than left idling to expiry.
+    if (repairCycle && !isRepairTerminal(repairCycle.state)) {
+      kryom()
+        .cancelRepairCycle({ cycleId: repairCycle.id })
+        .catch(() => undefined)
+    }
+
     setPlan(null)
     setApproved(new Set())
     setApplyResult(null)
@@ -508,7 +1553,8 @@ export function AgentPanel(props: AgentPanelProps) {
     setVerifyCommand('')
     setVerifyResult(null)
     setVerifyError('')
-    setRepairAttempt(0)
+    setRepairCycle(null)
+    setRepairError('')
     setStatus('idle')
   }
 
@@ -522,9 +1568,10 @@ export function AgentPanel(props: AgentPanelProps) {
     }
   }
 
-  const busy = planning || applying || verifying
+  const busy = planning || applying || verifying || repairBusy
   const contextCount =
     (includeActive && props.activeFile ? 1 : 0) + selectedFiles.length
+  const planTaskSplit = plan ? splitHistoryBlock(plan.task) : null
 
   return (
     <section className="agent-panel agent-docked">
@@ -543,8 +1590,9 @@ export function AgentPanel(props: AgentPanelProps) {
       {status !== 'idle' && (
         <p className="muted padded" role="status">
           Status: {STATUS_LABELS[status]}
-          {status === 'review' && repairAttempt > 0
-            ? ` (repair attempt ${repairAttempt} of ${MAX_REPAIR_ATTEMPTS})`
+          {status === 'review' &&
+          repairCycle?.state === 'awaiting-approval'
+            ? ` (repair attempt ${repairCycle.attempts.length} of 2)`
             : ''}
         </p>
       )}
@@ -595,6 +1643,51 @@ export function AgentPanel(props: AgentPanelProps) {
             />
             Include active file
           </label>
+
+          <label
+            className="context-toggle"
+            title="Reads recent chat history in the main process and sends an excerpt with the task"
+          >
+            <input
+              type="checkbox"
+              checked={includeChat}
+              onChange={(event) => {
+                const checked = event.target.checked
+
+                setIncludeChat(checked)
+                setChatExcerpt(null)
+                setChatExcerptError('')
+
+                if (checked) {
+                  kryom()
+                    .getAgentChatExcerpt()
+                    .then(setChatExcerpt)
+                    .catch((e: unknown) => {
+                      setChatExcerptError(errorMessage(e))
+                      setIncludeChat(false)
+                    })
+                }
+              }}
+              disabled={busy}
+            />
+            Include recent chat
+          </label>
+
+          {includeChat && chatExcerpt && !plan && (
+            <div className="context-file">
+              <p>
+                Chat context: {chatExcerpt.messageCount} message(s),{' '}
+                {formatBytes(chatExcerpt.chars)}
+                {chatExcerpt.truncated ? ' (truncated)' : ''}
+              </p>
+            </div>
+          )}
+
+          {chatExcerptError && !plan && (
+            <p className="muted padded" role="alert">
+              {chatExcerptError}
+            </p>
+          )}
 
           <div className="context-file">
             {props.activeFile
@@ -692,6 +1785,13 @@ export function AgentPanel(props: AgentPanelProps) {
             </p>
           )}
 
+          {props.historyContext && !plan && (
+            <p className="muted padded">
+              Selected history attached: {props.historyContext.length}{' '}
+              chars will ground the plan.
+            </p>
+          )}
+
           {contextPreview && !plan && (
             <div className="context-file">
               <p>
@@ -715,7 +1815,14 @@ export function AgentPanel(props: AgentPanelProps) {
             <div className="plan-view">
               <p className="plan-task">
                 <span className="muted">Task: </span>
-                {plan.task}
+                {planTaskSplit?.head ?? plan.task}
+                {planTaskSplit && planTaskSplit.historyChars > 0 && (
+                  <span className="muted">
+                    {' '}
+                    (plus {planTaskSplit.historyChars} chars of selected
+                    history)
+                  </span>
+                )}
               </p>
               <p className="muted padded">
                 Model: {plan.model} · {plan.edits.length} proposed edit(s)
@@ -736,7 +1843,37 @@ export function AgentPanel(props: AgentPanelProps) {
                   : ''}
               </p>
 
+              <ContextSnapshotView
+                snapshot={trackedPlan?.context ?? plan.contextSnapshot ?? null}
+                live={trackedPlan?.context != null}
+              />
+
               {plan.notes && <p className="plan-notes">{plan.notes}</p>}
+
+              {plan.expectedOutcome && (
+                <p className="plan-notes">
+                  <strong>Expected outcome:</strong> {plan.expectedOutcome}
+                </p>
+              )}
+
+              {(plan.risks ?? []).length > 0 && (
+                <div className="plan-risks">
+                  <strong>Risks</strong>
+                  <ul>
+                    {(plan.risks ?? []).map((risk, index) => (
+                      <li key={index}>
+                        <span className={`risk-severity risk-${risk.severity}`}>
+                          {risk.severity}
+                        </span>{' '}
+                        {risk.explanation}{' '}
+                        <span className="muted">
+                          Mitigation: {risk.mitigation}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {plan.edits.length === 0 && (
                 <p className="muted padded">The plan proposes no file edits.</p>
@@ -827,6 +1964,74 @@ export function AgentPanel(props: AgentPanelProps) {
                 )
               })}
 
+              {approved.size > 0 && !applyResult?.completed && (
+                <div className="plan-commands">
+                  <strong>Change set (dependency analysis)</strong>
+                  {changeSetLoading && (
+                    <p className="muted">Analyzing dependencies…</p>
+                  )}
+                  {changeSetError && (
+                    <p className="muted">
+                      Change-set analysis unavailable: {changeSetError}{' '}
+                      Applying in plan order; approval and safety checks
+                      still apply.
+                    </p>
+                  )}
+                  {changeSet && (
+                    <>
+                      <p className="muted">{changeSet.orderReason}</p>
+                      {changeSet.validation.blockers.map((blocker, index) => (
+                        <p key={index} role="alert">
+                          Blocked: {blocker.reason}
+                        </p>
+                      ))}
+                      {changeSet.order.length > 1 && (
+                        <p className="muted">
+                          Apply order:{' '}
+                          {changeSet.order
+                            .map((index) => {
+                              const target = changeSet.targets.find(
+                                (entry) => entry.index === index
+                              )
+
+                              return target ? baseName(target.path) : `#${index}`
+                            })
+                            .join(' → ')}
+                        </p>
+                      )}
+                      {changeSet.reviewGroups.map((group, index) => (
+                        <p key={index} className="muted">
+                          Review together:{' '}
+                          {group.files.map(baseName).join(', ')}
+                        </p>
+                      ))}
+                      {changeSet.cycles.length > 0 && (
+                        <p className="muted">
+                          {changeSet.cycles.length} import cycle(s);
+                          cyclic members keep plan order.
+                        </p>
+                      )}
+                      {(changeSet.totalUnresolved > 0 ||
+                        changeSet.totalUnknown > 0) && (
+                        <p className="muted">
+                          {changeSet.totalUnresolved} unresolved,{' '}
+                          {changeSet.totalUnknown} unknown,{' '}
+                          {changeSet.totalExternals} external import(s)
+                          — plan order kept where facts are missing.
+                        </p>
+                      )}
+                      {changeSet.validation.warnings
+                        .slice(0, 5)
+                        .map((warning, index) => (
+                          <p key={index} className="muted">
+                            Note: {warning.reason}
+                          </p>
+                        ))}
+                    </>
+                  )}
+                </div>
+              )}
+
               <div className="plan-commands">
                 <strong>Proposed commands (never executed automatically)</strong>
 
@@ -854,26 +2059,99 @@ export function AgentPanel(props: AgentPanelProps) {
                 <button
                   className="primary-button"
                   onClick={() => void applyApproved()}
-                  disabled={applying || approved.size === 0}
+                  disabled={
+                    applying ||
+                    approved.size === 0 ||
+                    (changeSet !== null && !changeSet.validation.ok)
+                  }
+                  title={
+                    changeSet !== null && !changeSet.validation.ok
+                      ? 'Resolve change-set blockers first (deselect a conflicting edit).'
+                      : undefined
+                  }
                 >
                   {applying ? 'Applying…' : 'Apply approved edits'}
                 </button>
+                {applying && (
+                  <button type="button" onClick={stopApplying}>
+                    Stop
+                  </button>
+                )}
+                {repairAttemptId() && !applying && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={busy || repairBusy}
+                    onClick={() => void denyRepair()}
+                  >
+                    Deny repair
+                  </button>
+                )}
               </div>
 
               {applyResult && (
                 <div className="apply-result" role="status">
                   {applyResult.completed ? (
-                    <p>Applied {applyResult.applied.length} edit(s).</p>
+                    <>
+                      <p>Applied {applyResult.applied.length} edit(s).</p>
+
+                      {applyResult.checkpoint && 'id' in applyResult.checkpoint && (
+                        <p className="muted">
+                          Checkpoint saved ({applyResult.checkpoint.files}{' '}
+                          file(s)).
+                        </p>
+                      )}
+                    </>
+                  ) : applyResult.cancelled ? (
+                    <>
+                      <p>
+                        <strong>
+                          Apply cancelled after {applyResult.applied.length}{' '}
+                          edit(s).
+                        </strong>
+                      </p>
+                      <p className="muted">
+                        Applied edits were kept
+                        {applyResult.checkpoint &&
+                        'id' in applyResult.checkpoint
+                          ? ' and checkpointed; undo them from Checkpoints.'
+                          : '.'}
+                      </p>
+                    </>
                   ) : (
                     <>
                       <p>
                         <strong>Apply did not complete.</strong>
                       </p>
                       {applyResult.failed && <p>{applyResult.failed.message}</p>}
+                      {(applyResult.stale ?? []).length > 0 && (
+                        <ul>
+                          {(applyResult.stale ?? []).map((entry) => (
+                            <li key={`${entry.index}-${entry.path}`}>
+                              <strong>{entry.path}</strong> — {entry.status}:{' '}
+                              {entry.reason}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {(applyResult.conflicts ?? []).length > 0 && (
+                        <ul>
+                          {(applyResult.conflicts ?? []).map((entry) => (
+                            <li key={entry.path}>
+                              <strong>{entry.path}</strong> — conflicting
+                              edits {entry.indexes.join(', ')}; approve
+                              only one.
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                       <p className="muted">
-                        {applyResult.rolledBack
-                          ? 'All changes were rolled back.'
-                          : 'No changes were rolled back.'}
+                        {(applyResult.stale ?? []).length > 0 ||
+                        (applyResult.conflicts ?? []).length > 0
+                          ? 'Nothing was written; the plan and its evidence are preserved.'
+                          : applyResult.rolledBack
+                            ? 'All changes were rolled back.'
+                            : 'No changes were rolled back.'}
                       </p>
                       {stale && (
                         <button
@@ -886,6 +2164,309 @@ export function AgentPanel(props: AgentPanelProps) {
                         </button>
                       )}
                     </>
+                  )}
+                </div>
+              )}
+
+              {checkpoints.length > 0 && (
+                <div className="plan-commands">
+                  <strong>Checkpoints (undo previous applies)</strong>
+
+                  {checkpoints.map((entry) => (
+                    <div key={entry.id} className="composer-footer">
+                      <span className="muted">
+                        {entry.files} file(s)
+                        {entry.task ? ` — ${entry.task.slice(0, 80)}` : ''}{' '}
+                        ({new Date(entry.createdAt).toLocaleString()})
+                      </span>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={undoing}
+                        onClick={() => void undoApply(entry.id)}
+                      >
+                        {undoing ? 'Undoing…' : 'Undo'}
+                      </button>
+                    </div>
+                  ))}
+
+                  {undoError !== '' && <p>{undoError}</p>}
+
+                  {undoResult && (
+                    <div role="status">
+                      <p>
+                        Restored {undoResult.restored.length}, skipped{' '}
+                        {undoResult.skipped.length}, failed{' '}
+                        {undoResult.failures.length}.
+                      </p>
+
+                      {undoResult.skipped.map((entry) => (
+                        <p key={entry.path} className="muted">
+                          Kept {displayUndoPath(entry.path)}: {entry.reason}.
+                        </p>
+                      ))}
+
+                      {undoResult.failures.map((entry) => (
+                        <p key={entry.path}>
+                          {displayUndoPath(entry.path)}: {entry.reason}.
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {trackedPlan && (
+                <div className="plan-progress">
+                  <strong>
+                    Plan progress · {trackedPlan.status} · verification:{' '}
+                    {trackedPlan.verification}
+                  </strong>
+
+                  {progressError && (
+                    <p role="alert">Progress update failed: {progressError}</p>
+                  )}
+
+                  <ul className="plan-steps">
+                    {trackedPlan.steps.map((step) => (
+                      <li key={step.id} className={`plan-step plan-step-${step.state}`}>
+                        <span className="plan-step-head">
+                          <span>{step.label}</span>{' '}
+                          <span className="muted">({step.state.replace('_', ' ')})</span>
+                          {step.interrupted && (
+                            <span className="plan-interrupted">
+                              interrupted — work stopped here
+                            </span>
+                          )}
+                        </span>
+                        {step.detail && <p className="muted">{step.detail}</p>}
+                        {step.evidence.length > 0 && (
+                          <p className="muted">
+                            Evidence:{' '}
+                            {step.evidence
+                              .map((item) => `${item.kind}:${item.ref.slice(0, 12)}`)
+                              .join(', ')}
+                          </p>
+                        )}
+                        {trackedPlan.status === 'active' && (
+                          <span className="plan-step-actions">
+                            {step.interrupted && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="mini-btn"
+                                  onClick={() => {
+                                    kryom()
+                                      .resumeAgentPlan({ id: trackedPlan.id })
+                                      .then(setTrackedPlan)
+                                      .catch((e: unknown) =>
+                                        setProgressError(errorMessage(e))
+                                      )
+                                  }}
+                                >
+                                  Resume
+                                </button>
+                                <button
+                                  type="button"
+                                  className="mini-btn"
+                                  onClick={() =>
+                                    void moveTrackedStep(
+                                      step.id,
+                                      'blocked',
+                                      'Interrupted; awaiting review.'
+                                    )
+                                  }
+                                >
+                                  Mark blocked
+                                </button>
+                              </>
+                            )}
+                            {!step.interrupted && step.kind === 'task' && step.state === 'pending' && (
+                              <button
+                                type="button"
+                                className="mini-btn"
+                                onClick={() => void moveTrackedStep(step.id, 'in_progress')}
+                              >
+                                Start
+                              </button>
+                            )}
+                            {!step.interrupted &&
+                              step.kind === 'task' &&
+                              step.state === 'in_progress' && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="mini-btn"
+                                    onClick={() => void moveTrackedStep(step.id, 'completed')}
+                                  >
+                                    Complete
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="mini-btn"
+                                    onClick={() => void moveTrackedStep(step.id, 'blocked')}
+                                  >
+                                    Block
+                                  </button>
+                                </>
+                              )}
+                            {!step.interrupted && step.state === 'blocked' && (
+                              <button
+                                type="button"
+                                className="mini-btn"
+                                onClick={() => void moveTrackedStep(step.id, 'in_progress')}
+                              >
+                                Resume
+                              </button>
+                            )}
+                            {!step.interrupted && step.state === 'failed' && step.kind === 'task' && (
+                              <button
+                                type="button"
+                                className="mini-btn"
+                                onClick={() => void moveTrackedStep(step.id, 'in_progress')}
+                              >
+                                Retry
+                              </button>
+                            )}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+
+                  {trackedPlan.reports.length > 0 && (
+                    <>
+                      <strong>Verification reports</strong>
+                      <ul className="plan-reports">
+                        {trackedPlan.reports.map((report) => (
+                          <li key={report.id}>
+                            <span>
+                              <strong>{report.check}</strong>: Status{' '}
+                              <strong>{report.conclusion}</strong>
+                            </span>{' '}
+                            <span className="muted">
+                              {new Date(report.at).toLocaleString()}
+                            </span>
+                            {report.execution ? (
+                              <p className="muted">
+                                Executed: {report.execution.command} · exit{' '}
+                                {report.execution.exitCode}
+                                {report.execution.timedOut
+                                  ? ' · timed out'
+                                  : ''}
+                                {report.execution.cancelled
+                                  ? ' · cancelled'
+                                  : ''}{' '}
+                                · {(report.execution.durationMs / 1000).toFixed(1)}s
+                                {' · '}run {report.execution.runId}
+                              </p>
+                            ) : (
+                              <p className="muted">
+                                Not executed — {report.conclusion}
+                                {report.legacyProvenance
+                                  ? ' (unverified claim: recorded before execution tracking; provenance unverified)'
+                                  : ` (stated reason: ${report.outputSummary.slice(0, 200)})`}
+                              </p>
+                            )}
+                            {report.outputSummary &&
+                              report.execution !== null && (
+                                <pre className="plan-preview">
+                                  {report.outputSummary.slice(0, 1000)}
+                                  {report.outputSummary.length > 1000
+                                    ? '… (truncated)'
+                                    : ''}
+                                </pre>
+                              )}
+                            {report.diagnosis && (
+                              <p className="muted">
+                                Observed evidence — diagnosis:{' '}
+                                {report.diagnosis.summary} (
+                                {report.diagnosis.findings.length} finding(s),
+                                run {report.diagnosis.runId})
+                              </p>
+                            )}
+                            {report.diagnosis?.findings.map((finding) => (
+                              <p key={finding.id} className="muted">
+                                <strong>{finding.category}</strong> (
+                                {finding.confidence} confidence):{' '}
+                                {finding.summary}
+                              </p>
+                            ))}
+                            {report.modelExplanation ? (
+                              <p className="muted">
+                                Model explanation (AI-generated, not
+                                evidence): {report.modelExplanation.summary}
+                                {report.modelExplanation.failureAnalysis
+                                  ? ` Analysis: ${report.modelExplanation.failureAnalysis}`
+                                  : ''}
+                                {report.modelExplanation.suggestedNextSteps
+                                  ? ` Next: ${report.modelExplanation.suggestedNextSteps}`
+                                  : ''}
+                              </p>
+                            ) : (
+                              <p className="muted">
+                                No model explanation recorded.
+                              </p>
+                            )}
+                            {report.repair && (
+                              <p className="muted">
+                                Repair attempt {report.repair.attempt} of
+                                cycle {report.repair.cycleId}
+                                {report.repair.checkpointId
+                                  ? ` · checkpoint ${report.repair.checkpointId}`
+                                  : ''}
+                                {report.repair.appliedFiles.length > 0
+                                  ? ` · changed: ${report.repair.appliedFiles.join(', ')}`
+                                  : ''}
+                              </p>
+                            )}
+                            <p className="muted">
+                              Shell check (no live AI verification)
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+
+                  {trackedPlan.status === 'active' && (
+                    <div className="composer-footer">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => {
+                          kryom()
+                            .completeAgentPlan({ id: trackedPlan.id })
+                            .then(setTrackedPlan)
+                            .catch((e: unknown) =>
+                              setProgressError(errorMessage(e))
+                            )
+                        }}
+                      >
+                        Complete plan
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => {
+                          void dialogs
+                            .confirm({
+                              title: 'Cancel plan?',
+                              message:
+                                'This marks every open step cancelled. Applied edits stay on disk.',
+                              confirmLabel: 'Cancel plan',
+                              danger: true,
+                            })
+                            .then((confirmed) => {
+                              if (confirmed) {
+                                void cancelTrackedPlan('Cancelled by user.')
+                              }
+                            })
+                        }}
+                      >
+                        Cancel plan
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
@@ -933,6 +2514,26 @@ export function AgentPanel(props: AgentPanelProps) {
                     >
                       {verifying ? 'Running…' : 'Run check'}
                     </button>
+                    {verifying && (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => void stopVerification()}
+                        title="Stops the running check (same shared cancel as the terminal panel)."
+                      >
+                        Stop
+                      </button>
+                    )}
+                    {trackedPlan && !verifying && (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={busy}
+                        onClick={() => void skipVerification()}
+                      >
+                        Skip check
+                      </button>
+                    )}
                   </div>
 
                   {verifyError && (
@@ -945,14 +2546,38 @@ export function AgentPanel(props: AgentPanelProps) {
                         <strong>
                           {verifyResult.success
                             ? 'Check passed.'
-                            : 'Check failed.'}
+                            : verifyResult.timedOut
+                              ? 'Check timed out.'
+                              : verifyResult.cancelled
+                                ? 'Check cancelled.'
+                                : 'Check failed.'}
                         </strong>{' '}
                         Exit code: {verifyResult.exitCode}
                         {verifyResult.timedOut ? ' (timed out)' : ''}
+                        {verifyResult.cancelled ? ' (cancelled)' : ''}
                         {verifyResult.outputLimited ? ' · output truncated' : ''}
                         {' · '}
                         {verifyResult.diagnostics.length} problem(s)
                       </p>
+                      <p className="muted">
+                        {verifyResult.diagnosis.summary} Runner:{' '}
+                        {verifyResult.diagnosis.runner} ·{' '}
+                        {(verifyResult.durationMs / 1000).toFixed(1)}s ·{' '}
+                        {verifyResult.diagnosis.provenance === 'executed'
+                          ? 'actually executed'
+                          : 'mocked result'}
+                      </p>
+                      {verifyResult.diagnosis.findings.map((finding) => (
+                        <p key={finding.id} className="muted">
+                          <strong>{finding.category}</strong> (
+                          {finding.confidence} confidence)
+                          {finding.test ? ` — ${finding.test}` : ''}
+                          {finding.file
+                            ? ` — ${finding.file}:${finding.line ?? '?'}`
+                            : ''}
+                          : {finding.summary}
+                        </p>
+                      ))}
                       {verifyResult.warnings.map((warning) => (
                         <p key={warning} className="muted">
                           Warning: {warning}
@@ -967,25 +2592,98 @@ export function AgentPanel(props: AgentPanelProps) {
                           {diagnostic.message}
                         </p>
                       ))}
-                      {!verifyResult.success &&
-                        repairAttempt < MAX_REPAIR_ATTEMPTS && (
-                          <button
-                            type="button"
-                            className="secondary-button"
-                            disabled={busy}
-                            onClick={requestFix}
-                          >
-                            Request fix (attempt {repairAttempt + 1} of{' '}
-                            {MAX_REPAIR_ATTEMPTS})
-                          </button>
-                        )}
-                      {!verifyResult.success &&
-                        repairAttempt >= MAX_REPAIR_ATTEMPTS && (
-                          <p className="muted">
-                            Repair attempts exhausted. Adjust the task or files
-                            and plan again.
-                          </p>
-                        )}
+                      {!verifyResult.success && trackedPlan && (
+                        <>
+                          {repairError !== '' && (
+                            <p role="alert">Repair failed: {repairError}</p>
+                          )}
+
+                          {repairCycle && (
+                            <p className="muted">
+                              Repair cycle {repairCycle.state}
+                              {repairCycle.interrupted
+                                ? ' (interrupted — cancel it or start a new cycle)'
+                                : ''}
+                              {' · '}attempt {repairCycle.attempts.length} of
+                              2 · {repairCycle.remainingAttempts} remaining
+                              {' · '}elapsed{' '}
+                              {formatRepairMs(repairCycle.elapsedMs)} of{' '}
+                              {formatRepairMs(repairCycle.budgetMs)}
+                              {isRepairTerminal(repairCycle.state) &&
+                              repairCycle.detail !== ''
+                                ? ` · ${repairCycle.detail}`
+                                : ''}
+                            </p>
+                          )}
+
+                          {repairCycle?.attempts.map(
+                            (attempt) =>
+                              attempt.appliedFiles.length > 0 && (
+                                <p
+                                  key={attempt.attemptId}
+                                  className="muted"
+                                >
+                                  Attempt {attempt.n} changed:{' '}
+                                  {attempt.appliedFiles.join(', ')}
+                                  {attempt.reportId
+                                    ? ' · verification recorded'
+                                    : ''}
+                                </p>
+                              )
+                          )}
+
+                          {(!repairCycle ||
+                            isRepairTerminal(repairCycle.state)) && (
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              disabled={busy || repairBusy}
+                              onClick={() => void startRepair()}
+                            >
+                              {repairBusy
+                                ? 'Starting repair…'
+                                : 'Start repair cycle'}
+                            </button>
+                          )}
+
+                          {repairCycle?.state === 'awaiting-proposal' &&
+                            repairCycle.attempts.length > 0 && (
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                disabled={busy || repairBusy}
+                                onClick={() =>
+                                  void requestRepairProposal(repairCycle.id)
+                                }
+                              >
+                                {repairBusy
+                                  ? 'Generating…'
+                                  : `Generate repair attempt ${
+                                      repairCycle.attempts.length + 1
+                                    } of 2`}
+                              </button>
+                            )}
+
+                          {repairCycle &&
+                            !isRepairTerminal(repairCycle.state) && (
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                disabled={busy || repairBusy}
+                                onClick={() => void cancelRepairUi()}
+                              >
+                                Cancel repair
+                              </button>
+                            )}
+
+                          {repairCycle?.state === 'exhausted' && (
+                            <p className="muted">
+                              Repair attempts exhausted. Adjust the task or
+                              files and plan again.
+                            </p>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

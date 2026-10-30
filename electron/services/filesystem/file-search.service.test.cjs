@@ -40,6 +40,25 @@ describe('file-search.service', () => {
     assert.ok(!names.some((name) => name.includes('node_modules')))
   })
 
+  it('never searches inside .kryom state', async () => {
+    const root = await openFixture()
+
+    await fs.mkdir(path.join(root, '.kryom'), { recursive: true })
+    await fs.writeFile(path.join(root, '.kryom', 'app-notes.ts'), 'hello world\n')
+
+    const byName = await searchFiles('app-notes', { mode: 'name' })
+
+    assert.ok(
+      byName.matches.every((match) => !match.relativePath.includes('.kryom'))
+    )
+
+    const byContent = await searchFiles('hello world', { mode: 'content' })
+
+    assert.ok(
+      byContent.matches.every((match) => !match.relativePath.includes('.kryom'))
+    )
+  })
+
   it('greps content with line numbers', async () => {
     await openFixture()
 

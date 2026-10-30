@@ -4,6 +4,7 @@ const path = require('node:path')
 const IGNORED = new Set([
   'node_modules',
   '.git',
+  '.kryom',
   'dist',
   '.next',
   'coverage',
@@ -11,8 +12,18 @@ const IGNORED = new Set([
 
 let workspaceRoot = null
 
+// Single-slot previous root for in-flight saves. A chat save
+// dispatched before a project switch must still land in the project
+// it was written for, not the newly opened one (Level 2B.2). Only
+// ever a root the user actually opened; never an arbitrary path.
+let previousWorkspaceRoot = null
+
 function getWorkspaceRoot() {
   return workspaceRoot
+}
+
+function getPreviousWorkspaceRoot() {
+  return previousWorkspaceRoot
 }
 
 async function setWorkspaceRoot(directoryPath) {
@@ -27,11 +38,21 @@ async function setWorkspaceRoot(directoryPath) {
     throw new Error('The selected workspace is not a directory.')
   }
 
+  // Opening over an empty root (after a close) keeps the previously
+  // closed root, so close-then-open switches behave like direct ones.
+  if (workspaceRoot) {
+    previousWorkspaceRoot = workspaceRoot
+  }
+
   workspaceRoot = resolved
   return workspaceRoot
 }
 
 function closeWorkspace() {
+  if (workspaceRoot) {
+    previousWorkspaceRoot = workspaceRoot
+  }
+
   workspaceRoot = null
 
   return { success: true }
@@ -205,6 +226,7 @@ async function buildTree(
 
 module.exports = {
   getWorkspaceRoot,
+  getPreviousWorkspaceRoot,
   setWorkspaceRoot,
   closeWorkspace,
   isInsideWorkspace,

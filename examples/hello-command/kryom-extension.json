@@ -1,0 +1,16 @@
+{
+  "manifestVersion": 1,
+  "id": "kryom.hello-command",
+  "name": "Hello Command",
+  "description": "Sample extension: contributes a command that greets the project and counts invocations.",
+  "version": "1.0.0",
+  "publisher": "kryom",
+  "main": "main.js",
+  "apiVersion": 1,
+  "permissions": ["workspace.metadata"],
+  "optionalPermissions": [],
+  "contributes": {
+    "commands": [{ "id": "kryom.hello-command.say-hello", "title": "Say hello" }]
+  },
+  "dependencies": {}
+}

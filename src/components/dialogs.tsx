@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -59,77 +60,178 @@ type Pending =
   | ({ kind: 'conflict' } & ConflictOptions & { resolve: (value: ConflictChoice) => void })
   | ({ kind: 'closeChoice' } & CloseDirtyOptions & { resolve: (value: CloseDirtyChoice) => void })
 
+type PendingValue =
+  | boolean
+  | string
+  | null
+  | ConflictChoice
+  | CloseDirtyChoice
+
 export function DialogProvider({ children }: { children: ReactNode }) {
-  const [pending, setPending] = useState<Pending | null>(null)
+  // FIFO queue: concurrent requests wait their turn instead of
+  // overwriting each other and stranding promises forever.
+  const [queue, setQueue] = useState<Pending[]>([])
   const [promptValue, setPromptValue] = useState('')
+  const dialogNodeRef = useRef<HTMLDivElement | null>(null)
+  const returnFocusRef = useRef<Element | null>(null)
+  const hadDialogRef = useRef(false)
 
-  const confirm = useCallback((options: ConfirmOptions) => {
-    return new Promise<boolean>((resolve) => {
-      setPending({ kind: 'confirm', ...options, resolve })
+  const pending = queue[0] ?? null
+
+  const enqueue = useCallback((entry: Pending) => {
+    setQueue((current) => [...current, entry])
+  }, [])
+
+  // Resolves the head dialog and advances the queue. Functional
+  // update: safe from Escape/overlay closures of any age.
+  const settleHead = useCallback((value: PendingValue) => {
+    setQueue((current) => {
+      const [head, ...rest] = current
+
+      if (head) {
+        const resolve = head.resolve as (result: PendingValue) => void
+
+        resolve(value)
+      }
+
+      return rest
     })
   }, [])
 
-  const prompt = useCallback((options: PromptOptions) => {
-    return new Promise<string | null>((resolve) => {
-      setPromptValue(options.initialValue ?? '')
-      setPending({ kind: 'prompt', ...options, resolve })
+  const dismissHead = useCallback(() => {
+    setQueue((current) => {
+      const [head, ...rest] = current
+
+      if (!head) {
+        return current
+      }
+
+      if (head.kind === 'confirm') {
+        head.resolve(false)
+      } else if (head.kind === 'prompt') {
+        head.resolve(null)
+      } else {
+        head.resolve('cancel')
+      }
+
+      return rest
     })
   }, [])
 
-  const resolveConflict = useCallback((options: ConflictOptions) => {
-    return new Promise<ConflictChoice>((resolve) => {
-      setPending({ kind: 'conflict', ...options, resolve })
-    })
-  }, [])
+  const confirm = useCallback(
+    (options: ConfirmOptions) => {
+      return new Promise<boolean>((resolve) => {
+        enqueue({ kind: 'confirm', ...options, resolve })
+      })
+    },
+    [enqueue]
+  )
 
-  const confirmCloseDirty = useCallback((options: CloseDirtyOptions) => {
-    return new Promise<CloseDirtyChoice>((resolve) => {
-      setPending({ kind: 'closeChoice', ...options, resolve })
-    })
-  }, [])
+  const prompt = useCallback(
+    (options: PromptOptions) => {
+      return new Promise<string | null>((resolve) => {
+        enqueue({ kind: 'prompt', ...options, resolve })
+      })
+    },
+    [enqueue]
+  )
 
+  const resolveConflict = useCallback(
+    (options: ConflictOptions) => {
+      return new Promise<ConflictChoice>((resolve) => {
+        enqueue({ kind: 'conflict', ...options, resolve })
+      })
+    },
+    [enqueue]
+  )
+
+  const confirmCloseDirty = useCallback(
+    (options: CloseDirtyOptions) => {
+      return new Promise<CloseDirtyChoice>((resolve) => {
+        enqueue({ kind: 'closeChoice', ...options, resolve })
+      })
+    },
+    [enqueue]
+  )
+
+  // Prompt input resets per dialog head.
   useEffect(() => {
-    if (!pending) {
+    if (pending?.kind === 'prompt') {
+      setPromptValue(pending.initialValue ?? '')
+    }
+  }, [pending])
+
+  // Focus trap while any dialog is open; focus returns to the
+  // invoking element only when the queue fully drains.
+  useEffect(() => {
+    if (queue.length === 0) {
+      if (hadDialogRef.current) {
+        hadDialogRef.current = false
+
+        const target = returnFocusRef.current
+
+        returnFocusRef.current = null
+
+        if (target instanceof HTMLElement) {
+          target.focus()
+        }
+      }
+
       return
     }
 
-    const dismiss = () => {
-      if (pending.kind === 'confirm') {
-        pending.resolve(false)
-      } else if (pending.kind === 'prompt') {
-        pending.resolve(null)
-      } else {
-        pending.resolve('cancel')
-      }
-
-      setPending(null)
+    if (!hadDialogRef.current) {
+      hadDialogRef.current = true
+      returnFocusRef.current = document.activeElement
     }
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        dismiss()
+        dismissHead()
+        return
+      }
+
+      if (event.key !== 'Tab') {
+        return
+      }
+
+      const node = dialogNodeRef.current
+
+      if (!node) {
+        return
+      }
+
+      const focusables = node.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      )
+
+      if (focusables.length === 0) {
+        return
+      }
+
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
       }
     }
 
     document.addEventListener('keydown', onKey)
 
     return () => document.removeEventListener('keydown', onKey)
-  }, [pending])
+  }, [queue.length, pending, dismissHead])
 
   const closeOverlay = (event: React.MouseEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget || !pending) {
       return
     }
 
-    if (pending.kind === 'confirm') {
-      pending.resolve(false)
-    } else if (pending.kind === 'prompt') {
-      pending.resolve(null)
-    } else {
-      pending.resolve('cancel')
-    }
-
-    setPending(null)
+    dismissHead()
   }
 
   return (
@@ -144,6 +246,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
             className="dialog"
             role="dialog"
             aria-modal="true"
+            ref={dialogNodeRef}
             aria-label={
               pending.kind === 'conflict'
                 ? 'Unsaved changes conflict'
@@ -158,20 +261,17 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                 <p>{pending.message}</p>
                 <div className="dialog-actions">
                   <button
+                    type="button"
                     className="secondary-button"
-                    onClick={() => {
-                      pending.resolve(false)
-                      setPending(null)
-                    }}
+                    onClick={() => settleHead(false)}
+                    autoFocus={pending.danger === true}
                   >
                     Cancel
                   </button>
                   <button
+                    type="button"
                     className={pending.danger ? 'danger-button' : 'primary-button'}
-                    onClick={() => {
-                      pending.resolve(true)
-                      setPending(null)
-                    }}
+                    onClick={() => settleHead(true)}
                     // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus={!pending.danger}
                   >
@@ -190,8 +290,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                     return
                   }
 
-                  pending.resolve(promptValue.trim())
-                  setPending(null)
+                  settleHead(promptValue.trim())
                 }}
               >
                 <h2>{pending.title}</h2>
@@ -209,10 +308,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                   <button
                     type="button"
                     className="secondary-button"
-                    onClick={() => {
-                      pending.resolve(null)
-                      setPending(null)
-                    }}
+                    onClick={() => settleHead(null)}
                   >
                     Cancel
                   </button>
@@ -236,29 +332,23 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                 </p>
                 <div className="dialog-actions">
                   <button
+                    type="button"
                     className="secondary-button"
-                    onClick={() => {
-                      pending.resolve('cancel')
-                      setPending(null)
-                    }}
+                    onClick={() => settleHead('cancel')}
                   >
                     Cancel
                   </button>
                   <button
+                    type="button"
                     className="danger-button"
-                    onClick={() => {
-                      pending.resolve('discard')
-                      setPending(null)
-                    }}
+                    onClick={() => settleHead('discard')}
                   >
                     Discard changes
                   </button>
                   <button
+                    type="button"
                     className="primary-button"
-                    onClick={() => {
-                      pending.resolve('save')
-                      setPending(null)
-                    }}
+                    onClick={() => settleHead('save')}
                     autoFocus
                   >
                     Save and close
@@ -277,29 +367,23 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                 </p>
                 <div className="dialog-actions">
                   <button
+                    type="button"
                     className="secondary-button"
-                    onClick={() => {
-                      pending.resolve('cancel')
-                      setPending(null)
-                    }}
+                    onClick={() => settleHead('cancel')}
                   >
                     Cancel
                   </button>
                   <button
+                    type="button"
                     className="secondary-button"
-                    onClick={() => {
-                      pending.resolve('reload')
-                      setPending(null)
-                    }}
+                    onClick={() => settleHead('reload')}
                   >
                     Reload disk version
                   </button>
                   <button
+                    type="button"
                     className="danger-button"
-                    onClick={() => {
-                      pending.resolve('overwrite')
-                      setPending(null)
-                    }}
+                    onClick={() => settleHead('overwrite')}
                   >
                     Overwrite disk version
                   </button>

@@ -6,10 +6,46 @@ const { spawnSync } = require('node:child_process')
 let nextId = 1
 const active = new Map()
 
+// Children killed through a cancel path (as opposed to timeouts or
+// natural exits). Runners consume the mark when their child closes
+// so results report `cancelled` honestly. Weak refs: entries vanish
+// with their child objects even if a close event never arrives.
+const killMarked = new WeakSet()
+
+function markKilled(child) {
+  if (child) {
+    killMarked.add(child)
+  }
+}
+
+function consumeKillMark(child) {
+  if (child && killMarked.has(child)) {
+    killMarked.delete(child)
+
+    return true
+  }
+
+  return false
+}
+
+// Children spawned detached on POSIX (their own process group; see
+// platform.shouldDetach). Group signals are sent ONLY to marked
+// children: signaling an unmarked pid's group could hit the app's
+// own process group.
+const detachedChildren = new WeakSet()
+
+function markDetachedProcess(child) {
+  if (child) {
+    detachedChildren.add(child)
+  }
+}
+
 // Terminates a child and its descendants. On Windows, child.kill()
 // stops only the console shell and orphans grandchildren (npm scripts,
-// dev servers), so the whole tree is force-killed via taskkill. The
-// platform/spawn overrides exist so both branches stay testable.
+// dev servers), so the whole tree is force-killed via taskkill. On
+// POSIX, detached children die by process-group signal so grandchildren
+// cannot outlive a cancel/timeout either. The platform/spawn/kill
+// overrides exist so every branch stays testable.
 function killProcessTree(child, overrides = {}) {
   if (!child) {
     return false
@@ -28,6 +64,18 @@ function killProcessTree(child, overrides = {}) {
       if (result && result.status === 0) {
         return true
       }
+    } catch {
+      // Fall through to plain kill below.
+    }
+  }
+
+  if (platform !== 'win32' && child.pid && detachedChildren.has(child)) {
+    try {
+      const signaler = overrides.killSignal || ((pgid, signal) => process.kill(pgid, signal))
+
+      signaler(-child.pid, 'SIGTERM')
+
+      return true
     } catch {
       // Fall through to plain kill below.
     }
@@ -67,13 +115,17 @@ function listProcesses() {
 function killAllProcesses() {
   let killed = 0
 
-  for (const [, meta] of active) {
+  // Only successful kills leave the registry: a failed kill keeps
+  // its entry so the process stays visible (and a later cancel can
+  // retry it) until its close handler unregisters it.
+  for (const [id, meta] of active) {
+    markKilled(meta.child)
+
     if (killProcessTree(meta.child)) {
       killed += 1
+      active.delete(id)
     }
   }
-
-  active.clear()
 
   return { killed }
 }
@@ -84,4 +136,7 @@ module.exports = {
   listProcesses,
   killAllProcesses,
   killProcessTree,
+  markKilled,
+  consumeKillMark,
+  markDetachedProcess,
 }

@@ -19,6 +19,31 @@ describe('settings.service', () => {
     const baseDir = await makeBaseDir()
 
     assert.deepEqual(await readSettings(baseDir), DEFAULTS)
+    assert.equal(DEFAULTS.confirmAllCommands, false)
+  })
+
+  it('persists the confirm-all-commands preference', async () => {
+    const baseDir = await makeBaseDir()
+
+    const updated = await updateSettings({ confirmAllCommands: true }, baseDir)
+
+    assert.equal(updated.confirmAllCommands, true)
+    assert.deepEqual(await readSettings(baseDir), updated)
+
+    await assert.rejects(
+      () => updateSettings({ confirmAllCommands: 'yes' }, baseDir),
+      /confirmAllCommands/
+    )
+
+    await fs.writeFile(
+      path.join(baseDir, 'kryomcode-settings.json'),
+      JSON.stringify({ confirmAllCommands: 'yes' })
+    )
+
+    assert.equal(
+      (await readSettings(baseDir)).confirmAllCommands,
+      DEFAULTS.confirmAllCommands
+    )
   })
 
   it('persists validated updates', async () => {

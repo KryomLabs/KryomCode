@@ -1,0 +1,19 @@
+{
+  "templateVersion": 1,
+  "id": "react-vite",
+  "name": "React + TypeScript + Vite",
+  "description": "Minimal React 19 + TypeScript + Vite web application.",
+  "version": "1.0.0",
+  "category": "frontend",
+  "language": "TypeScript",
+  "framework": "React",
+  "runtime": "Node.js 20+",
+  "variables": [
+    { "name": "project_name", "description": "Package and project name", "default": "my-app", "required": true, "pattern": "[a-z0-9-]+" },
+    { "name": "description", "description": "Package description", "default": "A React + Vite project." }
+  ],
+  "setup": {
+    "instructions": "Install dependencies, then start the dev server. Commands are for your terminal — KryomCode never runs them automatically.",
+    "commands": ["npm install", "npm run dev"]
+  }
+}

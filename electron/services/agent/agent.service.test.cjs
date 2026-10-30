@@ -136,6 +136,159 @@ describe('agent.service', () => {
     }
   })
 
+  it('validates planner risks, outcomes, and suggested steps', async () => {
+    const restore = useTestKey()
+
+    try {
+      await openWorkspace()
+
+      const provider = new MockProvider({
+        answer: JSON.stringify({
+          edits: [],
+          commands: [],
+          notes: 'ok',
+          expectedOutcome: 'Tests pass.',
+          risks: [
+            {
+              severity: 'high',
+              explanation: 'Could break login.',
+              mitigation: 'Run auth tests.',
+            },
+          ],
+          steps: ['Write code', 'Run tests'],
+        }),
+      })
+
+      const plan = await planTask({ task: 'Do it.' }, { provider })
+
+      assert.equal(plan.expectedOutcome, 'Tests pass.')
+      assert.deepEqual(plan.risks, [
+        {
+          severity: 'high',
+          explanation: 'Could break login.',
+          mitigation: 'Run auth tests.',
+        },
+      ])
+      assert.deepEqual(plan.suggestedSteps, ['Write code', 'Run tests'])
+
+      const bare = new MockProvider({
+        answer: JSON.stringify({ edits: [], commands: [], notes: '' }),
+      })
+
+      const minimal = await planTask({ task: 'Do it.' }, { provider: bare })
+
+      assert.equal(minimal.expectedOutcome, '')
+      assert.deepEqual(minimal.risks, [])
+      assert.deepEqual(minimal.suggestedSteps, [])
+
+      const badRisk = new MockProvider({
+        answer: JSON.stringify({
+          edits: [],
+          risks: [{ severity: 'low', explanation: 'x' }],
+        }),
+      })
+
+      await assert.rejects(
+        () => planTask({ task: 'Do it.' }, { provider: badRisk }),
+        /Invalid plan risk/
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  it('attaches chat context only on explicit opt-in', async () => {
+    const restore = useTestKey()
+
+    try {
+      const root = await openWorkspace()
+      const { saveChat } = require('../ai/chat-store.cjs')
+
+      await saveChat(
+        [
+          { role: 'user', content: 'Remember the blue widget.' },
+          { role: 'assistant', content: 'Noted.' },
+        ],
+        { root }
+      )
+
+      const withChat = new MockProvider({
+        answer: JSON.stringify({ edits: [], commands: [], notes: '' }),
+      })
+
+      const plan = await planTask(
+        { task: 'Do it.', includeChat: true },
+        { provider: withChat }
+      )
+
+      const sent = withChat.calls[0].messages.map((entry) => entry.content).join('\n')
+
+      assert.ok(sent.includes('blue widget'))
+      assert.equal(plan.contextSnapshot.chat.messageCount, 2)
+      assert.equal(plan.contextSnapshot.files.length, 0)
+      assert.equal(plan.contextSnapshot.research, null)
+      assert.ok(plan.contextSnapshot.workspace.projectName)
+
+      const withoutChat = new MockProvider({
+        answer: JSON.stringify({ edits: [], commands: [], notes: '' }),
+      })
+
+      const plain = await planTask({ task: 'Do it.' }, { provider: withoutChat })
+      const plainSent = withoutChat.calls[0].messages
+        .map((entry) => entry.content)
+        .join('\n')
+
+      assert.ok(!plainSent.includes('blue widget'))
+      assert.equal(plain.contextSnapshot.chat, null)
+
+      await assert.rejects(
+        () =>
+          planTask(
+            { task: 'Do it.', includeChat: 'yes' },
+            { provider: new MockProvider({}) }
+          ),
+        /Invalid includeChat flag/
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  it('records file and research provenance in snapshots', async () => {
+    const restore = useTestKey()
+
+    try {
+      const root = await openWorkspace()
+      const { createSession } = require('../research/session-store.cjs')
+
+      await fs.writeFile(path.join(root, 'app.ts'), 'const x = 1\n')
+
+      const session = await createSession('Snapshot provenance.')
+
+      const provider = new MockProvider({
+        answer: JSON.stringify({ edits: [], commands: [], notes: '' }),
+      })
+
+      const plan = await planTask(
+        {
+          task: 'Do it.',
+          contextPaths: [path.join(root, 'app.ts')],
+          researchSessionId: session.id,
+        },
+        { provider }
+      )
+
+      assert.equal(plan.contextSnapshot.files.length, 1)
+      assert.equal(plan.contextSnapshot.files[0].relativePath, 'app.ts')
+      assert.match(plan.contextSnapshot.files[0].digest, /^[0-9a-f]{64}$/)
+      assert.equal(plan.contextSnapshot.research.sessionId, session.id)
+      assert.equal(plan.contextSnapshot.research.briefVersion, 0)
+      assert.equal(plan.contextSnapshot.chat, null)
+    } finally {
+      restore()
+    }
+  })
+
   it('applies approved edits and rolls back on failure', async () => {
     const restore = useTestKey()
 
@@ -161,6 +314,9 @@ describe('agent.service', () => {
       assert.equal(ok.applied.length, 2)
       assert.equal(await fs.readFile(existing, 'utf8'), 'updated')
 
+      // A mid-apply failure (oversized content the pre-apply
+      // freshness gate does not screen) still rolls back the edit
+      // that already landed.
       const failed = await applyEdits({
         edits: [
           {
@@ -169,13 +325,20 @@ describe('agent.service', () => {
             content: 'broken-plan',
             originalDigest: digestOf('updated'),
           },
-          { path: path.join(root, 'missing.txt'), action: 'delete' },
+          {
+            path: path.join(root, 'made.txt'),
+            action: 'modify',
+            content: `too big: ${'x'.repeat(1024 * 1024 + 1)}`,
+            originalDigest: digestOf('new'),
+            originalLength: 3,
+          },
         ],
       })
 
       assert.equal(failed.completed, false)
       assert.equal(failed.rolledBack, true)
       assert.ok(failed.failed)
+      assert.match(failed.failed.message, /exceeds 1 MB/)
       assert.equal(await fs.readFile(existing, 'utf8'), 'updated')
     } finally {
       restore()
@@ -427,9 +590,17 @@ describe('agent.service', () => {
 
       const stale = await applyEdits({ edits: plan.edits })
 
+      // The pre-apply gate blocks with zero writes, so there is
+      // nothing to roll back and no checkpoint to record.
       assert.equal(stale.completed, false)
-      assert.equal(stale.rolledBack, true)
-      assert.match(stale.failed.message, /changed since the plan/)
+      assert.equal(stale.rolledBack, false)
+      assert.equal(stale.checkpoint, null)
+      assert.deepEqual(stale.applied, [])
+      assert.match(stale.failed.message, /Pre-apply check blocked 1 edit/)
+      assert.equal(stale.stale.length, 1)
+      assert.equal(stale.stale[0].path, 'app.ts')
+      assert.equal(stale.stale[0].status, 'stale')
+      assert.match(stale.stale[0].reason, /Changed since the plan/)
       assert.equal(await fs.readFile(target, 'utf8'), 'version three\n')
 
       // A fresh plan against current content applies cleanly.
@@ -447,8 +618,162 @@ describe('agent.service', () => {
       })
 
       assert.equal(undigested.completed, false)
-      assert.match(undigested.failed.message, /originalDigest/)
+      assert.equal(undigested.stale.length, 1)
+      assert.equal(undigested.stale[0].status, 'unverified')
       assert.equal(await fs.readFile(target, 'utf8'), 'version four\n')
+    } finally {
+      restore()
+    }
+  })
+
+  it('blocks mixed stale batches with zero writes and no checkpoint', async () => {
+    const restore = useTestKey()
+
+    try {
+      const root = await openWorkspace()
+      const current = path.join(root, 'current.ts')
+      const changed = path.join(root, 'changed.ts')
+      const removed = path.join(root, 'removed.ts')
+      const bystander = path.join(root, 'bystander.ts')
+
+      await fs.writeFile(current, 'steady\n')
+      await fs.writeFile(changed, 'planned\n')
+      await fs.writeFile(removed, 'doomed\n')
+      await fs.writeFile(bystander, 'hands off\n')
+
+      const edits = [
+        {
+          path: current,
+          action: 'modify',
+          content: 'steady v2\n',
+          originalDigest: digestOf('steady\n'),
+          originalLength: 7,
+        },
+        {
+          path: changed,
+          action: 'modify',
+          content: 'planned v2\n',
+          originalDigest: digestOf('planned\n'),
+          originalLength: 8,
+        },
+        {
+          path: removed,
+          action: 'delete',
+          originalDigest: digestOf('doomed\n'),
+          originalLength: 7,
+        },
+      ]
+
+      // Two files move after planning: one edited, one deleted.
+      await fs.writeFile(changed, 'user rewrite\n')
+      await fs.unlink(removed)
+
+      const blocked = await applyEdits({ edits })
+
+      assert.equal(blocked.completed, false)
+      assert.equal(blocked.rolledBack, false)
+      assert.equal(blocked.checkpoint, null)
+      assert.deepEqual(blocked.applied, [])
+      assert.equal(blocked.stale.length, 2)
+      assert.deepEqual(
+        blocked.stale.map((entry) => [entry.path, entry.status]),
+        [
+          ['changed.ts', 'stale'],
+          ['removed.ts', 'missing'],
+        ]
+      )
+
+      // Zero writes: even the current edit is held back, and the
+      // unrelated bystander file is untouched.
+      assert.equal(await fs.readFile(current, 'utf8'), 'steady\n')
+      assert.equal(await fs.readFile(changed, 'utf8'), 'user rewrite\n')
+      assert.equal(await fs.readFile(bystander, 'utf8'), 'hands off\n')
+      await assert.rejects(() => fs.stat(removed))
+
+      // Re-planning against current content clears the block.
+      const retry = await applyEdits({
+        edits: [
+          {
+            path: current,
+            action: 'modify',
+            content: 'steady v2\n',
+            originalDigest: digestOf('steady\n'),
+            originalLength: 7,
+          },
+        ],
+      })
+
+      assert.equal(retry.completed, true)
+      assert.equal(await fs.readFile(current, 'utf8'), 'steady v2\n')
+      assert.equal(await fs.readFile(changed, 'utf8'), 'user rewrite\n')
+    } finally {
+      restore()
+    }
+  })
+
+  it('blocks same-file duplicate batches with zero writes and no checkpoint', async () => {
+    const restore = useTestKey()
+
+    try {
+      const root = await openWorkspace()
+      const target = path.join(root, 'dupe.ts')
+      const other = path.join(root, 'other.ts')
+
+      await fs.writeFile(target, 'original\n')
+      await fs.writeFile(other, 'other\n')
+
+      const blocked = await applyEdits({
+        edits: [
+          {
+            path: target,
+            action: 'modify',
+            content: 'first\n',
+            originalDigest: digestOf('original\n'),
+            originalLength: 9,
+          },
+          {
+            path: target,
+            action: 'modify',
+            content: 'second\n',
+            originalDigest: digestOf('original\n'),
+            originalLength: 9,
+          },
+          {
+            path: other,
+            action: 'modify',
+            content: 'other v2\n',
+            originalDigest: digestOf('other\n'),
+            originalLength: 6,
+          },
+        ],
+      })
+
+      assert.equal(blocked.completed, false)
+      assert.equal(blocked.rolledBack, false)
+      assert.equal(blocked.checkpoint, null)
+      assert.deepEqual(blocked.applied, [])
+      assert.match(blocked.failed.message, /Conflicting edits/)
+      assert.deepEqual(blocked.conflicts, [{ path: 'dupe.ts', indexes: [0, 1] }])
+
+      // Zero writes: even the unrelated current edit is held back.
+      assert.equal(await fs.readFile(target, 'utf8'), 'original\n')
+      assert.equal(await fs.readFile(other, 'utf8'), 'other\n')
+
+      // Approving only one of the pair clears the block.
+      const retry = await applyEdits({
+        edits: [
+          {
+            path: target,
+            action: 'modify',
+            content: 'second\n',
+            originalDigest: digestOf('original\n'),
+            originalLength: 9,
+          },
+        ],
+      })
+
+      assert.equal(retry.completed, true)
+      assert.equal(await fs.readFile(target, 'utf8'), 'second\n')
     } finally {
       restore()
     }
@@ -532,5 +857,79 @@ describe('agent.service', () => {
     } finally {
       restore()
     }
+  })
+
+  it('aborts an apply batch before any edit on a pre-cancelled signal', async () => {
+    const root = await openWorkspace()
+    const target = path.join(root, 'made.txt')
+    const controller = new AbortController()
+    controller.abort()
+
+    const result = await applyEdits(
+      { edits: [{ path: target, action: 'create', content: 'x' }] },
+      { signal: controller.signal }
+    )
+
+    assert.equal(result.completed, false)
+    assert.equal(result.cancelled, true)
+    assert.deepEqual(result.applied, [])
+    assert.equal(result.rolledBack, false)
+    assert.equal(result.checkpoint, null)
+    await assert.rejects(fs.stat(target), /ENOENT/)
+    assert.deepEqual(cancelPlan(), { cancelled: false })
+  })
+
+  it('stops an apply between edits and checkpoints partial work', async () => {
+    const root = await openWorkspace()
+    const edits = Array.from({ length: 20 }, (_, index) => ({
+      path: path.join(root, `f${index}.txt`),
+      action: 'create',
+      content: `file ${index}`,
+    }))
+
+    const run = applyEdits({ edits, task: 'Partial probe' })
+    setImmediate(() => cancelPlan())
+    const result = await run
+
+    assert.equal(result.completed, false)
+    assert.equal(result.cancelled, true)
+    assert.equal(result.rolledBack, false)
+    assert.ok(result.applied.length >= 0 && result.applied.length <= 20)
+
+    // Checkpoint consistency holds at any split point.
+    if (result.applied.length === 0) {
+      assert.equal(result.checkpoint, null)
+    } else {
+      assert.ok(result.checkpoint && result.checkpoint.id)
+      assert.equal(result.checkpoint.files, result.applied.length)
+    }
+
+    // Disk matches the reported partial batch exactly (compared by
+    // file name so workspace path aliases cannot fool the check).
+    const appliedNames = new Set(
+      result.applied.map((item) => path.basename(item.path))
+    )
+
+    for (const item of result.applied) {
+      const content = await fs.readFile(
+        path.join(root, path.basename(item.path)),
+        'utf8'
+      )
+
+      assert.match(content, /^file \d+$/)
+    }
+
+    for (let index = 0; index < edits.length; index += 1) {
+      const exists = await fs
+        .stat(path.join(root, `f${index}.txt`))
+        .then(
+          () => true,
+          () => false
+        )
+
+      assert.equal(exists, appliedNames.has(`f${index}.txt`))
+    }
+
+    assert.deepEqual(cancelPlan(), { cancelled: false })
   })
 })

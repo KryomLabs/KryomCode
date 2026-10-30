@@ -1,0 +1,16 @@
+{
+  "workflowVersion": 1,
+  "id": "test-verification",
+  "name": "Test and Verification",
+  "description": "Builds a quality report and gathers testing guidance for the changed code.",
+  "version": "1.0.0",
+  "inputs": [
+    { "name": "scope", "description": "Comma-separated scope paths (empty means git changes)", "default": "" }
+  ],
+  "steps": [
+    { "id": "quality", "kind": "quality.build", "title": "Build quality report", "params": { "paths": "{{inputs.scope}}" } },
+    { "id": "testing", "kind": "specialist.run", "title": "Advise on tests", "specialist": "testing", "task": "Review test coverage for the current changes and recommend missing tests." },
+    { "id": "report", "kind": "report", "title": "Report verification" }
+  ],
+  "owner": "builtin"
+}

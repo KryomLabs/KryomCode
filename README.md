@@ -33,9 +33,12 @@ traced back to the research and checks behind it.
 - Backend services, IPC channels, and the security boundary are
   implemented (`electron/`).
 - The React frontend panels and bridge wiring are implemented (`src/`).
-- The backend is covered by an automated `node:test` suite (23 test
-  files run by `npm test`), a syntax gate (`npm run check:syntax`),
-  and a Windows CI workflow that also runs the production build.
+- The backend is covered by an automated `node:test` suite (70 test
+  files run by `npm test`), a renderer DOM suite (`npm run test:renderer`),
+  a syntax gate (`npm run check:syntax`), a renderer-state gate
+  (`npm run check:workbench`),
+  and a 3-OS CI matrix (Windows/macOS/Linux) that also runs the
+  production build and the unpacked-app pack checks.
 - Windows packaging configuration (electron-builder, NSIS) exists.
 - Manual end-to-end checks (live app launch, real-key AI requests,
   packaged-app launch and install) are tracked in
@@ -98,8 +101,9 @@ not exist in the repo.
 
 ### Monaco code editor and file saving
 
-- Multi-file tabs with dirty tracking, keyboard navigation, and
-  focus restore on close.
+- Multi-file tabs with dirty tracking, keyboard navigation,
+  focus restore on close, and session restore (tabs plus unsaved
+  edits reopen after reload or relaunch).
 - Saves use mtime-based conflict detection: if a file changed on
   disk, a dialog offers reload-from-disk or overwrite.
 - Save As to a new location, optional Auto Save, and a window close
@@ -266,6 +270,19 @@ kryomcode/
 - A Meta API key, for the AI chat, agent, and LLM research-synthesis
   features only. Everything else works without one.
 
+## Supported platforms
+
+| Use | Platform |
+|---|---|
+| Development (`npm run dev`, `npm test`) | Windows 10/11 x64 with Node.js 22 |
+| Packaged app and NSIS installer | Windows 10/11 x64 |
+| CI | `windows-latest` with Node.js 22 (see `.github/workflows/ci.yml`) |
+
+macOS (dmg) and Linux (AppImage, deb) packaging is configured
+and the code handles all three platforms, but no macOS/Linux
+runtime testing has happened yet — see the honest matrix in
+[docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md).
+
 ## Installation
 
 ```powershell
@@ -335,16 +352,20 @@ All commands run from the repository root.
 | Command | What it does |
 |---|---|
 | `npm run dev` | Starts Vite on `http://127.0.0.1:5173`, then launches Electron against it. |
-| `npm test` | Runs the backend test suite (23 test files, `node:test`). |
+| `npm test` | Runs the backend test suite (31 test files, `node:test`). |
 | `npm run check:syntax` | Byte-checks every `electron/**/*.cjs` file with `node --check`. |
+| `npm run check:test-manifest` | Fails when a `*.test.cjs` file is missing from the `test` script. |
+| `npm run check:release` | Verifies the unpacked `npm run pack` output (layout, asar, exclusions). |
 | `npm run build` | Type-checks (`tsc -b`) and builds the renderer to `dist/`. |
 | `npm run preview` | Serves the production `dist/` build locally with Vite. |
 | `npm run pack` | Builds the renderer and produces an unpacked Windows app in `release/`. |
 | `npm run dist` | Builds the renderer and produces a Windows NSIS installer in `release/`. |
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `npm ci`,
-`npm test`, `npm run check:syntax`, and `npm run build` on Windows
-for pushes and pull requests to `main`. CI uses no secrets.
+`npm test`, `npm run check:syntax`, `npm run check:test-manifest`,
+a production-dependency audit, and `npm run build` on Windows for
+pushes and pull requests to `main`, plus a `pack` job that builds
+and verifies the unpacked app. CI uses no secrets.
 
 ## Basic usage
 
@@ -436,9 +457,9 @@ Current limits of the implementation:
 - Terminal and diagnostics output arrive on completion; there is no
   mid-run streaming view, and chat answers are single-shot (no
   streaming).
-- Agent planning can be cancelled, but an apply batch cannot be
-  cancelled mid-apply (apply is local and completes in
-  milliseconds; failures roll back).
+- Agent planning and apply batches can both be cancelled (Stop
+  buttons); a cancelled apply keeps completed edits and writes a
+  checkpoint, while failures roll back.
 - Diagnostics parsers cover TypeScript, generic `file:line:col`,
   and Node stack formats only.
 - Git push and pull use your ambient Git credentials; KryomCode
@@ -491,9 +512,16 @@ Planned ideas (not implemented, not promised) are listed in
    manual checks you ran.
 
 Report bugs and request features through the repository's Issues
-tab. Include the KryomCode version (Help > About), the Windows
+tab. Include the KryomCode version (Help > About), the OS
 version, and the exact steps to reproduce; never paste API keys,
 `.env` contents, or private `.kryom` data into an issue.
+Vulnerabilities go through private Security Advisories only —
+see [SECURITY.md](SECURITY.md).
+
+The full process (gates, docs, security review, commit style)
+lives in [CONTRIBUTING.md](CONTRIBUTING.md); behavior
+expectations in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md);
+data handling in [PRIVACY.md](PRIVACY.md).
 
 See [docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) for
 workflows and [docs/TESTING.md](docs/TESTING.md) for test
@@ -506,6 +534,23 @@ Detailed references live in `docs/`:
 - [DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) — workflows and tips.
 - [SECURITY.md](docs/SECURITY.md) — boundaries and secret handling.
 - [API_INTEGRATION.md](docs/API_INTEGRATION.md) — Meta provider details.
+- [PROVIDER_GUIDE.md](docs/PROVIDER_GUIDE.md) — provider platform and routing.
+- [EXTENSION_GUIDE.md](docs/EXTENSION_GUIDE.md) — extension manifest, runtime, walkthrough.
+- [SKILLS_WORKFLOWS.md](docs/SKILLS_WORKFLOWS.md) — skills catalog and workflow engine.
+- [INTEGRATIONS.md](docs/INTEGRATIONS.md) — adapter contract and GitHub adapter.
+- [TEMPLATES.md](docs/TEMPLATES.md) — template authoring and generation.
+- [PLATFORM_API.md](docs/PLATFORM_API.md) — versioned public API reference.
+- [INSTALLATION.md](docs/INSTALLATION.md) — prerequisites and first run.
+- [DEVELOPMENT_SETUP.md](docs/DEVELOPMENT_SETUP.md) — daily commands and conventions.
+- [BUILDING.md](docs/BUILDING.md) — production builds and packaging.
+- [RELEASING.md](docs/RELEASING.md) — versioning, channels, release checklist.
+- [PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md) — honest per-OS matrix.
+- [THREAT_MODEL.md](docs/THREAT_MODEL.md) — threats, controls, residual risks.
+- [SECURITY_ARCHITECTURE.md](docs/SECURITY_ARCHITECTURE.md) — how the controls are built.
+- [PRIVACY.md](docs/PRIVACY.md) — privacy implementation reference.
+- [DEPENDENCIES.md](docs/DEPENDENCIES.md) — supply-chain policy and inventory.
+- [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common failures and fixes.
+- [FAQ.md](docs/FAQ.md) — short answers.
 - [TESTING.md](docs/TESTING.md) — test inventory and manual checks.
 - [SMOKE_TEST.md](docs/SMOKE_TEST.md) — Windows GUI release-gate checklist.
 - [FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) — done vs planned.

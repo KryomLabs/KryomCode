@@ -415,6 +415,9 @@ async function tavilySearch(query, { limit = 5, signal, fetchImpl = fetch, apiKe
         include_answer: false,
       }),
       signal: controller.signal,
+      // The api_key body must stay on api.tavily.com: fail instead
+      // of following a redirect elsewhere.
+      redirect: 'error',
     })
 
     if (!response.ok) {

@@ -16,12 +16,15 @@ through `ai:chat` and `agent:plan`.
 
 ## Configuration resolution
 
-`getAIConfig()` throws a user-safe error when `MODEL_API_KEY` is
-missing or when `META_MODEL` names an unsupported model. Otherwise it
-returns `{ apiKey, model }`. Per-request overrides (`payload.model`
-for chat, settings `defaultModel` for the UI) are validated by
-`resolveModel` against the same allowlist, so neither environment
-values nor renderer input can select an arbitrary model.
+`getAIConfig()` throws a user-safe error when no key is configured or
+when `META_MODEL` names an unsupported model. Otherwise it returns
+`{ apiKey, model }`. The key resolves through the secret allowlist:
+the `MODEL_API_KEY` environment value first, then the OS-encrypted
+credential vault holding the user's own key from Settings →
+Providers. Per-request overrides (`payload.model` for chat, settings
+`defaultModel` for the UI) are validated by `resolveModel` against
+the same allowlist, so neither environment values nor renderer input
+can select an arbitrary model.
 
 ## Chat flow (`ai:chat`)
 

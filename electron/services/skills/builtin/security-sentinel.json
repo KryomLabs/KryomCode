@@ -1,0 +1,17 @@
+{
+  "skillVersion": 1,
+  "id": "security-sentinel",
+  "name": "Security Sentinel",
+  "description": "Reviews code for vulnerabilities, unsafe execution, and secret exposure with confirmed-vs-potential confidence.",
+  "version": "1.0.0",
+  "instructions": "Review the provided code for security issues: unsafe execution, input validation, permission boundaries, secrets, and IPC trust. Distinguish confirmed findings (cited evidence, high confidence) from potential risks. Give a concrete recommendation per finding.",
+  "tasks": ["security review"],
+  "inputSchema": { "type": "object", "properties": {}, "required": [] },
+  "outputSchema": { "type": "object", "properties": {}, "required": [] },
+  "tools": ["specialist.security"],
+  "entryTool": "specialist.security",
+  "permissions": ["ai.provider", "ai.tools"],
+  "models": { "provider": null, "model": null },
+  "dependencies": [],
+  "owner": "builtin"
+}

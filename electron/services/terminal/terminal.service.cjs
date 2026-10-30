@@ -9,8 +9,12 @@ const {
   listProcesses,
   killAllProcesses,
   killProcessTree,
+  markKilled,
+  consumeKillMark,
+  markDetachedProcess,
 } = require('./process-manager.cjs')
 const { classifyCommand } = require('./command-validator.cjs')
+const { shouldDetach } = require('../../utils/platform.cjs')
 const { isSecretKey } = require('../settings/secrets.service.cjs')
 
 const MAX_COMMAND_LENGTH = 2000
@@ -53,7 +57,7 @@ async function runCommand(command, options = {}) {
   validateCommand(command)
 
   const warnings = classifyCommand(command)
-  const { signal } = options ?? {}
+  const { signal, timeoutMs = TIMEOUT_MS } = options ?? {}
 
   return new Promise((resolve) => {
     let output = ''
@@ -61,12 +65,22 @@ async function runCommand(command, options = {}) {
     let outputLimited = false
     let settled = false
 
+    // POSIX-only detach: the child leads its own process group so
+    // cancel/timeout terminates grandchildren too. Windows behavior
+    // is unchanged (taskkill still owns tree termination).
+    const detached = shouldDetach()
+
     const child = spawn(command, {
       cwd: workspaceRoot,
       shell: true,
       windowsHide: true,
+      ...(detached ? { detached: true } : {}),
       env: buildChildEnv(),
     })
+
+    if (detached) {
+      markDetachedProcess(child)
+    }
 
     const processId = registerProcess(child, { command })
 
@@ -89,14 +103,18 @@ async function runCommand(command, options = {}) {
     const timer = setTimeout(() => {
       timedOut = true
       killProcessTree(child)
-    }, TIMEOUT_MS)
+    }, timeoutMs)
 
     const onAbort = () => {
+      markKilled(child)
       killProcessTree(child)
     }
 
     if (signal) {
       if (signal.aborted) {
+        // Pre-aborted: the run never really started, but it ends by
+        // cancellation, so it must report cancelled like onAbort.
+        markKilled(child)
         killProcessTree(child)
       } else {
         signal.addEventListener('abort', onAbort, { once: true })
@@ -121,10 +139,13 @@ async function runCommand(command, options = {}) {
       settled = true
       cleanup()
 
+      const cancelled = consumeKillMark(child) && !timedOut
+
       resolve({
         exitCode: 1,
         output: `${output}\n${error.message}`,
         timedOut,
+        cancelled,
         outputLimited,
         warnings,
       })
@@ -136,15 +157,21 @@ async function runCommand(command, options = {}) {
       settled = true
       cleanup()
 
+      // A timeout that already fired wins over a later cancel mark:
+      // the timer only fires before the close event.
+      const cancelled = consumeKillMark(child) && !timedOut
+
       resolve({
         exitCode: code ?? 1,
         output:
           output +
           (timedOut
-            ? '\nCommand timed out after 120 seconds.'
+            ? `\nCommand timed out after ${Math.round(timeoutMs / 1000)} seconds.`
             : '') +
+          (cancelled ? '\nCancelled by user.' : '') +
           (outputLimited ? '\nOutput truncated.' : ''),
         timedOut,
+        cancelled,
         outputLimited,
         warnings,
       })

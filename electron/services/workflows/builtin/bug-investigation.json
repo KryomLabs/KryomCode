@@ -1,0 +1,16 @@
+{
+  "workflowVersion": 1,
+  "id": "bug-investigation",
+  "name": "Bug Investigation",
+  "description": "Analyzes a failure with project evidence and proposes bounded repairs.",
+  "version": "1.0.0",
+  "inputs": [
+    { "name": "failure", "description": "Failure output, error text, or symptom", "default": "" }
+  ],
+  "steps": [
+    { "id": "architecture", "kind": "intelligence.architecture", "title": "Load project context" },
+    { "id": "debug", "kind": "specialist.run", "title": "Investigate failure", "specialist": "debugging", "task": "Analyze this failure with project evidence and propose bounded repairs: {{inputs.failure}}" },
+    { "id": "report", "kind": "report", "title": "Report diagnosis" }
+  ],
+  "owner": "builtin"
+}

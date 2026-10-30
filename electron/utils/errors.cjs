@@ -37,9 +37,22 @@ function isCodedError(error) {
   )
 }
 
+// External text (tool stderr/stdout, HTTP error bodies) is untrusted:
+// coerce to a trimmed string capped at max characters so it cannot
+// flood the UI. Non-strings become '' so callers fall back to static
+// wording. See docs/ERROR_TAXONOMY.md.
+function boundDetail(text, max) {
+  if (typeof text !== 'string') {
+    return ''
+  }
+
+  return text.trim().slice(0, max)
+}
+
 module.exports = {
   CODES,
   createError,
   validationError,
   isCodedError,
+  boundDetail,
 }

@@ -1,11 +1,18 @@
+const STARTUP_STARTED_AT = Date.now()
+
 const { app, BrowserWindow, Menu, dialog, shell, protocol } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const dotenv = require('dotenv')
 
-dotenv.config({
-  path: path.join(__dirname, '..', '.env'),
-})
+// Development-only .env load. Packaged builds never read the
+// developer's checkout: production secrets come from the user's own
+// environment, and the asar never ships a .env (release gate).
+if (!app.isPackaged) {
+  dotenv.config({
+    path: path.join(__dirname, '..', '.env'),
+  })
+}
 
 const registerHandlers = require('./ipc/register-handlers.cjs')
 const {
@@ -35,9 +42,18 @@ protocol.registerSchemesAsPrivileged([
 const { createLogger } = require('./utils/logger.cjs')
 const { buildMenuTemplate } = require('./menu.cjs')
 const {
+  summarizeCrash,
+  pruneCrashes,
+  shouldOfferReload,
+  describeMainFailure,
+} = require('./services/crash/crash-recovery.cjs')
+const {
   readUIState,
   clearRecent,
 } = require('./services/ui/ui-state.service.cjs')
+const {
+  recordSupportError,
+} = require('./services/diagnostics/support-bundle.cjs')
 
 const log = createLogger('main')
 
@@ -81,6 +97,113 @@ function isTrustedAppUrl(url) {
 
 const isTrustedSender = createTrustedSender(() => [...windows], {
   isTrustedAppUrl,
+})
+
+// Crash recovery (Level 2B.1). Renderer crashes offer a window
+// reload (disk-backed state survives; open tabs and unsaved changes
+// do not); repeated crashes escalate to an app relaunch.
+// Main-process failures log a redacted one-line detail and show a
+// native dialog: uncaught exceptions must exit (state is unknown),
+// while unhandled rejections warn and continue.
+function dialogParent(window) {
+  const candidates = [window, getMainWindow()]
+
+  for (const candidate of candidates) {
+    if (candidate && !candidate.isDestroyed()) {
+      return candidate
+    }
+  }
+
+  return undefined
+}
+
+function showSyncMessage(options, window) {
+  const parent = dialogParent(window)
+
+  return parent
+    ? dialog.showMessageBoxSync(parent, options)
+    : dialog.showMessageBoxSync(options)
+}
+
+function showAsyncMessage(options, window) {
+  const parent = dialogParent(window)
+
+  return parent
+    ? dialog.showMessageBox(parent, options)
+    : dialog.showMessageBox(options)
+}
+
+let rejectionDialogOpen = false
+
+process.on('uncaughtException', (error) => {
+  const detail = describeMainFailure(error)
+  log.error(`Uncaught main-process exception: ${detail}`)
+
+  try {
+    recordSupportError(`uncaughtException: ${detail}`)
+  } catch {
+    // Recording must never interfere with crash handling.
+  }
+
+  let relaunch = false
+
+  try {
+    relaunch =
+      showSyncMessage({
+        type: 'error',
+        title: 'KryomCode encountered a problem',
+        message: 'The application hit an unexpected error and must close.',
+        detail: `${detail}\n\nSaved files, chat history, and research sessions are preserved.`,
+        buttons: ['Relaunch', 'Quit'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      }) === 0
+  } catch {
+    relaunch = false
+  }
+
+  try {
+    if (relaunch) {
+      app.relaunch()
+    }
+  } catch {
+    // Fall through to exit.
+  }
+
+  app.exit(1)
+})
+
+process.on('unhandledRejection', (reason) => {
+  const detail = describeMainFailure(reason)
+  log.error(`Unhandled promise rejection: ${detail}`)
+
+  try {
+    recordSupportError(`unhandledRejection: ${detail}`)
+  } catch {
+    // Recording must never interfere with crash handling.
+  }
+
+  if (rejectionDialogOpen) {
+    return
+  }
+
+  rejectionDialogOpen = true
+
+  showAsyncMessage({
+    type: 'warning',
+    title: 'Background task failed',
+    message: 'A background task failed unexpectedly.',
+    detail: `${detail}\n\nThe application is still running.`,
+    buttons: ['OK'],
+    noLink: true,
+  })
+    .catch((error) => {
+      log.error(`Rejection dialog failed: ${error.message}`)
+    })
+    .finally(() => {
+      rejectionDialogOpen = false
+    })
 })
 
 function getWindows() {
@@ -210,7 +333,47 @@ async function loadApp(window) {
     }
   }
 
-  await window.loadURL(APP_ENTRY_URL)
+  try {
+    await window.loadURL(APP_ENTRY_URL)
+  } catch (error) {
+    // Startup failure is fatal and user-visible: a blank window with
+    // only a log line strands users. Offer relaunch, then quit.
+    log.error(`Failed to load the application: ${error.message}`)
+
+    let relaunch = false
+
+    try {
+      relaunch =
+        showSyncMessage(
+          {
+            type: 'error',
+            title: 'KryomCode could not start',
+            message: 'The application window failed to load.',
+            detail:
+              'Saved files and project data are untouched. ' +
+              'Relaunch, or reinstall if this keeps happening.',
+            buttons: ['Relaunch', 'Quit'],
+            defaultId: 0,
+            cancelId: 1,
+            noLink: true,
+          },
+          window
+        ) === 0
+    } catch {
+      relaunch = false
+    }
+
+    try {
+      if (relaunch) {
+        app.relaunch()
+      }
+    } catch {
+      // Fall through to exit.
+    }
+
+    app.exit(1)
+    throw error
+  }
 }
 
 async function resolveDirtyClose(window) {
@@ -224,7 +387,7 @@ async function resolveDirtyClose(window) {
         ? '1 file has unsaved changes.'
         : `${dirtyCount} files have unsaved changes.`,
     detail:
-      'Save them before closing? Chat and agent sessions are not saved.',
+      'Save them before closing? Chat history is kept per project, but in-flight agent and research work is not saved.',
     buttons: ['Save', 'Discard changes', 'Cancel'],
     defaultId: 0,
     cancelId: 2,
@@ -236,6 +399,16 @@ async function resolveDirtyClose(window) {
   }
 
   if (choice.response === 1) {
+    // Explicit discard: tell the renderer to drop its recovery
+    // snapshots so relaunch does not resurrect discarded buffers.
+    // The grace delay lets the IPC land before the window is gone.
+    if (!window.isDestroyed()) {
+      window.webContents.send('kryom:command', {
+        id: 'session.discardSnapshots',
+      })
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    }
+
     return true
   }
 
@@ -263,12 +436,37 @@ async function resolveDirtyClose(window) {
   })
 }
 
+function windowIconPath() {
+  // Official branding (Level 3C, Phase 10): platform icon generated
+  // from assets/branding/kryomcode-logo.png. Resolves in both dev
+  // (repo root) and packaged (asar) layouts; missing files fall back
+  // to the platform default instead of crashing startup.
+  const file =
+    process.platform === 'win32'
+      ? 'kryomcode-icon.ico'
+      : process.platform === 'darwin'
+        ? 'kryomcode-icon.icns'
+        : 'kryomcode-logo-512.png'
+  const candidate = path.join(__dirname, '..', 'assets', 'branding', file)
+
+  try {
+    if (fs.existsSync(candidate)) {
+      return candidate
+    }
+  } catch {
+    // Fall through to the default icon.
+  }
+
+  return undefined
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 900,
     minHeight: 600,
+    icon: windowIconPath(),
     title: 'KryomCode',
     backgroundColor: '#101114',
     webPreferences: {
@@ -324,6 +522,30 @@ function createWindow() {
 
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
+  // KryomCode needs no Chromium permissions (camera, microphone,
+  // geolocation, notifications, ...): deny them all rather than
+  // inheriting Electron's defaults.
+  window.webContents.session.setPermissionRequestHandler(
+    (_contents, _permission, callback) => {
+      callback(false)
+    }
+  )
+
+  // Production developer-tools policy: closed unless the operator
+  // explicitly opts in with KRYOM_DEVTOOLS=1. There is no menu or
+  // shortcut that opens them; this closes the programmatic path too.
+  window.webContents.on('devtools-opened', () => {
+    if (app.isPackaged && process.env.KRYOM_DEVTOOLS !== '1') {
+      log.warn('Developer tools blocked in production (set KRYOM_DEVTOOLS=1 to allow).')
+
+      try {
+        window.webContents.closeDevTools()
+      } catch (error) {
+        log.error(`Failed to close developer tools: ${error.message}`)
+      }
+    }
+  })
+
   // Parsed-URL navigation policy: the exact dev origin in
   // development, only the packaged entry document in production. No
   // file: URLs, no userinfo or sibling-host tricks, no subframes.
@@ -342,14 +564,69 @@ function createWindow() {
     }
   )
 
-  loadApp(window).catch((error) => {
-    log.error(`Failed to load the application: ${error.message}`)
+  let crashStamps = []
+
+  window.webContents.on('render-process-gone', (_event, details) => {
+    const summary = summarizeCrash(details)
+    log.error(`Renderer process gone: ${summary}`)
+
+    const now = Date.now()
+    crashStamps = pruneCrashes([...crashStamps, now], now)
+    const repeated = !shouldOfferReload(crashStamps, now)
+
+    const options = repeated
+      ? {
+          type: 'error',
+          title: 'KryomCode keeps crashing',
+          message: 'The window has crashed repeatedly and was not reloaded.',
+          detail: `Last crash: ${summary}\n\nSaved files, chat history, and research sessions are preserved.`,
+          buttons: ['Relaunch app', 'Quit'],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+        }
+      : {
+          type: 'error',
+          title: 'Window crashed',
+          message: 'The window stopped unexpectedly.',
+          detail: `Cause: ${summary}\n\nReload restores your saved files, chat history, and research sessions. Open tabs and unsaved changes are lost.`,
+          buttons: ['Reload window', 'Quit'],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+        }
+
+    showAsyncMessage(options, window)
+      .then((choice) => {
+        if (!choice || choice.response !== 0 || window.isDestroyed()) {
+          return
+        }
+
+        if (repeated) {
+          app.relaunch()
+          app.exit(1)
+          return
+        }
+
+        window.webContents.reload()
+      })
+      .catch((error) => {
+        log.error(`Crash recovery failed: ${error.message}`)
+      })
   })
+
+  loadApp(window)
+    .then(() => {
+      log.info(`Startup loaded the application in ${Date.now() - STARTUP_STARTED_AT} ms.`)
+    })
+    .catch((error) => {
+      log.error(`Failed to load the application: ${error.message}`)
+    })
 
   return window
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   protocol.handle(
     APP_SCHEME,
     createAppProtocolHandler({
@@ -357,6 +634,20 @@ app.whenReady().then(() => {
       contentSecurityPolicy: buildProductionCsp(),
     })
   )
+
+  // User-owned credentials: decrypt the vault into main-process
+  // memory before any window (and any AI call) exists. Best effort:
+  // a failure here must never block the offline IDE from starting.
+  try {
+    const { loadVault } = require('./services/settings/credential-vault.cjs')
+    const status = await loadVault()
+
+    log.info(
+      `Credential vault ready (available: ${status.available}).`
+    )
+  } catch (error) {
+    log.error(`Credential vault unavailable: ${error.message}`)
+  }
 
   registerHandlers({
     getMainWindow,
@@ -439,6 +730,16 @@ app.on('before-quit', () => {
     require('./services/git/git.service.cjs').killAllActiveProcesses()
   } catch (error) {
     log.error(`Shutdown cleanup failed: ${error.message}`)
+  }
+
+  // Extension workers next: best-effort async teardown so no worker
+  // child outlives the app. Never blocks or breaks quitting.
+  try {
+    require('./services/extensions/lifecycle.cjs').shutdownAll().catch((error) => {
+      log.error(`Extension shutdown failed: ${error.message}`)
+    })
+  } catch (error) {
+    log.error(`Extension shutdown failed: ${error.message}`)
   }
 })
 

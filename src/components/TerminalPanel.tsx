@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { kryom, errorMessage } from '../api/kryom'
+import { kryom, errorMessage, isCancelError } from '../api/kryom'
+import { confirmCommandRun } from '../utils/command-confirm'
+import { useDialogs } from './dialogs'
 
 export interface TerminalPanelProps {
   workspaceRoot: string | null
@@ -33,8 +35,10 @@ let nextEntryId = 1
 
 export function useTerminalController(
   workspaceRoot: string | null,
-  onStatus: (status: string) => void
+  onStatus: (status: string) => void,
+  requireConfirmAll = false
 ): TerminalController {
+  const dialogs = useDialogs()
   const [command, setCommand] = useState('npm run build')
   const [entries, setEntries] = useState<TerminalRunEntry[]>([])
   const [running, setRunning] = useState(false)
@@ -104,12 +108,31 @@ export function useTerminalController(
       return
     }
 
+    // Claim the run slot before the async confirm so two rapid
+    // activations cannot both pass the guard above.
+    runningRef.current = true
+
+    const approved = await confirmCommandRun(trimmed, {
+      requireConfirmAll,
+      classify: (text) =>
+        kryom()
+          .classifyCommand(text)
+          .then((result) => result.warnings),
+      confirm: (title, message, confirmLabel) =>
+        dialogs.confirm({ title, message, confirmLabel, danger: true }),
+    })
+
+    if (!approved) {
+      runningRef.current = false
+      onStatus('Command run cancelled')
+      return
+    }
+
     if (historyRef.current[historyRef.current.length - 1] !== trimmed) {
       historyRef.current = [...historyRef.current, trimmed].slice(-50)
     }
 
     historyPos.current = -1
-    runningRef.current = true
 
     const id = nextEntryId
     nextEntryId += 1
@@ -130,14 +153,24 @@ export function useTerminalController(
       )
       setRunningList([])
       onStatus(
-        result.exitCode === 0 && !result.timedOut
-          ? 'Command completed'
-          : 'Command failed'
+        result.cancelled
+          ? 'Command cancelled'
+          : result.exitCode === 0 && !result.timedOut
+            ? 'Command completed'
+            : 'Command failed'
       )
     } catch (e) {
       setError(errorMessage(e))
       setEntries((previous) => previous.filter((entry) => entry.id !== id))
-      onStatus('Terminal error')
+      // Main-process approval declines (native dialog Cancel) land
+      // here as cancellations, not failures. React batches the clear
+      // with the set above, so no error flashes.
+      if (isCancelError(e)) {
+        setError('')
+        onStatus('Command run cancelled')
+      } else {
+        onStatus('Terminal error')
+      }
     } finally {
       runningRef.current = false
       setRunning(false)
@@ -198,7 +231,13 @@ export function TerminalPanelView(props: TerminalPanelViewProps) {
 
   useEffect(() => {
     if (autoScroll) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      // Reduced-motion users get an instant jump instead of a smooth
+      // scroll; the content lands in the same place.
+      const reduceMotion =
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+      bottomRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'end' })
     }
   }, [controller.entries, autoScroll])
 
@@ -324,11 +363,13 @@ export function TerminalPanelView(props: TerminalPanelViewProps) {
 
                 <div className="muted">
                   Exit code: {entry.result.exitCode}
-                  {entry.result.timedOut ? ' · timed out after 120 s' : ''}
+                  {entry.result.timedOut ? ' · timed out' : ''}
                   {entry.result.outputLimited ? ' · output truncated' : ''}
-                  {entry.result.exitCode === 0 && !entry.result.timedOut
-                    ? ' · success'
-                    : ' · failed'}
+                  {entry.result.cancelled
+                    ? ' · cancelled'
+                    : entry.result.exitCode === 0 && !entry.result.timedOut
+                      ? ' · success'
+                      : ' · failed'}
                 </div>
               </>
             )}

@@ -1,0 +1,577 @@
+/* Level 3C design layer: tokens plus styles for the unified IDE
+   shell, tab system, and Meta AI workspace. Dark-theme-first,
+   compact, and restrained — the editor keeps maximum screen space.
+   Existing app.css classes are reused, never redefined. */
+
+:root {
+  --kryom-bg: #101014;
+  --kryom-surface: #17171c;
+  --kryom-raised: #1d1d26;
+  --kryom-border: #292930;
+  --kryom-border-soft: #232329;
+  --kryom-text: #e4e4e7;
+  --kryom-text-dim: #c9cad5;
+  --kryom-muted: #858592;
+  --kryom-accent: #8b7cff;
+  --kryom-meta: #0082fb;
+  --kryom-meta-deep: #0064e0;
+  --kryom-ok: #4ade80;
+  --kryom-warn: #fbbf24;
+  --kryom-error: #ff7a93;
+  --kryom-radius: 6px;
+  --kryom-gap: 8px;
+  --kryom-font: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --kryom-mono: 'Cascadia Code', Consolas, monospace;
+}
+
+/* ---- Title bar ---- */
+
+.title-logo {
+  border-radius: 4px;
+  flex: none;
+}
+
+.title-layout {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.title-layout-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--kryom-text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 7px;
+}
+
+.title-layout-btn:hover {
+  background: var(--kryom-raised);
+  border-color: var(--kryom-border);
+}
+
+.title-layout-btn[aria-pressed='true'] {
+  color: var(--kryom-text);
+}
+
+/* ---- Editor groups ---- */
+
+.editor-groups {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.editor-group {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.editor-group + .editor-group {
+  border-left: 1px solid var(--kryom-border);
+}
+
+.editor-group .editor-panel {
+  flex: 1;
+}
+
+/* ---- Breadcrumbs ---- */
+
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.crumb-sep {
+  color: var(--kryom-muted);
+  margin: 0 3px;
+}
+
+.crumb.current {
+  color: var(--kryom-text);
+}
+
+.group-bar {
+  min-height: 30px;
+}
+
+/* ---- Unified tab strip ---- */
+
+.editor-tab-meta-ai .tab-name-text {
+  color: var(--kryom-text-dim);
+}
+
+.editor-tab-meta-ai.active .tab-name-text {
+  color: var(--kryom-text);
+}
+
+.tab-ext-glyph {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.tabs-meta-ai {
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  padding: 4px;
+  margin-left: 4px;
+}
+
+.tabs-meta-ai:hover {
+  background: var(--kryom-raised);
+  border-color: var(--kryom-border);
+}
+
+.tab-context-menu {
+  background: var(--kryom-raised);
+  border: 1px solid var(--kryom-border);
+  border-radius: var(--kryom-radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+  padding: 4px;
+  position: fixed;
+  z-index: 200;
+}
+
+.tab-context-menu button {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--kryom-text);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.tab-context-menu button:hover {
+  background: var(--kryom-border);
+}
+
+.tab-context-menu .menu-danger {
+  color: var(--kryom-error);
+}
+
+/* ---- Explorer additions ---- */
+
+.explorer-empty-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.git-badge {
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  margin-left: auto;
+  padding: 2px 4px;
+  flex: none;
+}
+
+.git-staged {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--kryom-ok);
+}
+
+.git-unstaged {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--kryom-warn);
+}
+
+.git-untracked {
+  background: rgba(139, 124, 255, 0.15);
+  color: var(--kryom-accent);
+}
+
+.chip-error {
+  background: rgba(255, 122, 147, 0.15);
+  color: var(--kryom-error);
+}
+
+/* ---- Meta AI workspace ---- */
+
+.meta-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--kryom-bg);
+}
+
+.meta-head {
+  align-items: center;
+  border-bottom: 1px solid var(--kryom-border-soft);
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  position: sticky;
+  top: 0;
+  background: var(--kryom-bg);
+  z-index: 5;
+}
+
+.meta-identity {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.meta-title {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta-working {
+  font-size: 12px;
+  flex: none;
+}
+
+.meta-banner {
+  align-items: center;
+  background: rgba(0, 130, 251, 0.1);
+  border-bottom: 1px solid var(--kryom-border-soft);
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.meta-messages {
+  border-top: none;
+  flex: none;
+  max-height: none;
+  overflow: visible;
+}
+
+.meta-embedded {
+  border-top: 1px solid var(--kryom-border-soft);
+}
+
+.meta-embedded > summary {
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 8px 12px;
+  list-style: none;
+}
+
+.meta-embedded > summary::before {
+  content: '▸';
+  color: var(--kryom-muted);
+  font-size: 11px;
+}
+
+.meta-embedded[open] > summary::before {
+  content: '▾';
+}
+
+.meta-composer {
+  border-top: 1px solid var(--kryom-border);
+  position: sticky;
+  bottom: 0;
+  background: var(--kryom-surface);
+}
+
+.meta-composer-footer {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+/* Slim composer: Meta mark beside a compact input, subtle
+   placeholder, no counters or helper text. */
+.meta-composer-input {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.meta-composer-mark {
+  display: inline-flex;
+  flex: none;
+  padding-top: 8px;
+}
+
+.meta-composer-input textarea {
+  min-height: 44px;
+  font-size: 13px;
+}
+
+.meta-composer-input textarea::placeholder {
+  color: var(--kryom-muted);
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+/* ---- Session Tasks panel: collapsible, resizable bottom panel ----
+   Read-only execution state, separate from the conversation. */
+.agent-tasks-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-height: 0;
+  border-top: 1px solid var(--kryom-border);
+  background: var(--kryom-surface);
+}
+
+.agent-tasks-grip {
+  flex: none;
+  height: 8px;
+  cursor: ns-resize;
+  position: relative;
+}
+
+.agent-tasks-grip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 48px;
+  height: 2px;
+  margin-left: -24px;
+  border-radius: 1px;
+  background: var(--kryom-border);
+}
+
+.agent-tasks-grip:hover::after {
+  background: var(--kryom-muted);
+}
+
+.agent-tasks {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 10px;
+  font-size: 12px;
+}
+
+.agent-tasks .tasks-columns {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.agent-tasks .tasks-row .spacer {
+  flex: 1;
+}
+
+/* ---- History picker: compact attach/remove rows ---- */
+.agent-history {
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-history > input {
+  width: 100%;
+}
+
+.history-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.history-row {
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.history-label {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-kind {
+  display: inline-block;
+  min-width: 58px;
+  color: var(--kryom-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ---- Provider settings ---- */
+
+.provider-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.provider-status-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.key-input-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.key-input-row input {
+  flex: 1;
+}
+
+.provider-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.check-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.check-row {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.check-ok {
+  color: var(--kryom-ok);
+  font-weight: 700;
+}
+
+.check-fail {
+  color: var(--kryom-error);
+  font-weight: 700;
+}
+
+.provider-notice {
+  color: var(--kryom-ok);
+  font-size: 12px;
+  margin: 0;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+/* ---- Tasks panel ---- */
+
+.tasks-panel {
+  font-size: 12px;
+  padding: 8px 12px;
+  overflow-y: auto;
+}
+
+.tasks-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tasks-columns {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.tasks-list {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+}
+
+.tasks-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--kryom-border-soft);
+}
+
+/* ---- Template picker ---- */
+
+.template-dialog {
+  max-width: 560px;
+  width: min(560px, 92vw);
+}
+
+.template-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.template-row {
+  align-items: center;
+  border-bottom: 1px solid var(--kryom-border-soft);
+  display: flex;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.template-row > span {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.template-desc {
+  font-size: 11px;
+}
+
+.template-preview {
+  font-size: 13px;
+}
+
+/* ---- Narrow windows: the editor wins ---- */
+
+@media (max-width: 1100px) {
+  .tasks-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-tasks .tasks-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meta-workspace *,
+  .tab-context-menu {
+    transition: none !important;
+  }
+}

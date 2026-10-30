@@ -9,6 +9,7 @@ const {
 const IGNORED = new Set([
   'node_modules',
   '.git',
+  '.kryom',
   'dist',
   '.next',
   'coverage',

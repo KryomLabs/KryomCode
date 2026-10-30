@@ -10,6 +10,9 @@ const registerSettingsIPC = require('./settings.ipc.cjs')
 const registerResearchIPC = require('./research.ipc.cjs')
 const registerAppIPC = require('./app.ipc.cjs')
 const registerDocumentsIPC = require('./documents.ipc.cjs')
+const registerMemoryIPC = require('./memory.ipc.cjs')
+const registerPlatformIPC = require('./platform.ipc.cjs')
+const registerUpdateIPC = require('./update.ipc.cjs')
 
 module.exports = function registerHandlers({
   getMainWindow,
@@ -46,6 +49,7 @@ module.exports = function registerHandlers({
 
   registerDiagnosticsIPC({
     isTrustedSender,
+    getMainWindow,
   })
 
   registerIntelligenceIPC({
@@ -74,5 +78,19 @@ module.exports = function registerHandlers({
   registerDocumentsIPC({
     isTrustedSender,
     getMainWindow,
+  })
+
+  registerMemoryIPC({
+    isTrustedSender,
+    getMainWindow,
+  })
+
+  registerPlatformIPC({
+    isTrustedSender,
+    getMainWindow,
+  })
+
+  registerUpdateIPC({
+    isTrustedSender,
   })
 }

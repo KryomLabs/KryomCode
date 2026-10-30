@@ -6,6 +6,7 @@ const fs = require('node:fs/promises')
 
 const {
   setWorkspaceRoot,
+  getWorkspaceRoot,
   closeWorkspace,
 } = require('../workspace/workspace.service.cjs')
 const {
@@ -193,5 +194,105 @@ describe('chat-store', () => {
       saved: false,
       reason: 'No project is open.',
     })
+  })
+
+  it('lands an in-flight save in the project it was written for', async () => {
+    const dirA = await openWorkspace()
+    const rootA = getWorkspaceRoot()
+
+    try {
+      await saveChat([{ role: 'user', content: 'from A' }], { root: rootA })
+
+      // Switch projects, then deliver the late save bound to A: it
+      // must not land in B.
+      const dirB = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-chat-'))
+      await setWorkspaceRoot(dirB)
+
+      const late = await saveChat(
+        [
+          { role: 'user', content: 'from A' },
+          { role: 'assistant', content: 'late answer' },
+        ],
+        { root: rootA }
+      )
+
+      assert.deepEqual(late, { saved: true, messages: 2 })
+
+      const storedA = JSON.parse(
+        await fs.readFile(path.join(dirA, '.kryom', 'chat.json'), 'utf8')
+      )
+
+      assert.equal(storedA.messages.length, 2)
+      await assert.rejects(
+        fs.readFile(path.join(dirB, '.kryom', 'chat.json'), 'utf8'),
+        /ENOENT/
+      )
+    } finally {
+      await closeWorkspace()
+    }
+  })
+
+  it('rejects saves bound to a twice-replaced project', async () => {
+    const dirA = await openWorkspace()
+    const rootA = getWorkspaceRoot()
+
+    try {
+      const dirB = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-chat-'))
+      await setWorkspaceRoot(dirB)
+      const dirC = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-chat-'))
+      await setWorkspaceRoot(dirC)
+
+      const stale = await saveChat([{ role: 'user', content: 'stale' }], {
+        root: rootA,
+      })
+
+      assert.deepEqual(stale, {
+        saved: false,
+        reason: 'Project changed during save.',
+      })
+      await assert.rejects(
+        fs.readFile(path.join(dirA, '.kryom', 'chat.json'), 'utf8'),
+        /ENOENT/
+      )
+    } finally {
+      await closeWorkspace()
+    }
+  })
+
+  it('keeps the closed root for close-then-open switches', async () => {
+    const dirA = await openWorkspace()
+    const rootA = getWorkspaceRoot()
+
+    await saveChat([{ role: 'user', content: 'before close' }], {
+      root: rootA,
+    })
+    await closeWorkspace()
+
+    const dirB = await fs.mkdtemp(path.join(os.tmpdir(), 'kryom-chat-'))
+    await setWorkspaceRoot(dirB)
+
+    try {
+      const late = await saveChat(
+        [
+          { role: 'user', content: 'before close' },
+          { role: 'assistant', content: 'late answer' },
+        ],
+        { root: rootA }
+      )
+
+      assert.deepEqual(late, { saved: true, messages: 2 })
+
+      const storedA = JSON.parse(
+        await fs.readFile(path.join(dirA, '.kryom', 'chat.json'), 'utf8')
+      )
+
+      assert.equal(storedA.messages.length, 2)
+      await assert.rejects(
+        fs.readFile(path.join(dirB, '.kryom', 'chat.json'), 'utf8'),
+        /ENOENT/
+      )
+    } finally {
+      await closeWorkspace()
+    }
   })
 })

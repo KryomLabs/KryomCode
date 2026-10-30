@@ -11,7 +11,11 @@ const {
 } = require('../terminal/terminal.service.cjs')
 const {
   killProcessTree,
+  markKilled,
+  consumeKillMark,
+  markDetachedProcess,
 } = require('../terminal/process-manager.cjs')
+const { shouldDetach } = require('../../utils/platform.cjs')
 const {
   assertNonEmptyString,
   assertStringArray,
@@ -21,23 +25,37 @@ const {
   resolveWorkspacePath,
 } = require('../../security/validate-path.cjs')
 const { createLogger } = require('../../utils/logger.cjs')
+const { boundDetail } = require('../../utils/errors.cjs')
 
 const log = createLogger('git')
 const TIMEOUT_MS = 30000
 const MAX_OUTPUT_LENGTH = 200_000
+const MAX_ERROR_DETAIL = 2000
 const REF_PATTERN = /^[A-Za-z0-9._/-]+$/
 
 const activeChildren = new Set()
 
-function killAllActiveProcesses() {
+function cancelGitProcesses() {
+  let killed = 0
+
   for (const child of activeChildren) {
-    killProcessTree(child)
+    markKilled(child)
+
+    if (killProcessTree(child)) {
+      killed += 1
+    }
   }
 
   activeChildren.clear()
+
+  return { killed }
 }
 
-function spawnGit(cwd, args, { timeoutMs = TIMEOUT_MS, extraEnv = {} } = {}) {
+function killAllActiveProcesses() {
+  cancelGitProcesses()
+}
+
+function spawnGit(cwd, args, { timeoutMs = TIMEOUT_MS, extraEnv = {}, signal } = {}) {
   return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
@@ -53,12 +71,19 @@ function spawnGit(cwd, args, { timeoutMs = TIMEOUT_MS, extraEnv = {} } = {}) {
     delete childEnv.GIT_INDEX_FILE
 
     try {
+      const detached = shouldDetach()
+
       child = spawn('git', args, {
         cwd,
         shell: false,
         windowsHide: true,
+        ...(detached ? { detached: true } : {}),
         env: childEnv,
       })
+
+      if (detached) {
+        markDetachedProcess(child)
+      }
     } catch (error) {
       reject(error)
       return
@@ -73,9 +98,27 @@ function spawnGit(cwd, args, { timeoutMs = TIMEOUT_MS, extraEnv = {} } = {}) {
       killProcessTree(child)
     }, timeoutMs)
 
+    const onAbort = () => {
+      markKilled(child)
+      killProcessTree(child)
+    }
+
+    if (signal) {
+      if (signal.aborted) {
+        markKilled(child)
+        killProcessTree(child)
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true })
+      }
+    }
+
     const cleanup = () => {
       clearTimeout(timer)
       activeChildren.delete(child)
+
+      if (signal) {
+        signal.removeEventListener('abort', onAbort)
+      }
     }
 
     child.stdout.on('data', (chunk) => {
@@ -128,6 +171,22 @@ function spawnGit(cwd, args, { timeoutMs = TIMEOUT_MS, extraEnv = {} } = {}) {
       settled = true
       cleanup()
 
+      const cancelled = consumeKillMark(child) && !timedOut
+
+      if (cancelled) {
+        reject(new Error('Git operation was cancelled.'))
+        return
+      }
+
+      if (timedOut) {
+        reject(
+          new Error(
+            `Git operation timed out after ${Math.round(timeoutMs / 1000)} seconds.`
+          )
+        )
+        return
+      }
+
       resolve({
         exitCode: code ?? 1,
         stdout,
@@ -171,7 +230,7 @@ async function getStatus() {
 
   if (statusResult.exitCode !== 0) {
     throw new Error(
-      statusResult.stderr.trim() || 'Git status failed.'
+      boundDetail(statusResult.stderr, MAX_ERROR_DETAIL) || 'Git status failed.'
     )
   }
 
@@ -246,7 +305,7 @@ async function stageFiles(paths) {
   const result = await runGit(['add', '--', ...relative])
 
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || 'Git stage failed.')
+    throw new Error(boundDetail(result.stderr, MAX_ERROR_DETAIL) || 'Git stage failed.')
   }
 
   log.info(`Staged ${relative.length} path(s).`)
@@ -277,7 +336,7 @@ async function unstageFiles(paths) {
   const result = await runGit(['reset', 'HEAD', '--', ...relative])
 
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || 'Git unstage failed.')
+    throw new Error(boundDetail(result.stderr, MAX_ERROR_DETAIL) || 'Git unstage failed.')
   }
 
   log.info(`Unstaged ${relative.length} path(s).`)
@@ -308,7 +367,7 @@ async function discardChanges(paths) {
   const result = await runGit(['checkout', '--', ...relative])
 
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || 'Git discard failed.')
+    throw new Error(boundDetail(result.stderr, MAX_ERROR_DETAIL) || 'Git discard failed.')
   }
 
   log.info(`Discarded changes in ${relative.length} path(s).`)
@@ -329,7 +388,7 @@ async function commitChanges(message) {
       throw new Error('Nothing to commit. Stage changes first.')
     }
 
-    throw new Error(detail || 'Git commit failed.')
+    throw new Error(boundDetail(detail, MAX_ERROR_DETAIL) || 'Git commit failed.')
   }
 
   log.info('Created a commit.')
@@ -342,6 +401,12 @@ function assertRef(value, name) {
 
   if (!REF_PATTERN.test(value) || value.includes('..')) {
     throw new Error(`Invalid ${name}: unsafe characters rejected.`)
+  }
+
+  // Refs travel positionally into `git push/pull`, where a leading
+  // dash would parse as an option (e.g. remote `--tags`).
+  if (value.startsWith('-')) {
+    throw new Error(`Invalid ${name}: must not start with '-'.`)
   }
 
   return value
@@ -373,12 +438,33 @@ async function pushChanges(remote, branch) {
 
   if (result.exitCode !== 0) {
     const detail = (result.stdout + '\n' + result.stderr).trim()
-    throw new Error(detail.slice(0, 2000) || 'Git push failed.')
+    throw new Error(boundDetail(detail, MAX_ERROR_DETAIL) || 'Git push failed.')
   }
 
   log.info(`Pushed ${safeBranch} to ${safeRemote}.`)
 
   return { success: true, remote: safeRemote, branch: safeBranch }
+}
+
+// Strips userinfo (a classic embedded-token shape) from remote URLs
+// before they reach the renderer. SCP-style SSH (git@host:...) has
+// no secretable password and passes through untouched.
+function redactRemoteUrl(url) {
+  const schemeEnd = url.indexOf('://')
+
+  if (schemeEnd === -1) {
+    return url
+  }
+
+  const afterScheme = url.slice(schemeEnd + 3)
+  const at = afterScheme.indexOf('@')
+  const slash = afterScheme.indexOf('/')
+
+  if (at === -1 || (slash !== -1 && slash < at)) {
+    return url
+  }
+
+  return `${url.slice(0, schemeEnd + 3)}[REDACTED]@${afterScheme.slice(at + 1)}`
 }
 
 async function getRemotes() {
@@ -387,7 +473,7 @@ async function getRemotes() {
   const result = await runGit(['remote', '-v'])
 
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || 'Git remote lookup failed.')
+    throw new Error(boundDetail(result.stderr, MAX_ERROR_DETAIL) || 'Git remote lookup failed.')
   }
 
   const byName = new Map()
@@ -403,9 +489,9 @@ async function getRemotes() {
     const entry = byName.get(name) || { name, fetchUrl: null, pushUrl: null }
 
     if (kind === 'fetch') {
-      entry.fetchUrl = url
+      entry.fetchUrl = redactRemoteUrl(url)
     } else {
-      entry.pushUrl = url
+      entry.pushUrl = redactRemoteUrl(url)
     }
 
     byName.set(name, entry)
@@ -516,7 +602,7 @@ async function verifyRemote(rawUrl) {
   if (result.exitCode !== 0) {
     const detail = (result.stdout + '\n' + result.stderr).trim()
 
-    throw new Error(detail.slice(0, 2000) || 'Remote verification failed.')
+    throw new Error(boundDetail(detail, MAX_ERROR_DETAIL) || 'Remote verification failed.')
   }
 
   const refs = []
@@ -565,19 +651,36 @@ async function cloneRepository(rawUrl, parentDir, rawName) {
     }
   }
 
-  const result = await spawnGit(
-    parentDir,
-    ['clone', '--', target.url, destination],
-    {
-      timeoutMs: 300000,
-      extraEnv: { GIT_TERMINAL_PROMPT: '0' },
+  let result = null
+
+  try {
+    result = await spawnGit(
+      parentDir,
+      ['clone', '--', target.url, destination],
+      {
+        timeoutMs: 300000,
+        extraEnv: { GIT_TERMINAL_PROMPT: '0' },
+      }
+    )
+  } catch (error) {
+    // A cancelled clone leaves a partial directory behind; remove it
+    // so the next attempt does not fail on "already exists".
+    if (/cancelled/i.test(error.message)) {
+      await fs.rm(destination, { recursive: true, force: true }).catch(() => undefined)
     }
-  )
+
+    throw error
+  }
 
   if (result.exitCode !== 0) {
+    // A failed clone leaves a partial directory behind; remove it so
+    // the next attempt does not fail on "already exists". The
+    // destination provably did not exist before the clone ran.
+    await fs.rm(destination, { recursive: true, force: true }).catch(() => undefined)
+
     const detail = (result.stdout + '\n' + result.stderr).trim()
 
-    throw new Error(detail.slice(0, 2000) || 'Git clone failed.')
+    throw new Error(boundDetail(detail, MAX_ERROR_DETAIL) || 'Git clone failed.')
   }
 
   return { success: true, path: destination }
@@ -611,7 +714,7 @@ async function pullChanges(remote, branch) {
   if (result.exitCode !== 0) {
     const detail = (result.stdout + '\n' + result.stderr).trim()
 
-    throw new Error(detail.slice(0, 2000) || 'Git pull failed.')
+    throw new Error(boundDetail(detail, MAX_ERROR_DETAIL) || 'Git pull failed.')
   }
 
   log.info(`Pulled ${safeBranch} from ${safeRemote}.`)
@@ -637,5 +740,6 @@ module.exports = {
   commitChanges,
   pushChanges,
   pullChanges,
+  cancelGitProcesses,
   killAllActiveProcesses,
 }

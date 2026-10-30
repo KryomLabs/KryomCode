@@ -18,7 +18,7 @@ promised. Nothing under Planned should be treated as a commitment.
 - Diagnostics runner with tsc/generic/stack parsers.
 - Project summary and bounded AI context.
 - Validated settings store with a central secret allowlist.
-- 15-file `node:test` backend suite plus a wiring regression test.
+- 26-file `node:test` backend suite, including the wiring regression test.
 
 ## Done — Phase 2: frontend
 
