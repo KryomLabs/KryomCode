@@ -1,0 +1,100 @@
+/* Home hero: centered AI search entry. Token-only so it follows
+   both themes with no overrides. Imported after theme.css. */
+
+.hero {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 56px 24px 32px;
+  text-align: center;
+}
+
+.hero-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--kc-accent-dim);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.hero-brand {
+  margin: 14px 0 0;
+  color: var(--kc-text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.hero-title {
+  margin: 8px 0 0;
+  max-width: 560px;
+  color: var(--kc-text);
+  font-size: 27px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.hero-modes {
+  margin-top: 18px;
+}
+
+.hero-hint {
+  margin: 10px 0 0;
+  color: var(--kc-text-faint);
+  font-size: 12px;
+}
+
+.hero-form {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 600px;
+  margin-top: 16px;
+  padding: 8px 8px 8px 16px;
+  background: var(--kc-panel);
+  border: 1px solid var(--kc-btn-border);
+  border-radius: 12px;
+}
+
+.hero-form:focus-within {
+  border-color: var(--kc-focus);
+}
+
+.hero-form input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 8px 0;
+  color: var(--kc-text);
+  font-size: 14px;
+  outline: none;
+}
+
+.hero-send {
+  flex: none;
+}
+
+.hero-keys {
+  margin: 12px 0 0;
+  color: var(--kc-text-faint-soft);
+  font-size: 11px;
+}
+
+@media (max-width: 700px) {
+  .hero {
+    padding: 32px 16px 24px;
+  }
+
+  .hero-title {
+    font-size: 22px;
+  }
+}

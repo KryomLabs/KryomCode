@@ -1,0 +1,324 @@
+/* KryomCode theme tokens: dark backfill plus the light theme.
+   data-theme is set on <html> by src/utils/theme.ts; dark is the
+   default and light overrides the same tokens, so components never
+   branch on theme in markup. Imported AFTER app.css. */
+
+/* ---- Dark backfill ----
+   app.css references these tokens but the pre-existing .ide token
+   block never defined them, so they resolved to `unset`
+   (transparent inputs, invisible hovers/selections). Values below
+   follow the neighbouring palette ramps and the --kryom-*
+   equivalents in meta-ai.css; they restore the intended dark look.
+   TODO(verify): when shell access allows, diff against the
+   pre-tokenization app.css in git history and adjust if needed. */
+.ide {
+  --kc-input: #101014;
+  --kc-input-border: #3b3b46;
+  --kc-link: #6ea8fe;
+  --kc-strip: #1d1d26;
+  --kc-well: #101014;
+  --kc-text-faint-soft: #6e6e7a;
+  --kc-danger-soft: #f1aeb5;
+  --kc-danger-bg: #3d2226;
+  --kc-danger-border: #6b2c36;
+  --kc-tint: #232139;
+  --kc-tint-border: #3b3860;
+  --kc-accent-soft: #c4b5fd;
+  --kc-accent-btn: #7869e3;
+  --kc-quote: #55555f;
+  --kc-ok-soft: #a9efc5;
+  --kc-ok-border: #2e5c3f;
+  --kc-warn-border: #66592c;
+  --kc-warn-bright: #fbbf24;
+  --kc-risk-high: #ff7a93;
+  --kc-danger-btn: #b2424e;
+  --kc-danger-btn-hover: #c2525f;
+  --kc-error: #ff7a93;
+  --kc-scroll: #42424d;
+  --kc-on-accent: #ffffff;
+}
+
+/* ---- Base page + native controls per theme ---- */
+html[data-theme='light'] {
+  color-scheme: light;
+}
+
+html[data-theme='dark'],
+html:not([data-theme]) {
+  color-scheme: dark;
+}
+
+html[data-theme='light'] body {
+  background: #f4f4f6;
+  color: #1e1e22;
+}
+
+html[data-theme='dark'] body,
+html:not([data-theme]) body {
+  background: #101114;
+  color: #e4e4e7;
+}
+
+/* ---- Light theme: same tokens, light values ----
+   Higher specificity than the .ide backfill above, so every token
+   flips without touching component rules. */
+html[data-theme='light'] .ide {
+  --kc-bg: #ffffff;
+  --kc-panel: #f3f3f5;
+  --kc-panel-alt: #ececee;
+  --kc-panel-deep: #e9e9ed;
+  --kc-border: #d8d8de;
+  --kc-border-soft: #e4e4e9;
+  --kc-text: #1e1e22;
+  --kc-text-dim: #4c4c55;
+  --kc-text-faint: #7c7c87;
+  --kc-text-faint-soft: #a8a8b2;
+  --kc-accent: #6455d6;
+  --kc-accent-dim: #6556c8;
+  --kc-accent-soft: #5b4cc9;
+  --kc-accent-btn: #5f4fc4;
+  --kc-ok: #1a7f4b;
+  --kc-ok-bg: #e2f4e9;
+  --kc-ok-border: #bfe3cb;
+  --kc-ok-soft: #146c3e;
+  --kc-warn: #8f6200;
+  --kc-warn-bg: #faf0d7;
+  --kc-warn-border: #e6d18a;
+  --kc-warn-bright: #a86a00;
+  --kc-risk-high: #d92d20;
+  --kc-danger: #d92d20;
+  --kc-danger-soft: #b42318;
+  --kc-danger-bg: #fde8e8;
+  --kc-danger-border: #f0b6bc;
+  --kc-danger-btn: #d92d20;
+  --kc-danger-btn-hover: #b42318;
+  --kc-error: #d92d20;
+  --kc-btn: #f0f0f3;
+  --kc-btn-hover: #e4e4e9;
+  --kc-btn-border: #d0d0d7;
+  --kc-focus: #6455d6;
+  --kc-input: #ffffff;
+  --kc-input-border: #c9c9d1;
+  --kc-link: #0b5fff;
+  --kc-strip: #e8e8ec;
+  --kc-well: #f1f1f4;
+  --kc-tint: #efedfd;
+  --kc-tint-border: #d3cdf7;
+  --kc-quote: #b9b9c4;
+  --kc-scroll: #c6c6cd;
+  --kc-on-accent: #ffffff;
+}
+
+/* ---- Light theme: Meta layer tokens (meta-ai.css keys off
+   :root, so this html-level rule wins by specificity). ---- */
+html[data-theme='light'] {
+  --kryom-bg: #ffffff;
+  --kryom-surface: #f3f3f5;
+  --kryom-raised: #ececee;
+  --kryom-border: #d8d8de;
+  --kryom-border-soft: #e4e4e9;
+  --kryom-text: #1e1e22;
+  --kryom-text-dim: #4c4c55;
+  --kryom-muted: #7c7c87;
+  --kryom-accent: #6455d6;
+  --kryom-meta: #0b5fff;
+  --kryom-meta-deep: #004fc4;
+  --kryom-ok: #1a7f4b;
+  --kryom-warn: #8f6200;
+  --kryom-error: #d92d20;
+}
+
+/* ---- Light fixes for hardcoded dark-only colors ----
+   app.css still hardcodes a few hex colors that predate the token
+   pass (white text, #c9cad5 secondary text, #101014 code wells).
+   These grouped overrides keep light mode readable until those
+   lines are tokenized (tracked alongside the backfill TODO above).
+   White-on-accent cases (primary/danger buttons, brand marks,
+   switch knob) intentionally have NO override: white stays correct
+   on the violet/red fills in both themes. */
+html[data-theme='light'] .ide .icon-btn:hover:not(:disabled),
+html[data-theme='light'] .ide .file-row.selected,
+html[data-theme='light'] .ide .file-row:hover,
+html[data-theme='light'] .ide .tree-row-wrap.selected .file-row,
+html[data-theme='light'] .ide summary.tree-row.selected,
+html[data-theme='light'] .ide .editor-tab.active,
+html[data-theme='light'] .ide .tab-close:hover,
+html[data-theme='light'] .ide .discovery-head h1,
+html[data-theme='light'] .ide .panel-tab.active,
+html[data-theme='light'] .ide .md-heading,
+html[data-theme='light'] .ide .dialog h2,
+html[data-theme='light'] .ide .git-file:hover,
+html[data-theme='light'] .ide .title-brand,
+html[data-theme='light'] .ide .title-mode-btn.active,
+html[data-theme='light'] .ide .activity-btn.active,
+html[data-theme='light'] .ide .mini-btn:hover:not(:disabled),
+html[data-theme='light'] .ide .connect-name,
+html[data-theme='light'] .ide .profile-name {
+  color: var(--kc-text);
+}
+
+html[data-theme='light'] .ide .error-banner,
+html[data-theme='light'] .ide .ai-error code {
+  color: var(--kc-danger-soft);
+}
+
+html[data-theme='light'] .ide .status-toggle,
+html[data-theme='light'] .ide .terminal-output,
+html[data-theme='light'] .ide .plan-preview,
+html[data-theme='light'] .ide .command-row code,
+html[data-theme='light'] .ide .finding-body,
+html[data-theme='light'] .ide .diagnostic-message {
+  color: var(--kc-text-dim);
+}
+
+html[data-theme='light'] .ide .md-code,
+html[data-theme='light'] .ide .md-codeblock,
+html[data-theme='light'] .ide .brief-body,
+html[data-theme='light'] .ide .plan-preview,
+html[data-theme='light'] .ide .diff-view,
+html[data-theme='light'] .ide .command-row {
+  background: var(--kc-well);
+}
+
+html[data-theme='light'] .ide .status-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* ---- Segmented control (settings appearance toggle, etc.) ----
+   Token-only so it follows both themes with no overrides. */
+.segmented {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  background: var(--kc-panel-deep);
+  border: 1px solid var(--kc-border);
+  border-radius: 7px;
+}
+
+.segment {
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--kc-text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segment:hover:not(.active) {
+  color: var(--kc-text);
+}
+
+.segment.active {
+  background: var(--kc-btn);
+  border-color: var(--kc-btn-border);
+  color: var(--kc-text);
+}
+
+/* ---- Chat session tabs (home conversations) ---- */
+.chat-sessions {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-sessions > .ai-panel {
+  min-height: 0;
+}
+
+.session-tabs {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--kc-panel-alt);
+  border-bottom: 1px solid var(--kc-border);
+  overflow-x: auto;
+}
+
+.session-tab {
+  flex: 0 0 auto;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--kc-text-faint);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.session-tab:hover:not(:disabled) {
+  background: var(--kc-strip);
+  color: var(--kc-text);
+}
+
+.session-tab.active {
+  background: var(--kc-strip);
+  border-bottom: 2px solid var(--kc-accent);
+  border-radius: 4px 4px 0 0;
+  color: var(--kc-text);
+}
+
+.session-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.chat-sessions .inline-error button {
+  margin-left: 8px;
+}
+
+/* ---- Chat attachment chips ---- */
+.attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 8px;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 3px 4px 3px 10px;
+  background: var(--kc-tint);
+  border: 1px solid var(--kc-tint-border);
+  border-radius: 20px;
+  color: var(--kc-text);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.attach-remove {
+  border: 0;
+  background: transparent;
+  color: var(--kc-text-faint);
+  font-size: 13px;
+  line-height: 1;
+  padding: 1px 5px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.attach-remove:hover:not(:disabled) {
+  background: var(--kc-danger-bg);
+  color: var(--kc-danger-soft);
+}
+
+.attach-error {
+  color: var(--kc-danger-soft);
+  font-size: 11px;
+}

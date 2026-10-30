@@ -231,6 +231,7 @@ describe('ipc integration', () => {
       'filesystem:delete',
       'filesystem:save-as',
       'search:files',
+      'context:read-file',
       'terminal:run',
       'terminal:cancel',
       'terminal:status',
@@ -239,6 +240,11 @@ describe('ipc integration', () => {
       'ai:cancel',
       'chat:save',
       'chat:restore',
+      'chat:sessions',
+      'chat:create',
+      'chat:switch',
+      'chat:rename',
+      'chat:delete',
       'git:status',
       'git:cancel',
       'git:diff',
@@ -320,6 +326,7 @@ describe('ipc integration', () => {
       'app:get-version',
       'app:get-ai-status',
       'app:open-external',
+      'dialog:pick-context-files',
       'ui:get',
       'ui:set',
       'ui:context',
@@ -842,6 +849,64 @@ describe('ipc integration', () => {
       () => call('chat:save', { messages: 'nope' }),
       /Invalid chat history/
     )
+  })
+
+  it('manages chat sessions and context excerpts through IPC', async () => {
+    await ensureWorkspace()
+
+    const created = await call('chat:create', { title: 'IPC chat' })
+
+    assert.ok(created.id.startsWith('ch-'))
+    assert.equal(created.title, 'IPC chat')
+
+    await call('chat:save', { messages: [{ role: 'user', content: 'session two' }] })
+
+    const listed = await call('chat:sessions')
+
+    assert.equal(listed.activeId, created.id)
+    assert.ok(listed.sessions.some((entry) => entry.id === 'general'))
+    assert.ok(listed.sessions.some((entry) => entry.id === created.id))
+
+    const renamed = await call('chat:rename', { id: created.id, title: 'Renamed' })
+
+    assert.equal(renamed.title, 'Renamed')
+
+    const back = await call('chat:switch', { id: 'general' })
+
+    assert.equal(back.id, 'general')
+
+    const removed = await call('chat:delete', { id: created.id })
+
+    assert.equal(removed.deleted, true)
+
+    await assert.rejects(() => call('chat:switch', { id: 'Bad id!' }), /Invalid/)
+
+    const excerpt = await call('context:read-file', {
+      path: path.join(sharedRoot, 'hello.txt'),
+    })
+
+    assert.equal(excerpt.name, 'hello.txt')
+    assert.equal(excerpt.truncated, false)
+    assert.match(excerpt.excerpt, /hello ipc/)
+
+    await assert.rejects(
+      () => call('context:read-file', { path: path.join(sharedRoot, 'nope.txt') }),
+      /not found/
+    )
+
+    dialogPlan.open = async () => ({
+      canceled: false,
+      filePaths: [path.join(sharedRoot, 'hello.txt')],
+    })
+
+    try {
+      const picked = await call('dialog:pick-context-files')
+
+      assert.equal(picked.canceled, false)
+      assert.deepEqual(picked.paths, [path.join(sharedRoot, 'hello.txt')])
+    } finally {
+      dialogPlan.open = null
+    }
   })
 
   it('validates AI chat requests before any provider use', async () => {

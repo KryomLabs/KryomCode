@@ -70,6 +70,7 @@ module.exports = function registerHandlers({
 
   registerAppIPC({
     isTrustedSender,
+    getMainWindow,
     onUIStateChanged,
     onUIContext,
     getWindows,

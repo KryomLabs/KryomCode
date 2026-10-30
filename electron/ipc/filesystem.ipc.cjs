@@ -24,6 +24,9 @@ const {
   searchFiles,
 } = require('../services/filesystem/file-search.service.cjs')
 const {
+  readContextFile,
+} = require('../services/context/context-files.service.cjs')
+const {
   assertPlainObject,
   assertNonEmptyString,
   assertOptionalString,
@@ -34,6 +37,18 @@ module.exports = function registerFilesystemIPC({
   isTrustedSender,
   getMainWindow,
 }) {
+  // Bounded excerpt of a user-picked file for AI context (see
+  // context-files.service.cjs for the consent and bounds model).
+  ipcMain.handle('context:read-file', async (event, payload) => {
+    if (!isTrustedSender(event)) {
+      throw new Error('Unauthorized file request.')
+    }
+
+    const options = payload && typeof payload === 'object' ? payload : {}
+
+    return readContextFile(assertNonEmptyString(options.path, 'path', 4000))
+  })
+
   ipcMain.handle('workspace:read-file', async (event, filePath) => {
     if (!isTrustedSender(event)) {
       throw new Error('Unauthorized file request.')

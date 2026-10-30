@@ -26,13 +26,39 @@ export interface AiChatProps {
   // Workbench routing: offered explicitly on user messages that look
   // like coding tasks. Never fires silently — the user chooses.
   onOpenInAgent?: (text: string) => void
+  // Controlled attachments (ChatSessions keeps one set per
+  // conversation). Absent = local state, so standalone use works.
+  attachments?: KryomContextFile[]
+  onAttachmentsChange?: (
+    updater: (previous: KryomContextFile[]) => KryomContextFile[]
+  ) => void
 }
 
 const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
 
-// Appends stashed messages that are not already in the restored
-// history (exact match), keeping the newest last. The backend caps
-// stored history at 50 messages; the merged view matches.
+// Attachment context: user-picked file excerpts ride with each
+// request as a delimited block, so the model can tell them apart
+// from the active file and workspace summary. Each excerpt is
+// bounded by the backend; the count is capped (MAX_ATTACHMENTS).
+//
+// History note: restored chat below merges stashed messages by
+// exact match, newest last, capped at 50.
+const MAX_ATTACHMENTS = 8
+
+function withAttachments(base: string, files: KryomContextFile[]): string {
+  if (files.length === 0) {
+    return base
+  }
+
+  const blocks = files.map(
+    (file) =>
+      `--- ${file.name} (${file.path}, ${file.chars} chars${file.truncated ? ', truncated' : ''}) ---\n${file.excerpt}`
+  )
+  const block = `Attached files (explicit user context):\n${blocks.join('\n')}`
+
+  return base === '' ? block : `${base}\n\n${block}`
+}
+
 function mergeMessages(disk: ChatMessage[], stashed: ChatMessage[]): ChatMessage[] {
   const seen = new Set(disk.map((entry) => JSON.stringify(entry)))
   const merged = [...disk]
@@ -62,6 +88,15 @@ export function AiChat(props: AiChatProps) {
   const [includeResearch, setIncludeResearch] = useState(true)
   const [keyMissing, setKeyMissing] = useState(false)
   const [copiedMessage, setCopiedMessage] = useState<number | null>(null)
+  const [localAttachments, setLocalAttachments] = useState<KryomContextFile[]>(
+    []
+  )
+  const attachments = props.attachments ?? localAttachments
+  const setAttachments: (
+    updater: (previous: KryomContextFile[]) => KryomContextFile[]
+  ) => void = props.onAttachmentsChange ?? setLocalAttachments
+  const [attaching, setAttaching] = useState(false)
+  const [attachError, setAttachError] = useState('')
   const messagesRef = useRef<HTMLDivElement | null>(null)
   // Stick-to-bottom follows new messages only while the reader is
   // already near the bottom; scrolling up pins the view so older
@@ -100,6 +135,59 @@ export function AiChat(props: AiChatProps) {
   useEffect(() => {
     setIncludeFileContext(props.contextEnabled)
   }, [props.contextEnabled])
+
+  async function attachFiles() {
+    if (attaching) {
+      return
+    }
+
+    setAttaching(true)
+    setAttachError('')
+
+    try {
+      const picked = await kryom().pickContextFiles()
+
+      if (picked.canceled || picked.paths.length === 0) {
+        return
+      }
+
+      const fresh: KryomContextFile[] = []
+      const seen = new Set(attachments.map((file) => file.path))
+
+      for (const filePath of picked.paths) {
+        if (seen.has(filePath)) {
+          continue
+        }
+
+        if (attachments.length + fresh.length >= MAX_ATTACHMENTS) {
+          setAttachError(`Attachment limit reached (${MAX_ATTACHMENTS} files).`)
+          break
+        }
+
+        try {
+          const excerpt = await kryom().readContextFile({ path: filePath })
+          seen.add(excerpt.path)
+          fresh.push(excerpt)
+        } catch (e: unknown) {
+          setAttachError(`Could not attach ${filePath}: ${errorMessage(e)}`)
+        }
+      }
+
+      if (fresh.length > 0) {
+        setAttachments((previous) => [...previous, ...fresh])
+      }
+    } catch (e: unknown) {
+      setAttachError(errorMessage(e))
+    } finally {
+      setAttaching(false)
+    }
+  }
+
+  function removeAttachment(filePath: string) {
+    setAttachments((previous) =>
+      previous.filter((file) => file.path !== filePath)
+    )
+  }
 
   async function buildContext(): Promise<string> {
     if (includeFileContext && props.activeFile) {
@@ -265,7 +353,7 @@ export function AiChat(props: AiChatProps) {
     const userMessage: ChatMessage = { role: 'user', content: userPrompt }
 
     try {
-      const context = await buildContext()
+      const context = withAttachments(await buildContext(), attachments)
       const history: KryomAIMessage[] = messages
         .slice(-10)
         .map((message) => ({ role: message.role, content: message.content }))
@@ -539,7 +627,52 @@ export function AiChat(props: AiChatProps) {
           disabled={loading}
         />
 
+        {(attachments.length > 0 || attachError !== '' || attaching) && (
+          <div className="attach-row">
+            {attachments.map((file) => (
+              <span
+                key={file.path}
+                className="attach-chip"
+                title={`${file.path} · ${file.chars} chars${file.truncated ? ' (truncated)' : ''}`}
+              >
+                {file.name}
+                <button
+                  type="button"
+                  className="attach-remove"
+                  onClick={() => removeAttachment(file.path)}
+                  disabled={loading}
+                  aria-label={`Remove ${file.name}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {attaching && <span className="muted">Attaching…</span>}
+            {attachError !== '' && (
+              <span className="attach-error" role="alert">
+                {attachError}{' '}
+                <button
+                  type="button"
+                  className="mini-btn"
+                  onClick={() => setAttachError('')}
+                >
+                  Dismiss
+                </button>
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="composer-footer">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void attachFiles()}
+            disabled={loading || attaching}
+            title="Attach file excerpts to this conversation (read once, sent with each request)"
+          >
+            {attaching ? 'Attaching…' : 'Attach files'}
+          </button>
           <span className="spacer" />
           {loading ? (
             <button type="button" onClick={stopRequest}>

@@ -13,6 +13,11 @@ const {
   saveChat,
   restoreChat,
   sanitizeMessages,
+  listChatSessions,
+  createChatSession,
+  switchChatSession,
+  renameChatSession,
+  deleteChatSession,
 } = require('./chat-store.cjs')
 
 async function openWorkspace() {
@@ -291,6 +296,103 @@ describe('chat-store', () => {
         fs.readFile(path.join(dirB, '.kryom', 'chat.json'), 'utf8'),
         /ENOENT/
       )
+    } finally {
+      await closeWorkspace()
+    }
+  })
+  it('manages named sessions with isolated histories', async () => {
+    await openWorkspace()
+
+    try {
+      const first = await createChatSession('First chat')
+
+      assert.ok(/^ch-[a-z0-9]+-[0-9a-f]{6}$/.test(first.id))
+      assert.equal(first.title, 'First chat')
+
+      await saveChat([{ role: 'user', content: 'in first' }])
+
+      const second = await createChatSession('Second chat')
+      await saveChat([{ role: 'user', content: 'in second' }])
+
+      const listed = await listChatSessions()
+
+      assert.equal(listed.activeId, second.id)
+      assert.equal(listed.sessions.length, 3)
+      assert.equal(listed.sessions[0].id, 'general')
+      assert.deepEqual(
+        listed.sessions.slice(1).map((entry) => entry.id).sort(),
+        [first.id, second.id].sort()
+      )
+
+      const switched = await switchChatSession(first.id)
+
+      assert.equal(switched.title, 'First chat')
+      assert.deepEqual(switched.messages, [{ role: 'user', content: 'in first' }])
+
+      const restored = await restoreChat()
+
+      assert.deepEqual(restored.messages, [{ role: 'user', content: 'in first' }])
+
+      const renamed = await renameChatSession(first.id, '  Renamed   chat  ')
+
+      assert.equal(renamed.title, 'Renamed chat')
+
+      const deleted = await deleteChatSession(second.id)
+
+      assert.deepEqual(deleted, { id: second.id, deleted: true })
+
+      const relisted = await listChatSessions()
+
+      assert.deepEqual(
+        relisted.sessions.map((entry) => entry.id),
+        ['general', first.id]
+      )
+      assert.equal(relisted.activeId, first.id)
+    } finally {
+      await closeWorkspace()
+    }
+  })
+
+  it('protects the general conversation and validates ids', async () => {
+    await openWorkspace()
+
+    try {
+      await assert.rejects(() => switchChatSession('nope-missing'), /not found/)
+      await assert.rejects(() => switchChatSession('Bad id!'), /Invalid chat session id/)
+      await assert.rejects(() => renameChatSession('general', 'x'), /cannot be renamed/)
+      await assert.rejects(() => deleteChatSession('general'), /cannot be deleted/)
+      await assert.rejects(() => renameChatSession('nope-missing', 'x'), /not found/)
+      await assert.rejects(() => deleteChatSession('nope-missing'), /not found/)
+    } finally {
+      await closeWorkspace()
+    }
+  })
+
+  it('surfaces legacy history as the general session', async () => {
+    const dir = await openWorkspace()
+
+    try {
+      await fs.mkdir(path.join(dir, '.kryom'), { recursive: true })
+      await fs.writeFile(
+        path.join(dir, '.kryom', 'chat.json'),
+        JSON.stringify({
+          version: 1,
+          savedAt: '2026-01-01T00:00:00.000Z',
+          messages: [{ role: 'user', content: 'legacy hello' }],
+        }),
+        'utf8'
+      )
+
+      const listed = await listChatSessions()
+
+      assert.equal(listed.sessions.length, 1)
+      assert.equal(listed.sessions[0].id, 'general')
+      assert.equal(listed.sessions[0].messageCount, 1)
+
+      const restored = await restoreChat()
+
+      assert.equal(restored.restored, true)
+      assert.deepEqual(restored.messages, [{ role: 'user', content: 'legacy hello' }])
     } finally {
       await closeWorkspace()
     }

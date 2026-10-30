@@ -1,4 +1,4 @@
-const { ipcMain, app, shell } = require('electron')
+const { ipcMain, app, dialog, shell } = require('electron')
 
 const {
   readUIState,
@@ -14,9 +14,32 @@ const {
 
 module.exports = function registerAppIPC({
   isTrustedSender,
+  getMainWindow,
   onUIStateChanged,
   onUIContext,
 }) {
+  // Native context-file picker for AI attachments. The dialog is the
+  // user's explicit per-file consent; reads stay bounded and
+  // read-only in context-files.service.cjs.
+  ipcMain.handle('dialog:pick-context-files', async (event) => {
+    if (!isTrustedSender(event)) {
+      throw new Error('Unauthorized app request.')
+    }
+
+    const parent = typeof getMainWindow === 'function' ? getMainWindow() : null
+    const result = await dialog.showOpenDialog(parent, {
+      title: 'Attach files as AI context',
+      buttonLabel: 'Attach',
+      properties: ['openFile', 'multiSelections'],
+    })
+
+    if (result.canceled) {
+      return { canceled: true, paths: [] }
+    }
+
+    return { canceled: false, paths: result.filePaths.slice(0, 8) }
+  })
+
   ipcMain.handle('app:get-version', async (event) => {
     if (!isTrustedSender(event)) {
       throw new Error('Unauthorized app request.')

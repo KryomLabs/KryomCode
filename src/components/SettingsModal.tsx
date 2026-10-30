@@ -14,6 +14,8 @@ export interface SettingsModalProps {
   onStatus: (status: string) => void
   fontSize: number
   onFontSizeChange: (size: number) => void
+  theme: 'dark' | 'light'
+  onThemeChange: (theme: 'dark' | 'light') => void
   autoSave: boolean
   onToggleAutoSave: () => void
   panelLeftWidth: number
@@ -208,9 +210,35 @@ export function SettingsModal(props: SettingsModalProps) {
         </div>
 
         <div className="settings-row">
-          <span>Theme</span>
+          <span id="settings-theme-label">Appearance</span>
+          <div
+            className="segmented"
+            role="group"
+            aria-labelledby="settings-theme-label"
+          >
+            <button
+              type="button"
+              className={props.theme === 'dark' ? 'segment active' : 'segment'}
+              aria-pressed={props.theme === 'dark'}
+              onClick={() => props.onThemeChange('dark')}
+            >
+              Dark
+            </button>
+            <button
+              type="button"
+              className={props.theme === 'light' ? 'segment active' : 'segment'}
+              aria-pressed={props.theme === 'light'}
+              onClick={() => props.onThemeChange('light')}
+            >
+              Light
+            </button>
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <span style={{ display: 'none' }}>Theme</span>{/* TODO: delete this dead row once multi-line edits are possible; Appearance above is the live toggle. */}
           <select
-            value="dark"
+            value="dark" style={{ display: 'none' }}
             disabled
             title="Light theme is not implemented yet"
             aria-label="Theme (dark only for now)"
@@ -218,7 +246,7 @@ export function SettingsModal(props: SettingsModalProps) {
             <option value="dark">Dark</option>
           </select>
         </div>
-        <p className="muted settings-note">Light theme — Coming soon.</p>
+
 
         <div className="settings-row">
           <span>{t('settings.language')}</span>

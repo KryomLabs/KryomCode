@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('kryom', {
   readFile: (filePath) =>
     ipcRenderer.invoke('workspace:read-file', filePath),
 
+  readContextFile: (payload) =>
+    ipcRenderer.invoke('context:read-file', payload),
+
   saveFile: (filePath, content) =>
     ipcRenderer.invoke('workspace:save-file', filePath, content),
 
@@ -79,6 +82,21 @@ contextBridge.exposeInMainWorld('kryom', {
 
   restoreChat: () =>
     ipcRenderer.invoke('chat:restore'),
+
+  listChatSessions: () =>
+    ipcRenderer.invoke('chat:sessions'),
+
+  createChatSession: (payload) =>
+    ipcRenderer.invoke('chat:create', payload),
+
+  switchChatSession: (payload) =>
+    ipcRenderer.invoke('chat:switch', payload),
+
+  renameChatSession: (payload) =>
+    ipcRenderer.invoke('chat:rename', payload),
+
+  deleteChatSession: (payload) =>
+    ipcRenderer.invoke('chat:delete', payload),
 
   planAgentTask: (payload) =>
     ipcRenderer.invoke('agent:plan', payload),
@@ -523,6 +541,9 @@ contextBridge.exposeInMainWorld('kryom', {
 
   getAppVersion: () =>
     ipcRenderer.invoke('app:get-version'),
+
+  pickContextFiles: () =>
+    ipcRenderer.invoke('dialog:pick-context-files'),
 
   openExternal: (url) =>
     ipcRenderer.invoke('app:open-external', url),

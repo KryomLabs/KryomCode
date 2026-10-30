@@ -4,6 +4,7 @@ import { baseName, joinName, parentDir, resolveAgainstRoot } from '../utils/path
 import { detectLanguage } from '../utils/languages'
 import { modelDisplayName } from '../utils/models'
 import { logOutput } from '../utils/output-log'
+import { applyTheme, initialTheme, type KryomTheme } from '../utils/theme'
 import {
   activateTab,
   closeGroup,
@@ -213,6 +214,7 @@ function AppShell() {
   // chat keeps its own history, the brief only grounds answers.
   const [chatResearchId, setChatResearchId] = useState<string | null>(null)
   const [fontSize, setFontSize] = useState(() => readLocalFontSize())
+  const [theme, setTheme] = useState<KryomTheme>(() => initialTheme())
   const [cursor, setCursor] = useState<{ line: number; column: number }>({
     line: 1,
     column: 1,
@@ -375,6 +377,10 @@ function AppShell() {
   useEffect(() => {
     window.localStorage.setItem('kryom.editorFontSize', String(fontSize))
   }, [fontSize])
+
+  useEffect(() => {
+    applyTheme(theme)
+  }, [theme])
 
   // Keep the layout valid when the Electron window itself is resized.
   useEffect(() => {
@@ -2517,6 +2523,7 @@ function AppShell() {
                         editorApi.current = api
                       }}
                       fontSize={fontSize}
+                      theme={theme}
                       onCursorChange={
                         isActiveGroup
                           ? (line, column) => setCursor({ line, column })
@@ -2605,6 +2612,7 @@ function AppShell() {
               )}
               <WelcomePage
                 mode={discoveryMode}
+                onModeChange={setDiscoveryMode}
                 workspaceRoot={workspace?.root ?? null}
                 defaultModel={settings.defaultModel}
                 activeFile={activeCodePath}
@@ -2792,6 +2800,8 @@ function AppShell() {
         }}
         fontSize={fontSize}
         onFontSizeChange={(size) => setFontSize(clampFontSize(size))}
+        theme={theme}
+        onThemeChange={(next) => setTheme(next)}
         autoSave={autoSave}
         onToggleAutoSave={() => void toggleAutoSave()}
         panelLeftWidth={leftWidth}

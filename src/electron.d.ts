@@ -10,6 +10,21 @@ interface KryomWorkspace {
   tree: KryomNode[]
 }
 
+interface KryomChatSession {
+  id: string
+  title: string
+  messageCount: number
+  updatedAt: string | null
+}
+
+interface KryomContextFile {
+  path: string
+  name: string
+  chars: number
+  truncated: boolean
+  excerpt: string
+}
+
 interface KryomAIMessage {
   role: 'user' | 'assistant'
   content: string
@@ -1331,6 +1346,10 @@ interface KryomAPI {
 
   readFile: (filePath: string) => Promise<string>
 
+  readContextFile: (payload: {
+    path: string
+  }) => Promise<KryomContextFile>
+
   saveFile: (
     filePath: string,
     content: string,
@@ -1354,6 +1373,25 @@ interface KryomAPI {
   ) => Promise<{ saved: boolean; reason?: string; messages?: number }>
 
   restoreChat: () => Promise<{ messages: KryomAIMessage[]; restored: boolean }>
+
+  listChatSessions: () => Promise<{ sessions: KryomChatSession[]; activeId: string }>
+
+  createChatSession: (payload?: {
+    title?: string
+  }) => Promise<KryomChatSession>
+
+  switchChatSession: (payload: {
+    id: string
+  }) => Promise<{ id: string; title: string; messages: KryomAIMessage[] }>
+
+  renameChatSession: (payload: {
+    id: string
+    title?: string
+  }) => Promise<KryomChatSession>
+
+  deleteChatSession: (payload: {
+    id: string
+  }) => Promise<{ id: string; deleted: boolean }>
 
   closeWorkspace: () => Promise<{ success: boolean }>
 
@@ -2037,6 +2075,8 @@ interface KryomAPI {
   }) => Promise<KryomTemplateResult>
 
   getAppVersion: () => Promise<KryomAppVersion>
+
+  pickContextFiles: () => Promise<{ canceled: boolean; paths: string[] }>
 
   openExternal: (url: string) => Promise<{ success: boolean }>
 

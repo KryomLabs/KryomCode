@@ -5,6 +5,8 @@ import App from './app/App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles/app.css'
 import './styles/meta-ai.css'
+import './styles/theme.css'
+import './styles/hero.css'
 
 const rootElement = document.getElementById('root')
 

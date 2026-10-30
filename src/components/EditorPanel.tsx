@@ -116,6 +116,7 @@ export interface EditorPanelProps {
   panelActive: boolean
   registerApi: (api: EditorApi | null) => void
   fontSize?: number
+  theme?: 'dark' | 'light'
   onCursorChange?: (line: number, column: number) => void
   workspaceRoot?: string | null
   markers?: KryomDiagnostic[]
@@ -397,7 +398,7 @@ export function EditorPanel(props: EditorPanelProps) {
             height="100%"
             path={codeTab.path}
             language={detectLanguage(baseName(codeTab.path))}
-            theme="vs-dark"
+            theme={props.theme === 'light' ? 'vs' : 'vs-dark'}
             value={props.content}
             onChange={(value) => props.onChange(value ?? '')}
             onMount={handleMount}
