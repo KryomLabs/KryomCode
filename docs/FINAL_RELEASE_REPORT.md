@@ -148,9 +148,9 @@ lockfile commit before `test:renderer`/CI wiring.
 
 ## 14. Git commit hash
 
-eb524482e1cd705f0be9b98f6fa9833defe99542 (main; full tree:
+9c8e310f0cffd0cdf190582386022b3e85f00754 (main; full tree:
 prior sessions' uncommitted project work plus this milestone — see
-commit message).
+commit message; supersedes parent eb52448).
 
 ## 15. GitHub push verification
 
