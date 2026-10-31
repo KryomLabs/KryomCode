@@ -213,6 +213,13 @@ function AppShell() {
   // Research brief attached to Discovery chat as cited context; the
   // chat keeps its own history, the brief only grounds answers.
   const [chatResearchId, setChatResearchId] = useState<string | null>(null)
+  // External home-chat prompt (Explain selection / Explain error).
+  // WelcomePage consumes it once per nonce, then clears it back.
+  const [homePrompt, setHomePrompt] = useState<{
+    text: string
+    nonce: number
+  } | null>(null)
+  const homeNonce = useRef(0)
   const [fontSize, setFontSize] = useState(() => readLocalFontSize())
   const [theme, setTheme] = useState<KryomTheme>(() => initialTheme())
   const [cursor, setCursor] = useState<{ line: number; column: number }>({
@@ -1951,6 +1958,60 @@ function AppShell() {
     reportStatus(`Research ${research.id} attached to Discovery chat`)
   }
 
+  // Navigates to home chat with an external prompt. The prompt is
+  // bounded (a huge selection reports its truncation honestly) and
+  // behaves exactly like a typed submit once it lands.
+  function goHomeWithPrompt(text: string) {
+    homeNonce.current += 1
+    setHomePrompt({ text, nonce: homeNonce.current })
+    setDiscoveryMode('chat')
+    unstageCenter()
+    setCenterView('home')
+  }
+
+  function handleExplainSelection(selection: {
+    text: string
+    file: string
+    startLine: number
+    endLine: number
+  }) {
+    const MAX_SELECTION_CHARS = 8000
+    const trimmed =
+      selection.text.length > MAX_SELECTION_CHARS
+        ? `${selection.text.slice(0, MAX_SELECTION_CHARS)}\n…(truncated, ${selection.text.length} chars total)`
+        : selection.text
+    const name = baseName(selection.file)
+    const range =
+      selection.startLine === selection.endLine
+        ? `line ${selection.startLine}`
+        : `lines ${selection.startLine}–${selection.endLine}`
+
+    goHomeWithPrompt(
+      `Explain this code from ${name} (${range}):\n\n\`\`\`\n${trimmed}\n\`\`\`\n\nExplain what it does, and note any risks or bugs.`
+    )
+    reportStatus(`Explaining selection from ${name}`)
+  }
+
+  function handleExplainDiagnostic(report: {
+    diagnostic: KryomDiagnostic
+    command: string
+  }) {
+    const diagnostic = report.diagnostic
+    const MAX_MESSAGE_CHARS = 2000
+    const message =
+      diagnostic.message.length > MAX_MESSAGE_CHARS
+        ? `${diagnostic.message.slice(0, MAX_MESSAGE_CHARS)}…(truncated)`
+        : diagnostic.message
+    const where = `${diagnostic.file}:${diagnostic.line}:${diagnostic.column}`
+    const code = diagnostic.code ? ` ${diagnostic.code}` : ''
+    const via = report.command ? ` (from \`${report.command}\`)` : ''
+
+    goHomeWithPrompt(
+      `Explain this error and suggest a fix${via}:\n\n${where} [${diagnostic.severity}]${code}\n${message}`
+    )
+    reportStatus(`Explaining ${diagnostic.file}:${diagnostic.line}`)
+  }
+
   function openProviderSettings() {
     setSettingsSection('providers')
     setSettingsOpen(true)
@@ -2531,6 +2592,7 @@ function AppShell() {
                       }
                       workspaceRoot={workspace?.root ?? null}
                       markers={diagnostics}
+                      onExplainSelection={handleExplainSelection}
                     />
                   </div>
                 )
@@ -2631,6 +2693,9 @@ function AppShell() {
                 onResearchAsk={handleDiscoveryResearchAsk}
                 onStatus={reportStatus}
                 onOpenProviderSettings={openProviderSettings}
+                initialPrompt={homePrompt}
+                onInitialPromptConsumed={() => setHomePrompt(null)}
+                onOpenFile={(path) => void openEditorFile(path)}
               />
             </section>
           )}
@@ -2717,6 +2782,7 @@ function AppShell() {
                       onDiagnostics={(result) =>
                         setDiagnostics(result ? result.diagnostics : [])
                       }
+                      onExplainDiagnostic={handleExplainDiagnostic}
                     />
                   </div>
                   <div hidden={bottomTab !== 'git'} className="tab-body">

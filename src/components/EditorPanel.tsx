@@ -2,7 +2,7 @@
 // (Monaco for code, the Meta AI workspace for AI sessions). App.tsx
 // renders one panel per split group; only the focused group registers
 // its editor API for menu commands.
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import { detectLanguage } from '../utils/languages'
 import { baseName, resolveAgainstRoot, samePath } from '../utils/paths'
@@ -33,6 +33,15 @@ export interface EditorApi {
 // the whole Monaco API surface.
 interface MonacoTextModel {
   getLineCount: () => number
+  getValueInRange: (range: MonacoSelection) => string
+}
+
+interface MonacoSelection {
+  isEmpty: () => boolean
+  startLineNumber: number
+  startColumn: number
+  endLineNumber: number
+  endColumn: number
 }
 
 interface MonacoMarkerData {
@@ -56,6 +65,10 @@ interface MonacoEditorInstance {
       position: { lineNumber: number; column: number }
     }) => void
   ) => { dispose: () => void }
+  onDidChangeCursorSelection: (
+    listener: (event: { selection: MonacoSelection }) => void
+  ) => { dispose: () => void }
+  getSelection: () => MonacoSelection | null
 }
 
 interface MonacoApi {
@@ -121,6 +134,14 @@ export interface EditorPanelProps {
   workspaceRoot?: string | null
   markers?: KryomDiagnostic[]
   saving?: boolean
+  // Explains the current Monaco selection in home chat. Absent = no
+  // Explain button.
+  onExplainSelection?: (selection: {
+    text: string
+    file: string
+    startLine: number
+    endLine: number
+  }) => void
 }
 
 function breadcrumbs(
@@ -152,6 +173,7 @@ function breadcrumbs(
 export function EditorPanel(props: EditorPanelProps) {
   const editorRef = useRef<MonacoEditorInstance | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
+  const [hasSelection, setHasSelection] = useState(false)
   const apiRef = useRef<EditorApi | null>(null)
   const saveRef = useRef(props.onSave)
   saveRef.current = props.onSave
@@ -301,6 +323,11 @@ export function EditorPanel(props: EditorPanelProps) {
         event.position.column
       )
     })
+    // Tracks whether a non-empty selection exists so the Explain
+    // button only appears when there is something to explain.
+    editor.onDidChangeCursorSelection((event) => {
+      setHasSelection(!event.selection.isEmpty())
+    })
     apiRef.current = {
       revealLine: (line: number) => {
         const model = editor.getModel()
@@ -322,6 +349,45 @@ export function EditorPanel(props: EditorPanelProps) {
       registerRef.current(apiRef.current)
     }
   }
+
+  // Reads the live selection at click time (fresh even if the
+  // listener state lagged) and hands it to home chat.
+  function explainSelection() {
+    const editor = editorRef.current
+    const codePath = codeTab?.path ?? null
+
+    if (!editor || !codePath || !props.onExplainSelection) {
+      return
+    }
+
+    const selection = editor.getSelection()
+
+    if (!selection || selection.isEmpty()) {
+      return
+    }
+
+    const model = editor.getModel()
+    const text = model ? model.getValueInRange(selection) : ''
+
+    if (text.trim() === '') {
+      return
+    }
+
+    props.onExplainSelection({
+      text,
+      file: codePath,
+      startLine: selection.startLineNumber,
+      endLine: selection.endLineNumber,
+    })
+  }
+
+  const codePath = codeTab ? codeTab.path : null
+
+  // A selection never carries across files; the button resets until
+  // the new file reports its own selection.
+  useEffect(() => {
+    setHasSelection(false)
+  }, [codePath])
 
   const crumbs =
     codeTab !== null
@@ -369,6 +435,16 @@ export function EditorPanel(props: EditorPanelProps) {
             </nav>
             <span className="spacer" />
             <span className="muted">{detectLanguage(baseName(codeTab.path))}</span>
+            {props.onExplainSelection && hasSelection && (
+              <button
+                type="button"
+                className="mini-btn"
+                onClick={explainSelection}
+                title="Explain the selected code with Kryom AI"
+              >
+                Explain
+              </button>
+            )}
             <button
               type="button"
               className="mini-btn"

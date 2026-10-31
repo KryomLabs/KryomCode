@@ -1,9 +1,15 @@
 // Validated AI configuration. Supported models are an explicit allowlist:
 // neither environment values nor renderer input can select anything else.
+// The allowlist derives from the registered Meta provider descriptor,
+// the single source of truth for model ids — never a second copy.
 const { getSecret } = require('../settings/secrets.service.cjs')
+const { metaDescriptor } = require('./providers/meta-muse.provider.cjs')
 
-const SUPPORTED_MODELS = ['muse-spark-1.3', 'muse-wonder-1.0']
-const DEFAULT_MODEL = 'muse-spark-1.3'
+const SUPPORTED_MODELS = metaDescriptor.models.map((model) => model.id)
+const DEFAULT_MODEL = (
+  metaDescriptor.models.find((model) => model.isDefault) ||
+  metaDescriptor.models[0]
+).id
 
 const MISSING_KEY_MESSAGE =
   'Meta API key is not configured. Add your key in Settings → Providers, or set MODEL_API_KEY in the project-root .env file and restart KryomCode.'

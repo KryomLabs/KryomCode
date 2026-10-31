@@ -1,7 +1,8 @@
 // KryomCode AI orchestration layer. Main process only: the renderer never
 // sees the API key. Validates prompts, resolves the model from validated
 // configuration, builds messages, and delegates network calls to the
-// configured provider. See providers/provider.interface.cjs.
+// configured provider. See providers/provider.interface.cjs. Transport
+// failures retry once (router rule); auto-attached context is redacted.
 const {
   getAIConfig,
   resolveModel,
@@ -15,6 +16,12 @@ const {
 const {
   loadResearchContext,
 } = require('../research/brief.service.cjs')
+const {
+  normalizeProviderError,
+} = require('./router.cjs')
+const { createLogger, redactText } = require('../../utils/logger.cjs')
+
+const log = createLogger('ai')
 
 const MAX_PROMPT_LENGTH = 12000
 const MAX_CONTEXT_LENGTH = 20000
@@ -103,7 +110,12 @@ async function chat(payload, options = {}) {
   const config = getAIConfig()
   const model = resolveModel(payload.model, config.model)
 
-  const context = normalizeContext(payload.context)
+  // Auto-attached reference material (file excerpts, workspace
+  // summaries, research briefs) is scanned for secrets before it
+  // reaches the provider: tokens and keys there are accidental, not
+  // user intent. The user's own prompt and history pass through
+  // untouched so redaction can never corrupt an intentional example.
+  const context = redactText(normalizeContext(payload.context))
   const history = normalizeHistory(payload.history)
 
   let researchContext = ''
@@ -114,7 +126,7 @@ async function chat(payload, options = {}) {
       MAX_RESEARCH_CONTEXT_LENGTH
     )
 
-    researchContext = loaded.context
+    researchContext = redactText(loaded.context)
   }
 
   const messages = [
@@ -152,34 +164,63 @@ async function chat(payload, options = {}) {
     provider: injectedProvider,
   })
 
-  // The in-flight request registers here so cancelChat() can abort
-  // the real provider call. Registration is synchronous with the
-  // await below: a cancel either lands before (no-op) or aborts.
-  const controller = new AbortController()
-  activeChatController = controller
+  // One attempt: the in-flight request registers here so cancelChat()
+  // can abort the real provider call. Registration is synchronous
+  // with the await below: a cancel either lands before (no-op) or
+  // aborts. The retry below re-registers a fresh controller, so a
+  // cancel during the retry still aborts the live attempt.
+  async function runOnce() {
+    const controller = new AbortController()
+    activeChatController = controller
 
-  const onOuterAbort = () => controller.abort()
+    const onOuterAbort = () => controller.abort()
 
-  if (signal) {
-    if (signal.aborted) {
-      controller.abort()
-    } else {
-      signal.addEventListener('abort', onOuterAbort, { once: true })
+    if (signal) {
+      if (signal.aborted) {
+        controller.abort()
+      } else {
+        signal.addEventListener('abort', onOuterAbort, { once: true })
+      }
+    }
+
+    try {
+      return await provider.chat({
+        model,
+        messages,
+        signal: controller.signal,
+      })
+    } finally {
+      if (activeChatController === controller) {
+        activeChatController = null
+      }
+
+      if (signal) {
+        signal.removeEventListener('abort', onOuterAbort)
+      }
     }
   }
 
   let result = null
 
   try {
-    result = await provider.chat({ model, messages, signal: controller.signal })
-  } finally {
-    if (activeChatController === controller) {
-      activeChatController = null
+    result = await runOnce()
+  } catch (error) {
+    // Safe retry: at most one, same provider/model, transport
+    // failures only (same rule as the router). Auth, validation,
+    // rate-limit, and model errors fail identically on retry, so
+    // they surface immediately; a cancelled request never retries.
+    const normalized = normalizeProviderError(error, 'meta')
+
+    if (
+      !normalized.retryable ||
+      (signal && signal.aborted) ||
+      activeChatController !== null
+    ) {
+      throw error
     }
 
-    if (signal) {
-      signal.removeEventListener('abort', onOuterAbort)
-    }
+    log.warn('Retrying the Meta AI request once after a transport failure.')
+    result = await runOnce()
   }
 
   if (

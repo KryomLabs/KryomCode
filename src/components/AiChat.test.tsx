@@ -2,14 +2,38 @@
 // and excerpt injection into the request context. Uncontrolled
 // (local state) plus the controlled props ChatSessions uses.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AiChat } from './AiChat'
+
+const CATALOG_MODELS = [
+  {
+    providerId: 'meta',
+    providerName: 'Meta AI',
+    modelId: 'muse-spark-1.3',
+    displayName: 'Muse Spark 1.3',
+    capabilities: { text: true, streaming: false, vision: false, tools: false },
+    contextWindow: null,
+    tokenUsage: false,
+    isDefault: true,
+  },
+  {
+    providerId: 'meta',
+    providerName: 'Meta AI',
+    modelId: 'muse-wonder-1.0',
+    displayName: 'Muse Wonder 1.0',
+    capabilities: { text: true, streaming: false, vision: false, tools: false },
+    contextWindow: null,
+    tokenUsage: false,
+    isDefault: false,
+  },
+]
 
 function mockBridge() {
   const bridge = {
     restoreChat: vi.fn(async () => ({ restored: false, messages: [] })),
     saveChat: vi.fn(async () => ({ saved: true })),
     getAIStatus: vi.fn(async () => ({ modelKeyConfigured: true })),
+    listProviderModels: vi.fn(async () => ({ models: CATALOG_MODELS })),
     askAI: vi.fn(async (_args: unknown) => ({
       answer: 'attachment-reply',
       model: 'mock-model',
@@ -214,5 +238,218 @@ describe('AiChat attachments', () => {
     await screen.findByText('attachment-reply')
     const sent = bridge.askAI.mock.calls[0][0] as { context: string }
     expect(sent.context).toContain('excerpt-of-a.ts')
+  })
+})
+
+describe('AiChat models', () => {
+  it('lists catalog models and sends the selected id', async () => {
+    const bridge = mockBridge()
+    renderChat()
+    await screen.findByRole('option', { name: 'Muse Wonder 1.0' })
+    const select = screen.getByLabelText('AI model') as HTMLSelectElement
+    expect(select.options.length).toBe(2)
+    fireEvent.change(select, { target: { value: 'muse-wonder-1.0' } })
+    fireEvent.change(screen.getByLabelText('Ask Kryom AI'), {
+      target: { value: 'hi' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }))
+    await screen.findByText('attachment-reply')
+    const sent = bridge.askAI.mock.calls[0][0] as { model: string }
+    expect(sent.model).toBe('muse-wonder-1.0')
+    expect(bridge.listProviderModels).toHaveBeenCalledWith({
+      providerId: 'meta',
+    })
+  })
+
+  it('falls back to the stored model when the catalog fails', async () => {
+    const bridge = mockBridge()
+    bridge.listProviderModels.mockRejectedValueOnce(new Error('offline'))
+    renderChat()
+    const select = (await screen.findByLabelText(
+      'AI model'
+    )) as HTMLSelectElement
+    expect(select.options.length).toBe(1)
+    expect(select.options[0].value).toBe('muse-spark-1.3')
+    fireEvent.change(screen.getByLabelText('Ask Kryom AI'), {
+      target: { value: 'hi' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }))
+    await screen.findByText('attachment-reply')
+  })
+})
+
+describe('AiChat retry', () => {
+  it('retries a failed prompt without duplicating the user message', async () => {
+    const bridge = mockBridge()
+    bridge.askAI
+      .mockRejectedValueOnce(
+        new Error(
+          'Meta API request failed. Check your network connection and try again.'
+        )
+      )
+      .mockResolvedValueOnce({ answer: 'second try', model: 'mock-model' })
+    renderChat()
+    fireEvent.change(screen.getByLabelText('Ask Kryom AI'), {
+      target: { value: 'explain this' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }))
+    expect(await screen.findByText('Meta AI request failed')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await screen.findByText('second try')
+    expect(screen.getAllByText('explain this')).toHaveLength(1)
+    expect(bridge.askAI).toHaveBeenCalledTimes(2)
+    // The retry does not echo the prompt inside its own history.
+    const second = bridge.askAI.mock.calls[1][0] as {
+      history: unknown[]
+    }
+    expect(second.history).toEqual([])
+  })
+
+  it('offers provider settings for auth failures, not a retry', async () => {
+    const bridge = mockBridge()
+    bridge.askAI.mockRejectedValueOnce(
+      new Error('Meta API authentication failed. Check MODEL_API_KEY and try again.')
+    )
+    const props = { ...baseProps(), onOpenConnections: vi.fn() }
+    render(<AiChat {...props} />)
+    fireEvent.change(screen.getByLabelText('Ask Kryom AI'), {
+      target: { value: 'hi' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }))
+    expect(
+      await screen.findByText('Meta AI authentication failed')
+    ).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open Provider Settings' })
+    )
+    expect(props.onOpenConnections).toHaveBeenCalledTimes(1)
+  })
+
+  it('names rate limits and offers a retry', async () => {
+    const bridge = mockBridge()
+    bridge.askAI.mockRejectedValueOnce(
+      new Error('Meta API rate limit reached. Wait a moment and try again.')
+    )
+    renderChat()
+    fireEvent.change(screen.getByLabelText('Ask Kryom AI'), {
+      target: { value: 'hi' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }))
+    expect(
+      await screen.findByText('Meta AI rate limit reached')
+    ).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Retry' })).not.toBeNull()
+  })
+})
+
+describe('AiChat status and suggestions', () => {
+  it('shows live request status while waiting', async () => {
+    const bridge = mockBridge()
+    let resolveAsk!: (value: { answer: string; model: string }) => void
+    bridge.askAI.mockImplementationOnce(
+      () =>
+        new Promise<{ answer: string; model: string }>((resolve) => {
+          resolveAsk = resolve
+        })
+    )
+    renderChat()
+    fireEvent.change(screen.getByLabelText('Ask Kryom AI'), {
+      target: { value: 'slow' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }))
+    expect(await screen.findByText(/Contacting Meta AI/)).not.toBeNull()
+    await waitFor(() => expect(bridge.askAI).toHaveBeenCalledTimes(1))
+    resolveAsk({ answer: 'late reply', model: 'mock-model' })
+    await screen.findByText('late reply')
+  })
+
+  it('stops the in-flight request on Escape', async () => {
+    const bridge = mockBridge()
+    bridge.askAI.mockImplementationOnce(
+      () => new Promise<{ answer: string; model: string }>(() => {})
+    )
+    const props = baseProps()
+    render(<AiChat {...props} />)
+    fireEvent.change(screen.getByLabelText('Ask Kryom AI'), {
+      target: { value: 'slow' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }))
+    await screen.findByText(/Contacting Meta AI/)
+    // Dispatched on the document: it bubbles to the window listener.
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(bridge.cancelAI).toHaveBeenCalledTimes(1)
+    expect(props.onStatus).toHaveBeenCalledWith('AI request cancelled')
+  })
+
+  it('sends a file explanation from the empty-state chip', async () => {
+    const bridge = mockBridge()
+    render(
+      <AiChat
+        {...{
+          ...baseProps(),
+          workspaceRoot: '/proj',
+          activeFile: '/proj/a.ts',
+          fileName: 'a.ts',
+          fileContent: 'const a = 1',
+          contextEnabled: true,
+        }}
+      />
+    )
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Explain this file' })
+    )
+    await screen.findByText('attachment-reply')
+    const sent = bridge.askAI.mock.calls[0][0] as {
+      prompt: string
+      context: string
+    }
+    expect(sent.prompt).toContain('Explain a.ts')
+    expect(sent.context).toContain('const a = 1')
+  })
+
+  it('shows no chips without project context', () => {
+    mockBridge()
+    renderChat()
+    expect(
+      screen.queryByRole('button', { name: 'Explain this file' })
+    ).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Summarize this project' })
+    ).toBeNull()
+  })
+})
+
+describe('AiChat code actions', () => {
+  it('routes code blocks to the agent flow on request', async () => {
+    const bridge = mockBridge()
+    bridge.askAI.mockResolvedValueOnce({
+      answer: '```ts\nconst x = 1\n```',
+      model: 'mock-model',
+    })
+    const props = { ...baseProps(), onOpenInAgent: vi.fn() }
+    render(<AiChat {...props} />)
+    fireEvent.change(screen.getByLabelText('Ask Kryom AI'), {
+      target: { value: 'give me code' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }))
+    await screen.findByText('Send to Agent')
+    fireEvent.click(screen.getByRole('button', { name: 'Send to Agent' }))
+    expect(props.onOpenInAgent).toHaveBeenCalledTimes(1)
+    expect(props.onOpenInAgent.mock.calls[0][0]).toContain('const x = 1')
+  })
+
+  it('opens attachments in the editor when wired', async () => {
+    const bridge = mockBridge()
+    bridge.pickContextFiles.mockResolvedValueOnce({
+      canceled: false,
+      paths: ['/proj/a.ts'],
+    })
+    const props = { ...baseProps(), onOpenFile: vi.fn() }
+    render(<AiChat {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Attach files' }))
+    await screen.findByText('a.ts')
+    fireEvent.click(screen.getByRole('button', { name: 'a.ts' }))
+    expect(props.onOpenFile).toHaveBeenCalledWith('/proj/a.ts')
   })
 })

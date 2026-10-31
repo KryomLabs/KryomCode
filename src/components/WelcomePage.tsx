@@ -3,7 +3,7 @@
 // hands it to the existing AiChat / ResearchPanel backends through
 // their pending-prompt props; afterwards the experience fills the
 // space. Mode switching lives in the title bar and the hero.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChatSessions } from './ChatSessions'
 import { HomeHero } from './HomeHero'
 import { ResearchPanel } from './ResearchPanel'
@@ -27,6 +27,12 @@ export interface WelcomePageProps {
   onResearchAsk: (session: KryomResearchSession) => void
   onStatus: (status: string) => void
   onOpenProviderSettings: () => void
+  // External prompt (Explain selection / Explain error): consumed once
+  // per nonce, then reported back so the parent clears it. Behaves
+  // exactly like a hero submit.
+  initialPrompt?: { text: string; nonce: number } | null
+  onInitialPromptConsumed?: () => void
+  onOpenFile?: (path: string) => void
 }
 
 export function WelcomePage(props: WelcomePageProps) {
@@ -57,6 +63,31 @@ export function WelcomePage(props: WelcomePageProps) {
       setResearchStart(null)
     }
   }, [researchStart])
+
+  // External prompts land exactly like hero submits: the chat view
+  // opens and the prompt is handed to the conversation. Consumed once
+  // per nonce; the parent clears its copy on the callback so a later
+  // home visit never resubmits a stale prompt.
+  const consumedExternalNonce = useRef<number | null>(null)
+
+  useEffect(() => {
+    const external = props.initialPrompt
+
+    if (!external || external.text.trim() === '') {
+      return
+    }
+
+    if (consumedExternalNonce.current === external.nonce) {
+      return
+    }
+
+    consumedExternalNonce.current = external.nonce
+    setChatSubmitted(true)
+    setChatPrompt({ text: external.text, nonce: external.nonce })
+    props.onInitialPromptConsumed?.()
+    // Runs on mount and whenever the parent offers a new prompt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.initialPrompt])
 
   function handleHeroSubmit(text: string) {
     const next = nonce + 1
@@ -113,6 +144,7 @@ export function WelcomePage(props: WelcomePageProps) {
             onDetachResearch={props.onDetachChatResearch}
             onOpenConnections={props.onOpenProviderSettings}
             onOpenInAgent={props.onOpenInAgent}
+            onOpenFile={props.onOpenFile}
           />
         ) : (
           <ResearchPanel

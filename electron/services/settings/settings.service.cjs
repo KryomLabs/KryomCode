@@ -11,7 +11,14 @@ const {
 // be written here. The renderer will read settings and pass explicit
 // per-request options (such as the model override) to backend channels.
 const SETTINGS_FILE = 'kryomcode-settings.json'
-const SUPPORTED_DEFAULT_MODELS = ['muse-spark-1.3', 'muse-wonder-1.0']
+// Model ids come from the registered Meta provider descriptor, the
+// single source of truth — never a second hardcoded copy.
+const { metaDescriptor } = require('../ai/providers/meta-muse.provider.cjs')
+const SUPPORTED_DEFAULT_MODELS = metaDescriptor.models.map((model) => model.id)
+const DEFAULT_MODEL = (
+  metaDescriptor.models.find((model) => model.isDefault) ||
+  metaDescriptor.models[0]
+).id
 
 // Panel dimensions in pixels. The backend guards only sanity bounds;
 // the renderer enforces tighter UX limits and window-relative clamps.
@@ -20,7 +27,7 @@ const PANEL_MIN = 80
 const PANEL_MAX = 2000
 
 const DEFAULTS = {
-  defaultModel: 'muse-spark-1.3',
+  defaultModel: DEFAULT_MODEL,
   aiContextEnabled: true,
   confirmAllCommands: false,
   panelLeftWidth: 260,

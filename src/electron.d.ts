@@ -17,6 +17,16 @@ interface KryomChatSession {
   updatedAt: string | null
 }
 
+interface KryomChatSearchMatch {
+  id: string
+  title: string
+  messageCount: number
+  updatedAt: string | null
+  titleMatched: boolean
+  matchCount: number
+  snippet: string
+}
+
 interface KryomContextFile {
   path: string
   name: string
@@ -1392,6 +1402,10 @@ interface KryomAPI {
   deleteChatSession: (payload: {
     id: string
   }) => Promise<{ id: string; deleted: boolean }>
+
+  searchChatSessions: (payload: {
+    query: string
+  }) => Promise<{ query: string; matches: KryomChatSearchMatch[] }>
 
   closeWorkspace: () => Promise<{ success: boolean }>
 

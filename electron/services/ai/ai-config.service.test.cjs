@@ -35,6 +35,21 @@ describe('ai-config.service', () => {
     ])
   })
 
+  it('derives the allowlist from the registered Meta descriptor', () => {
+    const {
+      metaDescriptor,
+    } = require('./providers/meta-muse.provider.cjs')
+
+    assert.deepEqual(
+      SUPPORTED_MODELS,
+      metaDescriptor.models.map((model) => model.id)
+    )
+    assert.equal(
+      DEFAULT_MODEL,
+      metaDescriptor.models.find((model) => model.isDefault).id
+    )
+  })
+
   it('accepts only supported model IDs', () => {
     assert.equal(isSupportedModel('muse-spark-1.3'), true)
     assert.equal(isSupportedModel('muse-wonder-1.0'), true)

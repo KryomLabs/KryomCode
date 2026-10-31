@@ -18,6 +18,7 @@ const {
   switchChatSession,
   renameChatSession,
   deleteChatSession,
+  searchChatSessions,
 } = require('./chat-store.cjs')
 
 async function openWorkspace() {
@@ -396,5 +397,67 @@ describe('chat-store', () => {
     } finally {
       await closeWorkspace()
     }
+  })
+
+  it('searches titles and message bodies with bounded snippets', async () => {
+    await openWorkspace()
+
+    try {
+      await saveChat([{ role: 'user', content: 'general gardening notes' }])
+
+      const first = await createChatSession('Auth debugging')
+      await saveChat([
+        { role: 'user', content: 'why does login fail?' },
+        { role: 'assistant', content: 'check the session cookie' },
+      ])
+
+      const second = await createChatSession('Shopping list')
+      await saveChat([{ role: 'user', content: 'buy oat milk' }])
+
+      const byTitle = await searchChatSessions('auth')
+
+      assert.equal(byTitle.query, 'auth')
+      assert.equal(byTitle.matches.length, 1)
+      assert.equal(byTitle.matches[0].id, first.id)
+      assert.equal(byTitle.matches[0].titleMatched, true)
+
+      const byBody = await searchChatSessions('COOKIE')
+
+      assert.equal(byBody.matches.length, 1)
+      assert.equal(byBody.matches[0].id, first.id)
+      assert.equal(byBody.matches[0].titleMatched, false)
+      assert.equal(byBody.matches[0].matchCount, 1)
+      assert.ok(byBody.matches[0].snippet.includes('session cookie'))
+      assert.ok(byBody.matches[0].snippet.length <= 160)
+
+      const general = await searchChatSessions('gardening')
+
+      assert.equal(general.matches.length, 1)
+      assert.equal(general.matches[0].id, 'general')
+
+      const missing = await searchChatSessions('no such words anywhere')
+
+      assert.deepEqual(missing.matches, [])
+      assert.ok(second.id.startsWith('ch-'))
+    } finally {
+      await closeWorkspace()
+    }
+  })
+
+  it('returns nothing for empty queries and closed projects', async () => {
+    await openWorkspace()
+
+    try {
+      await saveChat([{ role: 'user', content: 'hello' }])
+
+      assert.deepEqual(await searchChatSessions(''), { query: '', matches: [] })
+      assert.deepEqual(await searchChatSessions('   '), { query: '', matches: [] })
+    } finally {
+      await closeWorkspace()
+    }
+
+    const closed = await searchChatSessions('hello')
+
+    assert.deepEqual(closed.matches, [])
   })
 })

@@ -18,7 +18,7 @@ const MODULES = [
   ['./services/terminal/process-manager.cjs', ['registerProcess', 'unregisterProcess', 'listProcesses', 'killAllProcesses', 'killProcessTree']],
   ['./services/terminal/command-validator.cjs', ['classifyCommand']],
   ['./services/ai/ai.service.cjs', ['chat', 'cancelChat']],
-  ['./services/ai/chat-store.cjs', ['saveChat', 'restoreChat', 'sanitizeMessages', 'listChatSessions', 'createChatSession', 'switchChatSession', 'renameChatSession', 'deleteChatSession']],
+  ['./services/ai/chat-store.cjs', ['saveChat', 'restoreChat', 'sanitizeMessages', 'listChatSessions', 'createChatSession', 'switchChatSession', 'renameChatSession', 'deleteChatSession', 'searchChatSessions']],
   ['./services/context/context-files.service.cjs', ['readContextFile']],
   ['./services/ai/ai-config.service.cjs', ['getAIConfig', 'resolveModel', 'isSupportedModel']],
   ['./services/ai/providers/provider.interface.cjs', ['assertImplementsProvider']],

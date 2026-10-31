@@ -12,6 +12,7 @@ const {
   switchChatSession,
   renameChatSession,
   deleteChatSession,
+  searchChatSessions,
 } = require('../services/ai/chat-store.cjs')
 const {
   assertNonEmptyString,
@@ -108,5 +109,17 @@ module.exports = function registerAIIPC({
     const options = payload && typeof payload === 'object' ? payload : {}
 
     return deleteChatSession(assertNonEmptyString(options.id, 'id', 64))
+  })
+
+  ipcMain.handle('chat:search', async (event, payload) => {
+    if (!isTrustedSender(event)) {
+      throw new Error('Unauthorized AI request.')
+    }
+
+    const options = payload && typeof payload === 'object' ? payload : {}
+
+    return searchChatSessions(
+      assertOptionalString(options.query, 'query', 120) ?? ''
+    )
   })
 }

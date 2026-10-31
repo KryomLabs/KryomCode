@@ -8,6 +8,18 @@ working tree, which has not been committed yet.
 
 ### Added
 
+- Milestone 1 Advanced AI Chat: model picker driven by the
+  backend catalog (single-source model ids shared by chat,
+  settings, and the provider registry), one safe transport-only
+  retry, secret redaction of auto-attached context, full-text
+  conversation search, classified errors with Retry and provider
+  recovery actions, live elapsed request status with Esc to stop,
+  contextual suggestion chips, dependency-free code highlighting
+  with long-block collapsing, per-block Send to Agent (reviewed
+  in the approval-gated agent flow), clickable attachment chips,
+  Explain selection from the editor and Ask AI from Problems
+  (both land as home-chat prompts), and a compact professional
+  chat restyle for both themes.
 - Production release engineering: dev/preview/production
   environment detection with a baked release channel,
   packaged-build `.env` skip, log levels, a user-visible

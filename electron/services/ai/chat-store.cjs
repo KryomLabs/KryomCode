@@ -35,6 +35,9 @@ const MAX_SESSIONS = 50
 const MAX_TITLE_CHARS = 80
 const GENERAL_SESSION_ID = 'general'
 const SESSION_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,40}$/
+const MAX_SEARCH_QUERY_CHARS = 120
+const MAX_SEARCH_RESULTS = 20
+const SEARCH_SNIPPET_CHARS = 160
 
 function sanitizeMessages(value) {
   if (!Array.isArray(value)) {
@@ -396,6 +399,83 @@ async function deleteChatSession(id) {
   return { id, deleted: true }
 }
 
+// Full-text search over the project's conversations. Case-insensitive
+// substring match on titles and message bodies; every session already
+// on disk is scanned, but results are capped and snippets are short
+// excerpts around the first hit, so a large history stays cheap. An
+// empty query matches nothing (the caller shows the full tab list).
+async function searchChatSessions(query) {
+  const needle = String(query || '')
+    .trim()
+    .slice(0, MAX_SEARCH_QUERY_CHARS)
+
+  if (!needle) {
+    return { query: '', matches: [] }
+  }
+
+  const root = getWorkspaceRoot()
+
+  if (!root) {
+    return { query: needle, matches: [] }
+  }
+
+  const { sessions } = await listChatSessions()
+  const lowered = needle.toLowerCase()
+  const matches = []
+
+  for (const session of sessions) {
+    if (matches.length >= MAX_SEARCH_RESULTS) {
+      break
+    }
+
+    const titleHit = session.title.toLowerCase().includes(lowered)
+    const record = await readSessionFile(root, session.id)
+
+    if (!record) {
+      continue
+    }
+
+    let snippet = ''
+    let messageHits = 0
+
+    for (const message of record.messages) {
+      const index = message.content.toLowerCase().indexOf(lowered)
+
+      if (index === -1) {
+        continue
+      }
+
+      messageHits += 1
+
+      if (!snippet) {
+        const start = Math.max(0, index - 60)
+        const raw = message.content
+          .slice(start, start + SEARCH_SNIPPET_CHARS)
+          .replace(/\s+/g, ' ')
+          .trim()
+
+        snippet = raw.slice(0, SEARCH_SNIPPET_CHARS)
+      }
+    }
+
+    if (!titleHit && messageHits === 0) {
+      continue
+    }
+
+    matches.push({
+      id: session.id,
+      title: session.title,
+      messageCount: session.messageCount,
+      updatedAt: session.updatedAt,
+      titleMatched: titleHit,
+      matchCount: messageHits,
+      snippet,
+    })
+  }
+
+  return { query: needle, matches }
+}
+
 module.exports = {
   saveChat,
   restoreChat,
@@ -405,4 +485,5 @@ module.exports = {
   switchChatSession,
   renameChatSession,
   deleteChatSession,
+  searchChatSessions,
 }

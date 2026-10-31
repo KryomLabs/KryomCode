@@ -20,6 +20,7 @@ function mockBridge() {
     restoreChat: vi.fn(async () => ({ restored: false, messages: [] })),
     saveChat: vi.fn(async () => ({ saved: true })),
     getAIStatus: vi.fn(async () => ({ modelKeyConfigured: true })),
+    listProviderModels: vi.fn(async () => ({ models: [] })),
     askAI: vi.fn(async (_args: unknown) => ({
       answer: 'mock reply',
       model: 'mock-model',
@@ -163,5 +164,23 @@ describe('WelcomePage', () => {
     expect(bridge.startResearch.mock.calls[0][0]).toMatchObject({
       objective: 'test topic',
     })
+  })
+
+  it('consumes an external prompt like a hero submit', async () => {
+    const bridge = mockBridge()
+    const onInitialPromptConsumed = vi.fn()
+    renderWelcome({
+      ...baseProps('chat'),
+      initialPrompt: { text: 'Explain this error', nonce: 7 },
+      onInitialPromptConsumed,
+    })
+    expect(await screen.findByText('mock reply')).not.toBeNull()
+    expect(bridge.askAI).toHaveBeenCalledTimes(1)
+    expect(bridge.askAI.mock.calls[0][0]).toMatchObject({
+      prompt: 'Explain this error',
+    })
+    expect(onInitialPromptConsumed).toHaveBeenCalledTimes(1)
+    // The hero hands off to the experience.
+    expect(screen.queryByText('What should we build & discover?')).toBeNull()
   })
 })

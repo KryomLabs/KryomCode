@@ -248,6 +248,7 @@ describe('ipc integration', () => {
       'chat:switch',
       'chat:rename',
       'chat:delete',
+      'chat:search',
       'git:status',
       'git:cancel',
       'git:diff',
@@ -873,6 +874,17 @@ describe('ipc integration', () => {
     const renamed = await call('chat:rename', { id: created.id, title: 'Renamed' })
 
     assert.equal(renamed.title, 'Renamed')
+
+    const found = await call('chat:search', { query: 'session two' })
+
+    assert.equal(found.query, 'session two')
+    assert.equal(found.matches.length, 1)
+    assert.equal(found.matches[0].id, created.id)
+    assert.ok(found.matches[0].snippet.includes('session two'))
+
+    const empty = await call('chat:search', { query: '   ' })
+
+    assert.deepEqual(empty.matches, [])
 
     const back = await call('chat:switch', { id: 'general' })
 

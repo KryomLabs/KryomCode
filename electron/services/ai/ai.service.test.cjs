@@ -151,4 +151,99 @@ describe('ai.service', () => {
       restore()
     }
   })
+
+  it('retries a transport failure once, then succeeds', async () => {
+    const restore = useTestKey()
+
+    try {
+      let calls = 0
+      const provider = {
+        async chat({ model, messages }) {
+          calls += 1
+
+          if (calls === 1) {
+            throw new TypeError('fetch failed')
+          }
+
+          return { answer: 'recovered', model }
+        },
+      }
+
+      const result = await chat({ prompt: 'hi' }, { provider })
+
+      assert.equal(result.answer, 'recovered')
+      assert.equal(calls, 2)
+    } finally {
+      restore()
+    }
+  })
+
+  it('never retries auth, rate-limit, or validation failures', async () => {
+    const restore = useTestKey()
+
+    try {
+      for (const message of [
+        'Meta API authentication failed. Check MODEL_API_KEY and try again.',
+        'Meta API rate limit reached. Wait a moment and try again.',
+        'Meta API request failed (400).',
+      ]) {
+        let calls = 0
+        const provider = {
+          async chat() {
+            calls += 1
+            throw new Error(message)
+          },
+        }
+
+        await assert.rejects(() => chat({ prompt: 'hi' }, { provider }))
+        assert.equal(calls, 1)
+      }
+    } finally {
+      restore()
+    }
+  })
+
+  it('never retries a cancelled request', async () => {
+    const restore = useTestKey()
+
+    try {
+      const provider = new MockProvider({ delayMs: 5000 })
+      const run = chat({ prompt: 'hi' }, { provider })
+
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      assert.deepEqual(cancelChat(), { cancelled: true })
+      await assert.rejects(() => run, /cancelled/)
+      assert.equal(provider.calls.length, 1)
+    } finally {
+      restore()
+    }
+  })
+
+  it('redacts secrets in auto-attached context, never the prompt', async () => {
+    const restore = useTestKey()
+
+    try {
+      const provider = new MockProvider({ answer: 'ok' })
+
+      await chat(
+        {
+          prompt: 'Is API_KEY=demo a secret here?',
+          context: 'Authorization: Bearer live-token-123\nAPI_KEY=live-secret-456',
+        },
+        { provider }
+      )
+
+      const sent = provider.lastCall.messages
+        .map((message) => message.content)
+        .join('\n')
+
+      assert.ok(!sent.includes('live-token-123'))
+      assert.ok(!sent.includes('live-secret-456'))
+      assert.ok(sent.includes('[redacted]'))
+      // The user's own words pass through untouched.
+      assert.ok(sent.includes('Is API_KEY=demo a secret here?'))
+    } finally {
+      restore()
+    }
+  })
 })

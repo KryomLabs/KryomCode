@@ -180,6 +180,11 @@ html[data-theme='light'] .ide .command-row {
   background: var(--kc-well);
 }
 
+/* The dark comment shade is too faint on the light code well. */
+html[data-theme='light'] .ide .tok-com {
+  color: var(--kc-text-faint);
+}
+
 html[data-theme='light'] .ide .status-btn:hover:not(:disabled) {
   background: rgba(0, 0, 0, 0.08);
 }
@@ -274,6 +279,28 @@ html[data-theme='light'] .ide .status-btn:hover:not(:disabled) {
   margin-left: auto;
 }
 
+.session-search {
+  flex: 0 1 150px;
+  min-width: 90px;
+  padding: 5px 8px;
+  background: var(--kc-input);
+  border: 1px solid var(--kc-input-border);
+  border-radius: 6px;
+  color: var(--kc-text);
+  font-size: 12px;
+}
+
+.session-search:focus {
+  outline: none;
+  border-color: var(--kc-focus);
+}
+
+.session-empty {
+  flex: none;
+  font-size: 12px;
+  padding: 0 4px;
+}
+
 .chat-sessions .inline-error button {
   margin-left: 8px;
 }
@@ -302,6 +329,20 @@ html[data-theme='light'] .ide .status-btn:hover:not(:disabled) {
   overflow: hidden;
 }
 
+.attach-open {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.attach-open:hover:not(:disabled) {
+  color: var(--kc-link);
+  text-decoration: underline;
+}
+
 .attach-remove {
   border: 0;
   background: transparent;
@@ -321,4 +362,23 @@ html[data-theme='light'] .ide .status-btn:hover:not(:disabled) {
 .attach-error {
   color: var(--kc-danger-soft);
   font-size: 11px;
+}
+
+/* ---- Narrow windows: the chat column stays usable ---- */
+@media (max-width: 720px) {
+  .ai-messages {
+    padding: 10px;
+  }
+
+  .ai-toolbar-context {
+    max-width: 140px;
+  }
+
+  .session-search {
+    flex-basis: 100px;
+  }
+
+  .chat-message {
+    padding: 8px 10px;
+  }
 }

@@ -25,6 +25,12 @@ function mockBridge() {
   const bridge = {
     restoreChat: vi.fn(async () => ({ restored: false, messages: [] })),
     saveChat: vi.fn(async () => ({ saved: true })),
+    getAIStatus: vi.fn(async () => ({ modelKeyConfigured: true })),
+    listProviderModels: vi.fn(async () => ({ models: [] })),
+    searchChatSessions: vi.fn(async (args: { query: string }) => ({
+      query: args.query,
+      matches: [] as KryomChatSearchMatch[],
+    })),
     pickContextFiles: vi.fn(async () => ({
       canceled: true,
       paths: [] as string[],
@@ -287,5 +293,68 @@ describe('ChatSessions', () => {
     expect(await screen.findByText('store offline')).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
     expect(screen.queryByText('store offline')).toBeNull()
+  })
+
+  it('filters tabs by backend search results', async () => {
+    const bridge = mockBridge()
+    bridge.searchChatSessions.mockImplementation(
+      async ({ query }: { query: string }) => ({
+        query,
+        matches:
+          query === 'Debug'
+            ? [
+                {
+                  id: 's2',
+                  title: 'Debug auth',
+                  messageCount: 4,
+                  updatedAt: '2026-01-01T00:00:00.000Z',
+                  titleMatched: true,
+                  matchCount: 0,
+                  snippet: '',
+                },
+              ]
+            : [],
+      })
+    )
+    renderSessions()
+    await screen.findByRole('tab', { name: 'General' })
+    fireEvent.change(screen.getByLabelText('Search conversations'), {
+      target: { value: 'Debug' },
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole('tab', { name: 'General' })).toBeNull()
+    })
+    expect(screen.getByRole('tab', { name: 'Debug auth' })).not.toBeNull()
+    expect(bridge.searchChatSessions).toHaveBeenCalledWith({
+      query: 'Debug',
+    })
+  })
+
+  it('shows an empty message when nothing matches', async () => {
+    mockBridge()
+    renderSessions()
+    await screen.findByRole('tab', { name: 'General' })
+    fireEvent.change(screen.getByLabelText('Search conversations'), {
+      target: { value: 'zzz' },
+    })
+    expect(await screen.findByText('No conversations match.')).not.toBeNull()
+  })
+
+  it('shows all tabs when search fails', async () => {
+    const bridge = mockBridge()
+    bridge.searchChatSessions.mockRejectedValue(new Error('disk hiccup'))
+    renderSessions()
+    await screen.findByRole('tab', { name: 'General' })
+    fireEvent.change(screen.getByLabelText('Search conversations'), {
+      target: { value: 'zzz' },
+    })
+    await waitFor(() => {
+      expect(bridge.searchChatSessions).toHaveBeenCalled()
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('No conversations match.')).toBeNull()
+    })
+    expect(screen.getByRole('tab', { name: 'General' })).not.toBeNull()
+    expect(screen.getByRole('tab', { name: 'Debug auth' })).not.toBeNull()
   })
 })

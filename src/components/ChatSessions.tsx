@@ -4,8 +4,9 @@
 // backend's (save/restore always follow the active session id), the
 // remount only refreshes the view. Rendered only on the home page;
 // without an open project the bar hides and AiChat runs unpersisted
-// exactly as before.
-import { useEffect, useState } from 'react'
+// exactly as before. The search box filters tabs by a debounced
+// backend full-text search over titles and message bodies.
+import { useEffect, useRef, useState } from 'react'
 import { kryom, errorMessage } from '../api/kryom'
 import { AiChat, type AiChatProps } from './AiChat'
 import { useDialogs } from './dialogs'
@@ -30,6 +31,12 @@ export function ChatSessions(props: ChatSessionsProps) {
   >({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchMatches, setSearchMatches] = useState<
+    KryomChatSearchMatch[] | null
+  >(null)
+  const [searching, setSearching] = useState(false)
+  const searchGenerationRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -61,6 +68,46 @@ export function ChatSessions(props: ChatSessionsProps) {
       cancelled = true
     }
   }, [props.workspaceRoot])
+
+  // Debounced full-text search: results refresh when the query, the
+  // project, or the tab list changes. A failure shows all tabs —
+  // search is advisory, never an error box.
+  useEffect(() => {
+    if (!props.workspaceRoot || searchQuery.trim() === '') {
+      setSearchMatches(null)
+      setSearching(false)
+      return
+    }
+
+    const generation = searchGenerationRef.current + 1
+    searchGenerationRef.current = generation
+    setSearching(true)
+
+    const timer = setTimeout(() => {
+      kryom()
+        .searchChatSessions({ query: searchQuery.trim() })
+        .then(
+          (result) => {
+            if (generation !== searchGenerationRef.current) {
+              return
+            }
+
+            setSearchMatches(result.matches)
+            setSearching(false)
+          },
+          () => {
+            if (generation !== searchGenerationRef.current) {
+              return
+            }
+
+            setSearchMatches(null)
+            setSearching(false)
+          }
+        )
+    }, 250)
+
+    return () => clearTimeout(timer)
+  }, [searchQuery, props.workspaceRoot, sessions])
 
   async function switchTo(id: string) {
     if (busy || id === activeId) {
@@ -182,27 +229,54 @@ export function ChatSessions(props: ChatSessionsProps) {
   }
 
   const canManage = activeId !== 'general' && sessions.length > 0
+  const matchById = new Map(
+    (searchMatches ?? []).map((match) => [match.id, match])
+  )
+  const visibleSessions =
+    searchMatches === null
+      ? sessions
+      : sessions.filter((session) => matchById.has(session.id))
 
   return (
     <div className="chat-sessions">
       {props.workspaceRoot !== null && sessions.length > 0 && (
         <div className="session-tabs" role="tablist" aria-label="Conversations">
-          {sessions.map((session) => (
-            <button
-              key={session.id}
-              type="button"
-              role="tab"
-              aria-selected={session.id === activeId}
-              className={
-                session.id === activeId ? 'session-tab active' : 'session-tab'
-              }
-              onClick={() => void switchTo(session.id)}
-              disabled={busy}
-              title={`${session.title} · ${session.messageCount} message(s)`}
-            >
-              {session.title}
-            </button>
-          ))}
+          <input
+            className="session-search"
+            aria-label="Search conversations"
+            placeholder="Search…"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            maxLength={120}
+          />
+          {visibleSessions.map((session) => {
+            const match = matchById.get(session.id)
+            const title = match
+              ? `${session.title} · ${match.matchCount} match(es)${match.snippet ? ` — ${match.snippet}` : ''}`
+              : `${session.title} · ${session.messageCount} message(s)`
+
+            return (
+              <button
+                key={session.id}
+                type="button"
+                role="tab"
+                aria-selected={session.id === activeId}
+                className={
+                  session.id === activeId ? 'session-tab active' : 'session-tab'
+                }
+                onClick={() => void switchTo(session.id)}
+                disabled={busy}
+                title={title}
+              >
+                {session.title}
+              </button>
+            )
+          })}
+          {searchMatches !== null && visibleSessions.length === 0 && (
+            <span className="muted session-empty">
+              {searching ? 'Searching…' : 'No conversations match.'}
+            </span>
+          )}
           <button
             type="button"
             className="mini-btn"

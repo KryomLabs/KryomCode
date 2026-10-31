@@ -98,6 +98,9 @@ contextBridge.exposeInMainWorld('kryom', {
   deleteChatSession: (payload) =>
     ipcRenderer.invoke('chat:delete', payload),
 
+  searchChatSessions: (payload) =>
+    ipcRenderer.invoke('chat:search', payload),
+
   planAgentTask: (payload) =>
     ipcRenderer.invoke('agent:plan', payload),
 

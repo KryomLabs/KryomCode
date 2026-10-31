@@ -3,6 +3,9 @@ import { kryom, errorMessage, isCancelError } from '../api/kryom'
 import { classifyIntent } from './intent'
 import { AiKeyNotice } from './AiKeyNotice'
 import { MarkdownLite } from './MarkdownLite'
+import { classifyAIError, type AIErrorKind } from './meta-timeline'
+import { useProviderModels } from '../hooks/useProviderModels'
+import { modelDisplayName } from '../utils/models'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -26,6 +29,8 @@ export interface AiChatProps {
   // Workbench routing: offered explicitly on user messages that look
   // like coding tasks. Never fires silently — the user chooses.
   onOpenInAgent?: (text: string) => void
+  // Opens an attachment in the editor. Absent = chips are labels.
+  onOpenFile?: (path: string) => void
   // Controlled attachments (ChatSessions keeps one set per
   // conversation). Absent = local state, so standalone use works.
   attachments?: KryomContextFile[]
@@ -33,8 +38,6 @@ export interface AiChatProps {
     updater: (previous: KryomContextFile[]) => KryomContextFile[]
   ) => void
 }
-
-const MODELS = ['muse-spark-1.3', 'muse-wonder-1.0'] as const
 
 // Attachment context: user-picked file excerpts ride with each
 // request as a delimited block, so the model can tell them apart
@@ -82,6 +85,23 @@ export function AiChat(props: AiChatProps) {
   const [loading, setLoading] = useState(false)
   const [restored, setRestored] = useState(false)
   const [error, setError] = useState('')
+  const [errorKind, setErrorKind] = useState<AIErrorKind>('unknown')
+  const [failedPrompt, setFailedPrompt] = useState<string | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+  // Models come from the backend catalog (real routing); when the
+  // catalog is unreachable the picker falls back to the stored model
+  // so the conversation never breaks. The current model is always an
+  // option, even if the catalog no longer lists it.
+  const { models: catalogModels } = useProviderModels('meta')
+  const modelOptions =
+    catalogModels.length === 0
+      ? [{ modelId: model, displayName: modelDisplayName(model) }]
+      : catalogModels.some((entry) => entry.modelId === model)
+        ? catalogModels
+        : [
+            { modelId: model, displayName: modelDisplayName(model) },
+            ...catalogModels,
+          ]
   const [includeFileContext, setIncludeFileContext] = useState(
     props.contextEnabled
   )
@@ -98,6 +118,7 @@ export function AiChat(props: AiChatProps) {
   const [attaching, setAttaching] = useState(false)
   const [attachError, setAttachError] = useState('')
   const messagesRef = useRef<HTMLDivElement | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
   // Stick-to-bottom follows new messages only while the reader is
   // already near the bottom; scrolling up pins the view so older
   // messages can be read undisturbed.
@@ -144,6 +165,56 @@ export function AiChat(props: AiChatProps) {
   useEffect(() => {
     setIncludeFileContext(props.contextEnabled)
   }, [props.contextEnabled])
+
+  // Real request status: elapsed seconds while waiting. The provider
+  // exposes no streaming API, so there is no fake token stream —
+  // just an honest "still working" clock.
+  useEffect(() => {
+    if (!loading) {
+      setElapsed(0)
+      return
+    }
+
+    const started = Date.now()
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - started) / 1000))
+    }, 500)
+
+    return () => clearInterval(timer)
+  }, [loading])
+
+  // Escape stops the in-flight request. The composer is disabled
+  // while loading, so this listens globally instead of on the field.
+  useEffect(() => {
+    if (!loading) {
+      return
+    }
+
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        stopRequest()
+      }
+    }
+
+    window.addEventListener('keydown', onKey)
+
+    return () => window.removeEventListener('keydown', onKey)
+    // stopRequest is stable (refs + setState); loading re-arms it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading])
+
+  // The composer grows with the prompt up to 200px, then scrolls.
+  useEffect(() => {
+    const field = composerRef.current
+
+    if (!field) {
+      return
+    }
+
+    field.style.height = 'auto'
+    field.style.height = `${Math.min(field.scrollHeight, 200)}px`
+  }, [prompt])
 
   async function attachFiles() {
     if (attaching) {
@@ -354,6 +425,8 @@ export function AiChat(props: AiChatProps) {
     }
 
     setError('')
+    setErrorKind('unknown')
+    setFailedPrompt(null)
     setKeyMissing(false)
     setLoading(true)
 
@@ -363,9 +436,17 @@ export function AiChat(props: AiChatProps) {
 
     try {
       const context = withAttachments(await buildContext(), attachments)
-      const history: KryomAIMessage[] = messages
-        .slice(-10)
-        .map((message) => ({ role: message.role, content: message.content }))
+      // A trailing history message identical to the prompt adds
+      // nothing (retry pops the message but this closure still holds
+      // it), so it is dropped from the history half of the request.
+      const historySlice = messages.slice(-10)
+      const history: KryomAIMessage[] = (
+        historySlice.length > 0 &&
+        historySlice[historySlice.length - 1].role === 'user' &&
+        historySlice[historySlice.length - 1].content === userPrompt
+          ? historySlice.slice(0, -1)
+          : historySlice
+      ).map((message) => ({ role: message.role, content: message.content }))
 
       const attachedResearch =
         includeResearch && props.researchSessionId
@@ -410,7 +491,10 @@ export function AiChat(props: AiChatProps) {
       if (isCancelError(e)) {
         props.onStatus('AI request cancelled')
       } else {
-        setError(errorMessage(e))
+        const message = errorMessage(e)
+        setError(message)
+        setErrorKind(classifyAIError(message))
+        setFailedPrompt(userPrompt)
       }
     } finally {
       if (generation === sendGenerationRef.current) {
@@ -424,6 +508,30 @@ export function AiChat(props: AiChatProps) {
     setLoading(false)
     props.onStatus('AI request cancelled')
     kryom().cancelAI().catch(() => undefined)
+  }
+
+  // Retry re-sends the failed prompt without duplicating it: the
+  // failed attempt already appended the user message, so it is
+  // removed first and the send below appends it again.
+  async function retryLast() {
+    if (loading || failedPrompt === null) {
+      return
+    }
+
+    const text = failedPrompt
+    setFailedPrompt(null)
+    setError('')
+    setErrorKind('unknown')
+    setMessages((previous) => {
+      const last = previous[previous.length - 1]
+
+      if (last && last.role === 'user' && last.content === text) {
+        return previous.slice(0, -1)
+      }
+
+      return previous
+    })
+    await sendWithText(text)
   }
 
   async function sendMessage() {
@@ -457,20 +565,65 @@ export function AiChat(props: AiChatProps) {
     }
   }
 
+  // Code blocks route through the Agent tab so every change is
+  // planned, reviewed, and approved there — chat never edits files.
+  function sendCodeToAgent(code: string, lang: string) {
+    const label = lang.trim() ? `${lang.trim()} ` : ''
+
+    props.onOpenInAgent?.(
+      `Apply this ${label}suggestion from our chat to the project. ` +
+        `Review it first — propose the changes, then wait for approval.\n\n` +
+        `\`\`\`${lang}\n${code}\n\`\`\``
+    )
+  }
+
   // One-line context summary for the compact toolbar; the full
   // explanation stays available as a tooltip.
-  const contextShort =
+  const contextParts: string[] = [
     includeFileContext && props.activeFile
       ? `${props.fileName}${props.dirty ? ' •' : ''}`
       : includeFileContext
         ? 'workspace summary'
-        : 'context off'
+        : 'context off',
+  ]
+
+  if (attachments.length > 0) {
+    contextParts.push(
+      `+${attachments.length} file${attachments.length === 1 ? '' : 's'}`
+    )
+  }
+
+  if (includeResearch && props.researchSessionId) {
+    contextParts.push('research')
+  }
+
+  const contextShort = contextParts.join(' · ')
   const contextTitle =
-    includeFileContext && props.activeFile
+    (includeFileContext && props.activeFile
       ? `Context: ${props.fileName}${props.dirty ? ' (unsaved edits included)' : ''}`
       : includeFileContext
         ? 'No active file. A short workspace summary (~4,000 chars) is used instead.'
-        : 'File context is disabled. Only your prompt and recent messages are sent.'
+        : 'File context is disabled. Only your prompt and recent messages are sent.') +
+    (attachments.length > 0
+      ? ` ${attachments.length} attached file(s) ride along as excerpts.`
+      : '') +
+    ' Auto-attached file and workspace context is scanned for secrets before sending.'
+
+  const errorTitle =
+    errorKind === 'auth'
+      ? 'Meta AI authentication failed'
+      : errorKind === 'rate-limit'
+        ? 'Meta AI rate limit reached'
+        : errorKind === 'missing-key'
+          ? 'Meta AI is not configured'
+          : errorKind === 'network'
+            ? 'Meta AI request failed'
+            : 'AI request failed'
+  const retryable =
+    failedPrompt !== null &&
+    (errorKind === 'network' ||
+      errorKind === 'rate-limit' ||
+      errorKind === 'unknown')
 
   return (
     <section className="ai-panel">
@@ -481,11 +634,11 @@ export function AiChat(props: AiChatProps) {
           onChange={(event) => setModel(event.target.value)}
           disabled={loading}
           aria-label="AI model"
-          title="Model for this conversation"
+          title="Model for this conversation (from the configured Meta catalog)"
         >
-          {MODELS.map((id) => (
-            <option key={id} value={id}>
-              {id === 'muse-spark-1.3' ? 'Muse Spark 1.3' : 'Muse Wonder 1.0'}
+          {modelOptions.map((option) => (
+            <option key={option.modelId} value={option.modelId}>
+              {option.displayName}
             </option>
           ))}
         </select>
@@ -548,6 +701,60 @@ export function AiChat(props: AiChatProps) {
             <p className="muted">
               Ask about your code or request an explanation.
             </p>
+            {!loading && (
+              <div className="suggest-chips" role="group" aria-label="Suggested prompts">
+                {props.activeFile && (
+                  <>
+                    <button
+                      type="button"
+                      className="suggest-chip"
+                      onClick={() =>
+                        void sendWithText(
+                          `Explain ${props.fileName}: what it does, its key parts, and how it fits the project.`
+                        )
+                      }
+                    >
+                      Explain this file
+                    </button>
+                    <button
+                      type="button"
+                      className="suggest-chip"
+                      onClick={() =>
+                        void sendWithText(
+                          `Suggest tests for ${props.fileName}. List concrete test cases with what each verifies.`
+                        )
+                      }
+                    >
+                      Generate tests
+                    </button>
+                    <button
+                      type="button"
+                      className="suggest-chip"
+                      onClick={() =>
+                        void sendWithText(
+                          `Review ${props.fileName} for bugs, risks, and improvements. Be specific.`
+                        )
+                      }
+                    >
+                      Review this file
+                    </button>
+                  </>
+                )}
+                {props.workspaceRoot && !props.activeFile && (
+                  <button
+                    type="button"
+                    className="suggest-chip"
+                    onClick={() =>
+                      void sendWithText(
+                        'Summarize this project: its purpose, structure, and how to build and test it.'
+                      )
+                    }
+                  >
+                    Summarize this project
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -586,7 +793,12 @@ export function AiChat(props: AiChatProps) {
             {message.role === 'user' ? (
               <p className="md-para">{message.content}</p>
             ) : (
-              <MarkdownLite text={message.content} />
+              <MarkdownLite
+                text={message.content}
+                onSendToAgent={
+                  props.onOpenInAgent ? sendCodeToAgent : undefined
+                }
+              />
             )}
           </article>
         ))}
@@ -594,18 +806,45 @@ export function AiChat(props: AiChatProps) {
         {loading && (
           <div className="ai-loading" role="status">
             <span className="loading-dot" />
-            Kryom AI is thinking…
+            Contacting Meta AI…{elapsed > 0 ? ` ${elapsed}s` : ''} · Esc to
+            stop
           </div>
         )}
       </div>
 
       {error && (
         <div className="ai-error" role="alert">
-          <strong>AI request failed</strong>
+          <strong>{errorTitle}</strong>
           <p>{error}</p>
-          <button onClick={() => setError('')} className="secondary-button">
-            Dismiss
-          </button>
+          <div className="notice-actions">
+            {(errorKind === 'auth' || errorKind === 'missing-key') &&
+              props.onOpenConnections && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => props.onOpenConnections?.()}
+                >
+                  Open Provider Settings
+                </button>
+              )}
+            {retryable && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void retryLast()}
+                disabled={loading}
+              >
+                Retry
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setError('')}
+              className="secondary-button"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -621,6 +860,7 @@ export function AiChat(props: AiChatProps) {
         }}
       >
         <textarea
+          ref={composerRef}
           aria-label="Ask Kryom AI"
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
@@ -644,7 +884,18 @@ export function AiChat(props: AiChatProps) {
                 className="attach-chip"
                 title={`${file.path} · ${file.chars} chars${file.truncated ? ' (truncated)' : ''}`}
               >
-                {file.name}
+                {props.onOpenFile ? (
+                  <button
+                    type="button"
+                    className="attach-open"
+                    onClick={() => props.onOpenFile?.(file.path)}
+                    title={`Open ${file.path} in the editor`}
+                  >
+                    {file.name}
+                  </button>
+                ) : (
+                  file.name
+                )}
                 <button
                   type="button"
                   className="attach-remove"
@@ -684,7 +935,12 @@ export function AiChat(props: AiChatProps) {
           </button>
           <span className="spacer" />
           {loading ? (
-            <button type="button" onClick={stopRequest}>
+            <button
+              type="button"
+              className="stop-btn"
+              onClick={stopRequest}
+              title="Stop the in-flight request (Esc)"
+            >
               Stop
             </button>
           ) : (

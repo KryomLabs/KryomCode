@@ -13,6 +13,11 @@ export interface ProblemsPanelProps {
   pendingRun?: { nonce: number } | null
   onResult?: (count: number, success: boolean) => void
   onDiagnostics?: (result: KryomDiagnosticsResult | null) => void
+  // Explains one diagnostic in home chat. Absent = no Ask AI button.
+  onExplainDiagnostic?: (report: {
+    diagnostic: KryomDiagnostic
+    command: string
+  }) => void
 }
 
 function suggestCommand(scripts: string[]): string {
@@ -213,28 +218,48 @@ export function ProblemsPanel(props: ProblemsPanelProps) {
 
           <div className="diagnostics-list">
             {result.diagnostics.map((diagnostic, index) => (
-              <button
+              <div
                 key={`${diagnostic.file}:${diagnostic.line}:${diagnostic.column}:${index}`}
                 className="diagnostic-row"
-                onClick={() =>
-                  props.onOpenFileAtLine(
-                    resolvePath(diagnostic.file),
-                    diagnostic.line
-                  )
-                }
-                title={`Open ${diagnostic.file}`}
               >
-                <span className={`severity severity-${diagnostic.severity}`}>
-                  {diagnostic.severity.toUpperCase()}
-                </span>
-                <span className="diagnostic-location">
-                  {diagnostic.file}:{diagnostic.line}:{diagnostic.column}
-                </span>
-                <span className="diagnostic-message">
-                  {diagnostic.code ? `${diagnostic.code} ` : ''}
-                  {diagnostic.message}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  className="diagnostic-open"
+                  onClick={() =>
+                    props.onOpenFileAtLine(
+                      resolvePath(diagnostic.file),
+                      diagnostic.line
+                    )
+                  }
+                  title={`Open ${diagnostic.file}`}
+                >
+                  <span className={`severity severity-${diagnostic.severity}`}>
+                    {diagnostic.severity.toUpperCase()}
+                  </span>
+                  <span className="diagnostic-location">
+                    {diagnostic.file}:{diagnostic.line}:{diagnostic.column}
+                  </span>
+                  <span className="diagnostic-message">
+                    {diagnostic.code ? `${diagnostic.code} ` : ''}
+                    {diagnostic.message}
+                  </span>
+                </button>
+                {props.onExplainDiagnostic && (
+                  <button
+                    type="button"
+                    className="mini-btn diagnostic-ask"
+                    onClick={() =>
+                      props.onExplainDiagnostic?.({
+                        diagnostic,
+                        command: command.trim(),
+                      })
+                    }
+                    title="Explain this error with Kryom AI"
+                  >
+                    Ask AI
+                  </button>
+                )}
+              </div>
             ))}
 
             {result.diagnostics.length === 0 && (

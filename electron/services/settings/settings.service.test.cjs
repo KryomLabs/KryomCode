@@ -6,6 +6,7 @@ const fs = require('node:fs/promises')
 
 const {
   DEFAULTS,
+  SUPPORTED_DEFAULT_MODELS,
   readSettings,
   updateSettings,
 } = require('./settings.service.cjs')
@@ -20,6 +21,21 @@ describe('settings.service', () => {
 
     assert.deepEqual(await readSettings(baseDir), DEFAULTS)
     assert.equal(DEFAULTS.confirmAllCommands, false)
+  })
+
+  it('derives supported models from the registered Meta descriptor', () => {
+    const {
+      metaDescriptor,
+    } = require('../ai/providers/meta-muse.provider.cjs')
+
+    assert.deepEqual(
+      SUPPORTED_DEFAULT_MODELS,
+      metaDescriptor.models.map((model) => model.id)
+    )
+    assert.equal(
+      DEFAULTS.defaultModel,
+      metaDescriptor.models.find((model) => model.isDefault).id
+    )
   })
 
   it('persists the confirm-all-commands preference', async () => {
