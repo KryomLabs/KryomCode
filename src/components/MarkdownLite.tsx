@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type ReactElement, type ReactNode } from 'react'
 
 // Dependency-free renderer for model and brief text. Supports fenced
 // code blocks (with Copy), headings, lists, quotes, inline code, and
@@ -121,7 +121,46 @@ function parseBlocks(text: string): Block[] {
   return blocks
 }
 
-function renderInline(text: string, keyPrefix: string): ReactNode[] {
+function renderCitationChunk(
+  chunk: string,
+  keyPrefix: string,
+  onCitation?: (index: number) => void
+): ReactElement[] {
+  if (!onCitation) {
+    return [<span key={keyPrefix}>{chunk}</span>]
+  }
+
+  // Citation markers [n] become buttons that jump to the source; all
+  // other text stays inert spans, exactly as before.
+  return chunk.split(/(\[\d{1,3}\])/g).map((part, partIndex) => {
+    const match = part.match(/^\[(\d{1,3})\]$/)
+
+    if (match) {
+      const index = parseInt(match[1], 10)
+
+      return (
+        <button
+          key={`${keyPrefix}-cite${partIndex}`}
+          type="button"
+          className="md-cite"
+          onClick={() => onCitation(index)}
+          title={`Open source ${index}`}
+          aria-label={`Open source ${index}`}
+        >
+          [{index}]
+        </button>
+      )
+    }
+
+    return <span key={`${keyPrefix}-t${partIndex}`}>{part}</span>
+  })
+}
+
+function renderInline(
+  text: string,
+  keyPrefix: string,
+  onCitation?: (index: number) => void
+): ReactNode[] {
   const codeSplit = text.split(/(`[^`\n]+`)/g)
 
   return codeSplit.flatMap((part, partIndex) => {
@@ -135,19 +174,35 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       ]
     }
 
-    return part.split(/(\*\*[^*\n]+\*\*)/g).map((chunk, chunkIndex) => {
+    return part.split(/(\*\*[^*\n]+\*\*)/g).flatMap((chunk, chunkIndex) => {
       const boldMatch = chunk.match(/^\*\*([^*`\n]+)\*\*$/)
 
       if (boldMatch) {
-        return (
+        // Without citations the legacy shape (raw string child) is
+        // preserved exactly; citation splitting only wraps when asked.
+        if (!onCitation) {
+          return [
+            <strong key={`${keyPrefix}-b${partIndex}-${chunkIndex}`}>
+              {boldMatch[1]}
+            </strong>,
+          ]
+        }
+
+        return [
           <strong key={`${keyPrefix}-b${partIndex}-${chunkIndex}`}>
-            {boldMatch[1]}
-          </strong>
-        )
+            {renderCitationChunk(
+              boldMatch[1],
+              `${keyPrefix}-b${partIndex}-${chunkIndex}`,
+              onCitation
+            )}
+          </strong>,
+        ]
       }
 
-      return (
-        <span key={`${keyPrefix}-t${partIndex}-${chunkIndex}`}>{chunk}</span>
+      return renderCitationChunk(
+        chunk,
+        `${keyPrefix}-t${partIndex}-${chunkIndex}`,
+        onCitation
       )
     })
   })
@@ -521,9 +576,11 @@ function CodeBlock({
 export function MarkdownLite({
   text,
   onSendToAgent,
+  onCitation,
 }: {
   text: string
   onSendToAgent?: (code: string, lang: string) => void
+  onCitation?: (index: number) => void
 }) {
   const blocks = parseBlocks(text)
 
@@ -548,7 +605,7 @@ export function MarkdownLite({
         }
 
         if (block.kind === 'heading') {
-          const content = renderInline(block.text, key)
+          const content = renderInline(block.text, key, onCitation)
 
           if (block.level === 1) {
             return (
@@ -576,7 +633,7 @@ export function MarkdownLite({
         if (block.kind === 'list') {
           const items = block.items.map((item, itemIndex) => (
             <li key={`${key}-i${itemIndex}`}>
-              {renderInline(item, `${key}-i${itemIndex}`)}
+              {renderInline(item, `${key}-i${itemIndex}`, onCitation)}
             </li>
           ))
 
@@ -594,14 +651,14 @@ export function MarkdownLite({
         if (block.kind === 'quote') {
           return (
             <blockquote key={key} className="md-quote">
-              {renderInline(block.text, key)}
+              {renderInline(block.text, key, onCitation)}
             </blockquote>
           )
         }
 
         return (
           <p key={key} className="md-para">
-            {renderInline(block.text, key)}
+            {renderInline(block.text, key, onCitation)}
           </p>
         )
       })}

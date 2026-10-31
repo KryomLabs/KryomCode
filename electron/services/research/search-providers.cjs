@@ -4,6 +4,8 @@
 // so new sources can be added without touching the research workflow.
 // Built-in providers need no API key. Optional providers (Tavily)
 // activate only when their credential is configured.
+const crypto = require('node:crypto')
+
 const { createLogger } = require('../../utils/logger.cjs')
 const { getSecret } = require('../settings/secrets.service.cjs')
 
@@ -75,7 +77,13 @@ function normalizeSource(raw) {
     return null
   }
 
+  // Stable internal id derived from the canonical key (DOI-first),
+  // so evidence, findings, and citations link by id — never by the
+  // source's position in a list.
+  const id = `src-${crypto.createHash('sha1').update(canonicalKey({ url, doi: typeof raw.doi === 'string' ? raw.doi : null })).digest('hex').slice(0, 12)}`
+
   return {
+    id,
     provider: cleanText(raw.provider, 60) || 'unknown',
     title: cleanText(raw.title, 500) || '(untitled)',
     url: url.slice(0, 2000),
@@ -219,6 +227,10 @@ const ARXIV_STOPWORDS = new Set([
   'compare', 'comparison', 'versus', 'overview', 'study', 'studies',
   'analysis', 'review', 'explore', 'investigate', 'explain',
   'understand', 'evaluate', 'evaluation',
+  'approach', 'approaches', 'build', 'building', 'built', 'include',
+  'includes', 'including', 'useful', 'usage', 'key', 'role', 'impact',
+  'impacts', 'recent', 'future', 'trends', 'toward', 'towards',
+  'within', 'without', 'across', 'level', 'high', 'low',
 ])
 
 function toArxivQuery(query) {
@@ -462,15 +474,155 @@ async function tavilySearch(query, { limit = 5, signal, fetchImpl = fetch, apiKe
   }
 }
 
+function crossrefDate(item) {
+  const parts = item?.published?.['date-parts']?.[0]
+    || item?.['published-print']?.['date-parts']?.[0]
+    || item?.['published-online']?.['date-parts']?.[0]
+
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return null
+  }
+
+  const [year, month, day] = parts
+
+  if (!Number.isInteger(year)) {
+    return null
+  }
+
+  const pad = (value) => String(value || 1).padStart(2, '0')
+
+  return `${year}-${pad(month)}-${pad(day)}`
+}
+
+function parseCrossrefJson(data) {
+  const items = Array.isArray(data?.message?.items) ? data.message.items : []
+
+  return items.map((item) => {
+    const authors = Array.isArray(item.author) ? item.author : []
+    const names = authors
+      .map((entry) => [entry?.given, entry?.family].filter(Boolean).join(' '))
+      .filter((name) => typeof name === 'string' && name.trim())
+      .slice(0, 8)
+    const title = Array.isArray(item.title) ? item.title[0] : item.title
+
+    return {
+      provider: 'crossref',
+      title: typeof title === 'string' ? title : '',
+      url: typeof item.URL === 'string' ? item.URL : '',
+      authors: names,
+      publishedAt: crossrefDate(item),
+      abstract: typeof item.abstract === 'string' ? item.abstract : '',
+      venue: Array.isArray(item['container-title']) ? String(item['container-title'][0] || '') : '',
+      doi: typeof item.DOI === 'string' ? item.DOI : null,
+      sourceType: 'paper',
+      accessStatus: 'unknown',
+    }
+  })
+}
+
+// Crossref public REST API (api.crossref.org/works). No key needed;
+// the documented anonymous pool is used deliberately — no contact
+// identity is fabricated for the polite pool.
+async function crossrefSearch(query, { limit = 5, signal, fetchImpl = fetch } = {}) {
+  const count = normalizeLimit(limit)
+  const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(String(query).slice(0, 300))}&rows=${count}&select=DOI,title,author,published,published-print,published-online,URL,publisher,container-title,abstract`
+  const response = await fetchWithTimeout(fetchImpl, url, {
+    signal,
+    headers: { Accept: 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Crossref search failed (HTTP ${response.status}).`)
+  }
+
+  const data = await response.json().catch(() => ({}))
+
+  return parseCrossrefJson(data)
+    .slice(0, count)
+    .map(normalizeSource)
+    .filter(Boolean)
+}
+
+function parseSemanticScholarJson(data) {
+  const papers = Array.isArray(data?.data) ? data.data : []
+
+  return papers.map((paper) => {
+    const authors = Array.isArray(paper.authors) ? paper.authors : []
+    const names = authors
+      .map((entry) => entry?.name)
+      .filter((name) => typeof name === 'string')
+      .slice(0, 8)
+    const pdfUrl = paper?.openAccessPdf?.url
+    const landing = typeof paper.url === 'string' && paper.url
+      ? paper.url
+      : (typeof pdfUrl === 'string' ? pdfUrl : '')
+    const isOpen = typeof pdfUrl === 'string' && pdfUrl.length > 0
+    const doi = paper?.externalIds?.DOI
+
+    return {
+      provider: 'semanticscholar',
+      title: typeof paper.title === 'string' ? paper.title : '',
+      url: landing,
+      authors: names,
+      publishedAt: Number.isInteger(paper.year) ? String(paper.year) : null,
+      abstract: typeof paper.abstract === 'string' ? paper.abstract : '',
+      venue: typeof paper.venue === 'string' ? paper.venue : '',
+      doi: typeof doi === 'string' ? doi : null,
+      sourceType: isOpen ? 'paper-open' : 'paper',
+      accessStatus: isOpen ? 'open' : 'unknown',
+    }
+  })
+}
+
+// Semantic Scholar Academic Graph (api.semanticscholar.org/graph/v1).
+// Documented keyless endpoint. Concurrent sub-questions would burst
+// past the unauthenticated rate limit, so calls are paced to one per
+// 1.1 seconds; remaining 429s are recorded as provider errors.
+let lastSemanticScholarAt = 0
+
+async function paceSemanticScholar() {
+  const wait = 1100 - (Date.now() - lastSemanticScholarAt)
+
+  if (wait > 0) {
+    await new Promise((resolve) => setTimeout(resolve, wait))
+  }
+
+  lastSemanticScholarAt = Date.now()
+}
+
+async function semanticScholarSearch(query, { limit = 5, signal, fetchImpl = fetch } = {}) {
+  await paceSemanticScholar()
+
+  const count = normalizeLimit(limit)
+  const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(String(query).slice(0, 300))}&limit=${count}&fields=title,authors,year,abstract,url,venue,openAccessPdf,externalIds`
+  const response = await fetchWithTimeout(fetchImpl, url, {
+    signal,
+    headers: { Accept: 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Semantic Scholar search failed (HTTP ${response.status}).`)
+  }
+
+  const data = await response.json().catch(() => ({}))
+
+  return parseSemanticScholarJson(data)
+    .slice(0, count)
+    .map(normalizeSource)
+    .filter(Boolean)
+}
+
 function availableProviders() {
   const providers = [
-    { name: 'arxiv', needsKey: false, run: arxivSearch },
-    { name: 'openalex', needsKey: false, run: openAlexSearch },
-    { name: 'duckduckgo', needsKey: false, run: duckDuckGoSearch },
+    { name: 'arxiv', kind: 'paper', needsKey: false, run: arxivSearch },
+    { name: 'openalex', kind: 'paper', needsKey: false, run: openAlexSearch },
+    { name: 'crossref', kind: 'paper', needsKey: false, run: crossrefSearch },
+    { name: 'semanticscholar', kind: 'paper', needsKey: false, run: semanticScholarSearch },
+    { name: 'duckduckgo', kind: 'web', needsKey: false, run: duckDuckGoSearch },
   ]
 
   if (tavilyKey()) {
-    providers.push({ name: 'tavily', needsKey: true, run: tavilySearch })
+    providers.push({ name: 'tavily', kind: 'web', needsKey: true, run: tavilySearch })
   }
 
   return providers
@@ -525,12 +677,16 @@ module.exports = {
   canonicalKey,
   arxivSearch,
   openAlexSearch,
+  crossrefSearch,
+  semanticScholarSearch,
   duckDuckGoSearch,
   tavilySearch,
   availableProviders,
   searchAll,
   parseArxivXml,
   parseOpenAlexJson,
+  parseCrossrefJson,
+  parseSemanticScholarJson,
   parseDuckDuckGoJson,
   toArxivQuery,
 }

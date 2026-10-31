@@ -6,8 +6,11 @@ const {
   deduplicateSources,
   arxivSearch,
   openAlexSearch,
+  crossrefSearch,
+  semanticScholarSearch,
   duckDuckGoSearch,
   tavilySearch,
+  availableProviders,
   searchAll,
   toArxivQuery,
 } = require('./search-providers.cjs')
@@ -203,6 +206,106 @@ describe('research search providers', () => {
     assert.equal(calls[0].options.method, 'POST')
     assert.equal(calls[0].options.redirect, 'error')
     assert.equal(JSON.parse(calls[0].options.body).api_key, 'test-key')
+  })
+
+  it('assigns stable ids derived from the canonical key', () => {
+    const first = normalizeSource({ provider: 'x', title: 't', url: 'https://example.com/paper/', doi: '10.1/ABC' })
+    const second = normalizeSource({ provider: 'y', title: 't2', url: 'https://example.com/paper?utm_source=x', doi: '10.1/abc' })
+
+    assert.match(first.id, /^src-[0-9a-f]{12}$/)
+    assert.equal(first.id, second.id)
+  })
+
+  it('parses Crossref works with authors and dates', async () => {
+    const fetchImpl = async (url) => {
+      assert.match(url, /^https:\/\/api\.crossref\.org\/works\?/)
+
+      return jsonResponse({
+        message: {
+          items: [
+            {
+              DOI: '10.9999/crossref-test',
+              title: ['Crossref Test Paper'],
+              author: [{ given: 'Marie', family: 'Curie' }],
+              published: { 'date-parts': [[2022, 7, 9]] },
+              URL: 'https://doi.org/10.9999/crossref-test',
+              'container-title': ['Test Journal'],
+              abstract: '<jats:p>An abstract.</jats:p>',
+            },
+          ],
+        },
+      })
+    }
+    const sources = await crossrefSearch('radioactivity', { fetchImpl })
+
+    assert.equal(sources.length, 1)
+    assert.equal(sources[0].provider, 'crossref')
+    assert.equal(sources[0].title, 'Crossref Test Paper')
+    assert.deepEqual(sources[0].authors, ['Marie Curie'])
+    assert.equal(sources[0].publishedAt, '2022-07-09')
+    assert.equal(sources[0].doi, '10.9999/crossref-test')
+    assert.equal(sources[0].abstract, 'An abstract.')
+  })
+
+  it('parses Semantic Scholar papers with open-access detection', async () => {
+    const fetchImpl = async (url) => {
+      assert.match(url, /^https:\/\/api\.semanticscholar\.org\/graph\/v1\/paper\/search\?/)
+
+      return jsonResponse({
+        data: [
+          {
+            title: 'Scholar Test Paper',
+            authors: [{ name: 'Alan Turing' }],
+            year: 2021,
+            abstract: 'Computation abstract.',
+            url: 'https://example.com/scholar',
+            venue: 'Test Conf',
+            openAccessPdf: { url: 'https://example.com/scholar.pdf' },
+            externalIds: { DOI: '10.8888/scholar' },
+          },
+          {
+            title: 'Closed Paper',
+            authors: [],
+            year: null,
+            abstract: '',
+            url: 'https://example.com/closed',
+            venue: '',
+            openAccessPdf: null,
+            externalIds: {},
+          },
+        ],
+      })
+    }
+    const sources = await semanticScholarSearch('computation', { fetchImpl })
+
+    assert.equal(sources.length, 2)
+    assert.equal(sources[0].provider, 'semanticscholar')
+    assert.equal(sources[0].accessStatus, 'open')
+    assert.equal(sources[0].sourceType, 'paper-open')
+    assert.equal(sources[0].doi, '10.8888/scholar')
+    assert.equal(sources[1].accessStatus, 'unknown')
+    assert.equal(sources[1].publishedAt, null)
+  })
+
+  it('paces Semantic Scholar calls to respect the rate limit', async () => {
+    const fetchImpl = async () => jsonResponse({ data: [] })
+    const started = Date.now()
+
+    await semanticScholarSearch('first', { fetchImpl })
+    await semanticScholarSearch('second', { fetchImpl })
+
+    assert.ok(Date.now() - started >= 1000, 'rapid calls must be paced apart')
+  })
+
+  it('labels providers with paper and web kinds', () => {
+    const providers = availableProviders()
+    const kinds = new Map(providers.map((entry) => [entry.name, entry.kind]))
+
+    assert.equal(kinds.get('arxiv'), 'paper')
+    assert.equal(kinds.get('openalex'), 'paper')
+    assert.equal(kinds.get('crossref'), 'paper')
+    assert.equal(kinds.get('semanticscholar'), 'paper')
+    assert.equal(kinds.get('duckduckgo'), 'web')
   })
 })
 

@@ -1515,6 +1515,59 @@ section.editor-panel > .welcome {
   white-space: normal;
 }
 
+/* Deep Research workspace: compact tab strip, inline citation
+   buttons, and composer options. All colors come from the active
+   theme tokens so light and dark themes keep working. */
+.research-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+
+.research-tab {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px 6px 0 0;
+  border-bottom-color: transparent;
+}
+
+.research-tab.active {
+  background: var(--kc-panel-deep);
+  border-color: var(--kc-border);
+  border-bottom-color: var(--kc-panel-deep);
+  color: var(--kc-text);
+}
+
+.md-cite {
+  display: inline-block;
+  padding: 0 5px;
+  margin: 0 1px;
+  font-size: 11px;
+  line-height: 1.6;
+  border-radius: 4px;
+  color: var(--kc-accent);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.md-cite:hover:not(:disabled) {
+  background: var(--kc-panel-alt);
+  border-color: var(--kc-border);
+}
+
+.research-options {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.research-options select {
+  padding: 6px;
+  font-size: 12px;
+}
+
 .apply-result {
   margin: 10px 12px 0;
   padding: 10px;

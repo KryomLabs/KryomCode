@@ -549,7 +549,19 @@ interface KryomResearchStep {
   finishedAt: string | null
 }
 
+interface KryomResearchQualitySignal {
+  label: string
+  detail: string
+  polarity: 'positive' | 'neutral' | 'caution'
+}
+
+interface KryomResearchQuality {
+  signals: KryomResearchQualitySignal[]
+  summary: string
+}
+
 interface KryomResearchSource {
+  id?: string
   provider: string
   title: string
   url: string
@@ -561,6 +573,9 @@ interface KryomResearchSource {
   sourceType: string
   accessStatus: string
   excerpt: string
+  supports?: string[]
+  retrievedAt?: string | null
+  quality?: KryomResearchQuality | null
 }
 
 interface KryomResearchFinding {
@@ -570,16 +585,61 @@ interface KryomResearchFinding {
   note: string
 }
 
+interface KryomResearchSubQuestion {
+  id: string
+  text: string
+  queries: string[]
+  status: 'pending' | 'running' | 'done' | 'failed'
+  sourcesFound?: number
+  error?: string
+}
+
+interface KryomResearchPlan {
+  subQuestions: KryomResearchSubQuestion[]
+  searchTerms: string[]
+  evidenceNeeds: string[]
+  ambiguityNotes: string[]
+  via: string
+}
+
+interface KryomResearchClaim {
+  id: string
+  text: string
+  sourceId: string | null
+  questionIds: string[]
+  method: string
+  status?: string
+  supportingSourceIds?: string[]
+  explanation?: string
+  conflictNote?: string
+}
+
+interface KryomResearchConflict {
+  id: string
+  claimIds: string[]
+  sourceIds: string[]
+  topic: string
+  status: string
+  description: string
+}
+
+type KryomResearchDepth = 'quick' | 'standard' | 'deep'
+
 interface KryomResearchSession {
   id: string
   version: number
   objective: string
+  name?: string
+  depth?: KryomResearchDepth
   questions: string[]
-  queries: Array<{ query: string; at: string }>
+  queries: Array<{ query: string; questionId?: string; at: string }>
   steps: KryomResearchStep[]
+  plan?: KryomResearchPlan
   sources: KryomResearchSource[]
   evidence: Array<{ sourceUrl: string; excerpt: string; at: string }>
   findings: KryomResearchFinding[]
+  claims?: KryomResearchClaim[]
+  conflicts?: KryomResearchConflict[]
   decisions: Array<{ text: string; at: string }>
   brief: { version: number; markdown: string; generatedAt: string | null; via: string }
   implementationTasks: string[]
@@ -594,6 +654,8 @@ interface KryomResearchSession {
 interface KryomResearchSummary {
   id: string
   objective: string
+  name?: string
+  depth?: string
   status: string
   sources: number
   briefVersion: number
@@ -1772,6 +1834,9 @@ interface KryomAPI {
 
   startResearch: (payload: {
     objective: string
+    depth?: KryomResearchDepth
+    model?: string
+    name?: string
   }) => Promise<{ id: string; status: string }>
 
   getResearchStatus: (payload: {
@@ -1801,6 +1866,30 @@ interface KryomAPI {
   selectResearch: (payload: {
     id: string
   }) => Promise<{ id: string }>
+
+  renameResearch: (payload: {
+    id: string
+    name: string
+  }) => Promise<KryomResearchSession>
+
+  deleteResearch: (payload: {
+    id: string
+  }) => Promise<{ id: string; deleted: boolean }>
+
+  searchResearch: (payload: {
+    query: string
+  }) => Promise<KryomResearchSummary[]>
+
+  exportResearch: (payload: {
+    id: string
+    format?: 'markdown' | 'html'
+  }) => Promise<{ id: string; format: string; fileName: string; content: string }>
+
+  handoffResearch: (payload: {
+    id: string
+    findingIndexes?: number[]
+    target?: 'chat' | 'agent-brief'
+  }) => Promise<{ id: string; target: string; text: string }>
 
   listMemories: () => Promise<KryomMemoryList>
 

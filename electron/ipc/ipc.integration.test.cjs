@@ -327,6 +327,11 @@ describe('ipc integration', () => {
       'research:cancel',
       'research:resume',
       'research:select',
+      'research:rename',
+      'research:delete',
+      'research:search',
+      'research:export',
+      'research:handoff',
       'app:get-version',
       'app:get-ai-status',
       'app:open-external',
@@ -1205,6 +1210,80 @@ describe('ipc integration', () => {
     await assert.rejects(
       () => call('research:get', { id: 'no-such-session' }),
       /not found|ENOENT|no such/i
+    )
+  })
+
+  it('renames, searches, exports, hands off, and deletes research through IPC', async () => {
+    await ensureWorkspace()
+
+    const session = await createSession('ipc deep-research lifecycle')
+    const { writeSession } = require('../services/research/session-store.cjs')
+
+    session.sources = [
+      {
+        id: 'src-ipc1',
+        provider: 'openalex',
+        title: 'IPC Paper',
+        url: 'https://example.com/ipc',
+        authors: ['IPC Author'],
+        publishedAt: '2024-01-01',
+        abstract: 'Evidence about IPC lifecycle handling.',
+        venue: 'Test Venue',
+        doi: null,
+        sourceType: 'paper-open',
+        accessStatus: 'open',
+        excerpt: '',
+      },
+    ]
+    session.findings = [
+      { claim: 'IPC lifecycle works end to end.', sourceIndexes: [1], confidence: 'medium', note: 'test' },
+    ]
+    session.brief = { version: 1, markdown: '# Brief\n\nClaim [1].\n', generatedAt: new Date().toISOString(), via: 'test' }
+    session.status = 'completed'
+    await writeSession(session)
+
+    const renamed = await call('research:rename', { id: session.id, name: 'IPC Renamed' })
+
+    assert.equal(renamed.name, 'IPC Renamed')
+
+    const found = await call('research:search', { query: 'ipc deep-research' })
+
+    assert.ok(found.some((entry) => entry.id === session.id))
+
+    const exported = await call('research:export', { id: session.id, format: 'html' })
+
+    assert.equal(exported.id, session.id)
+    assert.match(exported.content, /IPC Paper/)
+    assert.match(exported.content, /example\.com\/ipc/)
+
+    const markdown = await call('research:export', { id: session.id, format: 'markdown' })
+
+    assert.match(markdown.content, /Claim \[1\]/)
+
+    const handoff = await call('research:handoff', { id: session.id, target: 'agent-brief' })
+
+    assert.match(handoff.text, /UNTRUSTED/)
+    assert.match(handoff.text, /IPC lifecycle works/)
+
+    await assert.rejects(
+      () => call('research:rename', { id: session.id, name: '  ' }),
+      /Invalid name/
+    )
+    await assert.rejects(
+      () => call('research:export', { id: session.id, format: 'pdf' }),
+      /Invalid format/
+    )
+    await assert.rejects(
+      () => call('research:handoff', { id: session.id, findingIndexes: ['x'] }),
+      /Invalid findingIndexes/
+    )
+
+    const deleted = await call('research:delete', { id: session.id })
+
+    assert.deepEqual(deleted, { id: session.id, deleted: true })
+    await assert.rejects(
+      () => call('research:get', { id: session.id }),
+      /not found/i
     )
   })
 

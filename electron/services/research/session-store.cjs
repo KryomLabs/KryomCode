@@ -16,13 +16,17 @@ const {
   listStorageFiles,
   readStorageFile,
   writeStorageFile,
+  resolveStoragePath,
 } = require('../../security/storage-path.cjs')
+const { resolveDepth, DEFAULT_DEPTH } = require('./depth-profiles.cjs')
 
 const RESEARCH_DIR = '.kryom'
 const SESSIONS_DIR = 'research'
-const SESSION_VERSION = 1
+const SESSION_VERSION = 2
 const MAX_OBJECTIVE_LENGTH = 2000
 const MAX_SESSIONS_LISTED = 50
+const MAX_NAME_LENGTH = 120
+const MAX_SEARCH_RESULTS = 20
 
 function assertValidSessionId(id) {
   if (typeof id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(id)) {
@@ -104,23 +108,39 @@ function blankSteps() {
   }))
 }
 
-function createSessionRecord(objective) {
+function blankPlan() {
+  return {
+    subQuestions: [],
+    searchTerms: [],
+    evidenceNeeds: [],
+    ambiguityNotes: [],
+    via: '',
+  }
+}
+
+function createSessionRecord(objective, options = {}) {
   if (typeof objective !== 'string' || !objective.trim() || objective.length > MAX_OBJECTIVE_LENGTH) {
     throw new Error(`Invalid objective: provide text up to ${MAX_OBJECTIVE_LENGTH} characters.`)
   }
 
   const stamp = nowIso()
+  const name = typeof options.name === 'string' ? options.name.trim().slice(0, MAX_NAME_LENGTH) : ''
 
   return {
     id: generateSessionId(),
     version: SESSION_VERSION,
     objective: objective.trim(),
+    name,
+    depth: resolveDepth(options.depth),
     questions: [],
     queries: [],
     steps: blankSteps(),
+    plan: blankPlan(),
     sources: [],
     evidence: [],
     findings: [],
+    claims: [],
+    conflicts: [],
     decisions: [],
     brief: { version: 0, markdown: '', generatedAt: null, via: '' },
     implementationTasks: [],
@@ -144,7 +164,7 @@ function sanitizeSession(raw) {
     session.steps = blankSteps()
   }
 
-  for (const key of ['questions', 'queries', 'sources', 'evidence', 'findings', 'decisions', 'implementationTasks', 'verification', 'errors']) {
+  for (const key of ['questions', 'queries', 'sources', 'evidence', 'findings', 'claims', 'conflicts', 'decisions', 'implementationTasks', 'verification', 'errors']) {
     if (!Array.isArray(session[key])) {
       session[key] = []
     }
@@ -154,15 +174,81 @@ function sanitizeSession(raw) {
     session.brief = { version: 0, markdown: '', generatedAt: null, via: '' }
   }
 
+  // v1 → v2 migration: default every deep-research field so old
+  // sessions reopen safely, and backfill stable source ids.
+  if (typeof session.name !== 'string') {
+    session.name = ''
+  }
+
+  try {
+    session.depth = resolveDepth(session.depth)
+  } catch {
+    session.depth = DEFAULT_DEPTH
+  }
+
+  if (!session.plan || typeof session.plan !== 'object' || Array.isArray(session.plan)) {
+    session.plan = blankPlan()
+  } else {
+    const plan = session.plan
+
+    for (const key of ['subQuestions', 'searchTerms', 'evidenceNeeds', 'ambiguityNotes']) {
+      if (!Array.isArray(plan[key])) {
+        plan[key] = []
+      }
+    }
+
+    if (typeof plan.via !== 'string') {
+      plan.via = ''
+    }
+  }
+
+  session.sources = session.sources.filter((entry) => entry && typeof entry === 'object')
+
+  for (const source of session.sources) {
+    if (typeof source.id !== 'string' || !source.id) {
+      source.id = backfillSourceId(source)
+    }
+
+    if (!Array.isArray(source.supports)) {
+      source.supports = []
+    }
+
+    if (typeof source.retrievedAt !== 'string') {
+      source.retrievedAt = null
+    }
+
+    if (!source.quality || typeof source.quality !== 'object') {
+      source.quality = null
+    }
+  }
+
+  session.version = SESSION_VERSION
+
   return session
+}
+
+// Backfills a stable id for v1 sources. Same derivation as
+// normalizeSource (DOI-first canonical key) so ids stay consistent.
+function backfillSourceId(source) {
+  try {
+    const { canonicalKey } = require('./search-providers.cjs')
+    const key = canonicalKey({
+      url: typeof source.url === 'string' ? source.url : '',
+      doi: typeof source.doi === 'string' ? source.doi : null,
+    })
+
+    return `src-${crypto.createHash('sha1').update(key).digest('hex').slice(0, 12)}`
+  } catch {
+    return `src-${crypto.randomBytes(6).toString('hex')}`
+  }
 }
 
 async function ensureDir() {
   await ensureStorageDir(openRoot(), [RESEARCH_DIR, SESSIONS_DIR])
 }
 
-async function createSession(objective) {
-  const session = createSessionRecord(objective)
+async function createSession(objective, options = {}) {
+  const session = createSessionRecord(objective, options)
 
   await writeStorageFile(
     openRoot(),
@@ -250,6 +336,8 @@ async function listSessions() {
       sessions.push({
         id: session.id,
         objective: session.objective,
+        name: typeof session.name === 'string' ? session.name : '',
+        depth: session.depth || DEFAULT_DEPTH,
         status: session.status,
         sources: session.sources.length,
         briefVersion: session.brief.version,
@@ -315,6 +403,83 @@ async function getActiveSession() {
   }
 }
 
+async function renameSession(id, name) {
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > MAX_NAME_LENGTH) {
+    throw new Error(`Invalid name: provide text up to ${MAX_NAME_LENGTH} characters.`)
+  }
+
+  const session = await readSession(id)
+
+  session.name = name.trim()
+  await writeSession(session)
+
+  return session
+}
+
+async function deleteSessionFile(root, segments) {
+  const { path: file, exists } = await resolveStoragePath(root, segments)
+
+  if (!exists) {
+    return false
+  }
+
+  const stat = await fs.lstat(file)
+
+  // Mirrors the storage layer: links are never followed, and only
+  // regular files inside the validated research dir are removed.
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error('Refusing to delete a non-file research entry.')
+  }
+
+  await fs.unlink(file)
+
+  return true
+}
+
+async function deleteSession(id) {
+  assertValidSessionId(id)
+
+  const root = openRoot()
+  const removed = await deleteSessionFile(root, sessionSegments(`${id}.json`))
+
+  if (!removed) {
+    throw new Error('Research session was not found.')
+  }
+
+  await deleteSessionFile(root, sessionSegments(`brief-${id}.md`)).catch(() => false)
+
+  const activeId = await getActiveSessionId().catch(() => null)
+
+  if (activeId === id) {
+    const remaining = await listSessions()
+
+    if (remaining.length > 0) {
+      await setActiveSession(remaining[0].id)
+    } else {
+      await deleteSessionFile(root, sessionSegments('active.json')).catch(() => false)
+    }
+  }
+
+  return { id, deleted: true }
+}
+
+async function searchSessions(query) {
+  if (typeof query !== 'string' || !query.trim()) {
+    throw new Error('A search query is required.')
+  }
+
+  const needle = query.trim().toLowerCase().slice(0, 200)
+  const sessions = await listSessions()
+
+  return sessions
+    .filter((entry) => (
+      String(entry.objective || '').toLowerCase().includes(needle)
+      || String(entry.name || '').toLowerCase().includes(needle)
+      || String(entry.id || '').toLowerCase().includes(needle)
+    ))
+    .slice(0, MAX_SEARCH_RESULTS)
+}
+
 module.exports = {
   createSession,
   readSession,
@@ -322,10 +487,15 @@ module.exports = {
   writeBrief,
   readBrief,
   listSessions,
+  searchSessions,
+  renameSession,
+  deleteSession,
   setActiveSession,
   getActiveSessionId,
   getActiveSession,
   blankSteps,
+  blankPlan,
   sessionsRoot,
   MAX_OBJECTIVE_LENGTH,
+  MAX_NAME_LENGTH,
 }

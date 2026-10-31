@@ -86,6 +86,10 @@ const MODULES = [
   ['./services/research/session-store.cjs', ['createSession', 'readSession', 'writeSession', 'listSessions', 'getActiveSession']],
   ['./services/research/brief.service.cjs', ['validateBrief', 'buildExtractiveBrief', 'buildResearchContext', 'loadResearchContext']],
   ['./services/research/research.service.cjs', ['startResearch', 'getStatus', 'cancelResearch', 'resumeResearch']],
+  ['./services/research/depth-profiles.cjs', ['resolveDepth', 'getProfile']],
+  ['./services/research/planner.cjs', ['planResearch', 'parsePlanJson']],
+  ['./services/research/evidence.cjs', ['verifySession', 'extractClaims']],
+  ['./services/research/credibility.cjs', ['assessSource', 'rankSources']],
   ['./services/documents/document.service.cjs', ['exportBriefDocx', 'exportTextDocx', 'importDocxFile']],
   ['./services/memory/memory.store.cjs', ['listMemories', 'getMemory', 'createMemory', 'updateMemory', 'deleteMemory']],
 ]

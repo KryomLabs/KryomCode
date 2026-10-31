@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { kryom, errorMessage } from '../api/kryom'
 import { MarkdownLite } from './MarkdownLite'
 
@@ -16,6 +16,23 @@ export interface ResearchPanelProps {
   sessionId?: string | null
 }
 
+type ResearchTab = 'overview' | 'plan' | 'sources' | 'evidence' | 'findings' | 'report'
+
+const TABS: Array<{ id: ResearchTab; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'plan', label: 'Plan' },
+  { id: 'sources', label: 'Sources' },
+  { id: 'evidence', label: 'Evidence' },
+  { id: 'findings', label: 'Findings' },
+  { id: 'report', label: 'Report' },
+]
+
+const EXAMPLE_PROMPTS = [
+  'Compare approaches for reliable autonomous coding agents: tool use, context management, verification, failure recovery',
+  'How do small language models perform at code generation and debugging versus large models?',
+  'What causes hallucinations in retrieval-augmented generation, and how are they evaluated?',
+]
+
 function stepIcon(status: KryomResearchStep['status']): string {
   switch (status) {
     case 'done':
@@ -31,17 +48,39 @@ function stepIcon(status: KryomResearchStep['status']): string {
   }
 }
 
+function sessionTitle(session: { name?: string; objective: string }): string {
+  return session.name && session.name.trim() ? session.name.trim() : session.objective
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ''
+  }
+}
+
 export function ResearchPanel(props: ResearchPanelProps) {
   const [objective, setObjective] = useState('')
+  const [depth, setDepth] = useState<KryomResearchDepth>('standard')
+  const [model, setModel] = useState('')
+  const [models, setModels] = useState<KryomProviderModelSummary[]>([])
   const [session, setSession] = useState<KryomResearchSession | null>(null)
   const [sessions, setSessions] = useState<KryomResearchSummary[]>([])
+  const [sessionQuery, setSessionQuery] = useState('')
   const [starting, setStarting] = useState(false)
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
-  const [copied, setCopied] = useState<number | null>(null)
-  const [showBrief, setShowBrief] = useState(false)
+  const [tab, setTab] = useState<ResearchTab>('overview')
+  const [renaming, setRenaming] = useState(false)
+  const [draftName, setDraftName] = useState('')
+  const [copied, setCopied] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportTemplate, setExportTemplate] = useState('report')
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [accessFilter, setAccessFilter] = useState('all')
+  const [sourceQuery, setSourceQuery] = useState('')
+  const [selectedSource, setSelectedSource] = useState<number | null>(null)
   const pollRef = useRef<number | null>(null)
 
   const refreshList = useCallback(async () => {
@@ -57,14 +96,11 @@ export function ResearchPanel(props: ResearchPanelProps) {
     }
   }, [props.workspaceRoot])
 
-  const loadSession = useCallback(
-    async (id: string) => {
-      const loaded = await kryom().getResearchStatus({ id })
-      setSession(loaded)
-      return loaded
-    },
-    []
-  )
+  const loadSession = useCallback(async (id: string) => {
+    const loaded = await kryom().getResearchStatus({ id })
+    setSession(loaded)
+    return loaded
+  }, [])
 
   // Ref mirrors: the poll interval below must not reset on every
   // parent render (a `props` dep would starve it while typing).
@@ -74,6 +110,13 @@ export function ResearchPanel(props: ResearchPanelProps) {
   refreshListRef.current = refreshList
   const statusRef = useRef(props.onStatus)
   statusRef.current = props.onStatus
+
+  useEffect(() => {
+    kryom()
+      .listProviderModels({ providerId: 'meta' })
+      .then((result) => setModels(result.models || []))
+      .catch(() => setModels([]))
+  }, [])
 
   useEffect(() => {
     if (!props.workspaceRoot) {
@@ -122,6 +165,9 @@ export function ResearchPanel(props: ResearchPanelProps) {
           if (loaded.status !== 'running') {
             void refreshListRef.current()
             statusRef.current(`Research ${loaded.status}: ${loaded.statusDetail}`)
+            // Surface the finished report, but only when the user is
+            // still on the default tab — never steal an active view.
+            setTab((current) => (current === 'overview' && loaded.status === 'completed' ? 'report' : current))
           }
         })
         .catch((e) => setError(errorMessage(e)))
@@ -162,6 +208,45 @@ export function ResearchPanel(props: ResearchPanelProps) {
     }
   }
 
+  async function exportReport(id: string, format: 'markdown' | 'html') {
+    if (exporting) {
+      return
+    }
+
+    setExporting(true)
+    setError('')
+
+    try {
+      const result = await kryom().exportResearch({ id, format })
+      const saved = await kryom().saveAs(result.content, result.fileName)
+
+      if (!saved) {
+        props.onStatus('Report export cancelled')
+        return
+      }
+
+      props.onStatus(`Report exported (${result.fileName})`)
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  async function copyHandoff(id: string, target: 'chat' | 'agent-brief') {
+    setError('')
+
+    try {
+      const result = await kryom().handoffResearch({ id, target })
+      await navigator.clipboard.writeText(result.text)
+      setCopied(`handoff-${target}`)
+      setTimeout(() => setCopied(null), 1500)
+      props.onStatus(target === 'chat' ? 'Chat handoff copied' : 'Agent brief copied')
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
   async function start(externalObjective?: string) {
     const trimmed = (externalObjective ?? objective).trim()
 
@@ -171,14 +256,19 @@ export function ResearchPanel(props: ResearchPanelProps) {
 
     setStarting(true)
     setError('')
-    setShowBrief(false)
+    setTab('overview')
+    setSelectedSource(null)
 
     try {
-      const started = await kryom().startResearch({ objective: trimmed })
+      const started = await kryom().startResearch({
+        objective: trimmed,
+        depth,
+        ...(model ? { model } : {}),
+      })
       setObjective('')
       await loadSession(started.id)
       await refreshList()
-      props.onStatus('Research started')
+      props.onStatus(`Research started (${depth})`)
     } catch (e) {
       setError(errorMessage(e))
     } finally {
@@ -251,7 +341,8 @@ export function ResearchPanel(props: ResearchPanelProps) {
 
     setWorking(true)
     setError('')
-    setShowBrief(false)
+    setTab('overview')
+    setSelectedSource(null)
 
     try {
       await kryom().selectResearch({ id })
@@ -263,10 +354,84 @@ export function ResearchPanel(props: ResearchPanelProps) {
     }
   }
 
-  async function copyText(text: string, index: number) {
+  async function rename() {
+    if (!session || working) {
+      return
+    }
+
+    const trimmed = draftName.trim()
+
+    if (!trimmed) {
+      return
+    }
+
+    setWorking(true)
+    setError('')
+
+    try {
+      const updated = await kryom().renameResearch({ id: session.id, name: trimmed })
+      setSession(updated)
+      setRenaming(false)
+      await refreshList()
+      props.onStatus('Session renamed')
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  async function removeSession(id: string) {
+    if (working) {
+      return
+    }
+
+    if (!window.confirm('Delete this research session and its saved report? This cannot be undone.')) {
+      return
+    }
+
+    setWorking(true)
+    setError('')
+
+    try {
+      await kryom().deleteResearch({ id })
+
+      if (session?.id === id) {
+        setSession(null)
+      }
+
+      await refreshList()
+      props.onStatus('Session deleted')
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  async function searchSessions() {
+    if (!props.workspaceRoot) {
+      return
+    }
+
+    const trimmed = sessionQuery.trim()
+
+    if (!trimmed) {
+      await refreshList()
+      return
+    }
+
+    try {
+      setSessions(await kryom().searchResearch({ query: trimmed }))
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  async function copyText(text: string, key: string) {
     try {
       await navigator.clipboard.writeText(text)
-      setCopied(index)
+      setCopied(key)
       setTimeout(() => setCopied(null), 1500)
     } catch {
       setError('Copy is unavailable in this context.')
@@ -288,6 +453,15 @@ export function ResearchPanel(props: ResearchPanelProps) {
     }
   }
 
+  function openCitation(index: number) {
+    if (!session || index < 1 || index > session.sources.length) {
+      return
+    }
+
+    setSelectedSource(index)
+    setTab('sources')
+  }
+
   const running = session?.status === 'running'
   const resumable =
     session !== null &&
@@ -301,16 +475,673 @@ export function ResearchPanel(props: ResearchPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewedSessionId])
 
+  const sourceTypes = useMemo(() => {
+    const kinds = new Set<string>()
+
+    for (const source of session?.sources || []) {
+      kinds.add(source.sourceType || 'unknown')
+    }
+
+    return [...kinds].sort()
+  }, [session])
+
+  const filteredSources = useMemo(() => {
+    const needle = sourceQuery.trim().toLowerCase()
+
+    return (session?.sources || [])
+      .map((source, position) => ({ source, index: position + 1 }))
+      .filter(({ source }) => {
+        if (typeFilter !== 'all' && (source.sourceType || 'unknown') !== typeFilter) {
+          return false
+        }
+
+        if (accessFilter !== 'all' && (source.accessStatus || 'unknown') !== accessFilter) {
+          return false
+        }
+
+        if (needle) {
+          const haystack = `${source.title} ${source.venue} ${source.authors.join(' ')} ${hostOf(source.url)}`.toLowerCase()
+
+          if (!haystack.includes(needle)) {
+            return false
+          }
+        }
+
+        return true
+      })
+  }, [session, typeFilter, accessFilter, sourceQuery])
+
+  // Findings grouped by cited source for source→finding navigation.
+  const findingsBySource = useMemo(() => {
+    const grouped = new Map<number, Array<{ finding: KryomResearchFinding; position: number }>>()
+
+    for (const [position, finding] of (session?.findings || []).entries()) {
+      for (const sourceIndex of finding.sourceIndexes) {
+        if (!Number.isInteger(sourceIndex)) {
+          continue
+        }
+
+        const list = grouped.get(sourceIndex) || []
+        list.push({ finding, position: position + 1 })
+        grouped.set(sourceIndex, list)
+      }
+    }
+
+    return grouped
+  }, [session])
+
+  function renderOverview() {
+    if (!session) {
+      return null
+    }
+
+    const subQuestions = session.plan?.subQuestions || []
+    const doneCount = subQuestions.filter((entry) => entry.status === 'done').length
+
+    return (
+      <div className="plan-view">
+        <div className="plan-commands">
+          <strong>Progress</strong>
+          {session.steps.map((step) => (
+            <div key={step.id} className="command-row">
+              <code>
+                [{stepIcon(step.status)}] {step.label}
+                {step.detail ? ` — ${step.detail}` : ''}
+                {step.error ? ` — ERROR: ${step.error}` : ''}
+              </code>
+            </div>
+          ))}
+        </div>
+
+        {subQuestions.length > 0 && (
+          <div className="plan-commands">
+            <strong>
+              Sub-questions ({doneCount}/{subQuestions.length} done)
+            </strong>
+            {subQuestions.map((entry) => (
+              <div key={entry.id} className="command-row">
+                <code>
+                  [{stepIcon(entry.status === 'done' ? 'done' : entry.status === 'failed' ? 'failed' : entry.status === 'running' ? 'running' : 'pending')}]{' '}
+                  {entry.id}: {entry.text}
+                  {typeof entry.sourcesFound === 'number' ? ` — ${entry.sourcesFound} result(s)` : ''}
+                  {entry.error ? ` — ERROR: ${entry.error}` : ''}
+                </code>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {session.queries.length > 0 && (
+          <div className="plan-commands">
+            <strong>Recent queries ({session.queries.length})</strong>
+            {session.queries.slice(-8).map((entry, position) => (
+              <div key={`${entry.at}-${position}`} className="command-row">
+                <code>
+                  {entry.questionId ? `[${entry.questionId}] ` : ''}{entry.query}
+                </code>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {session.errors.length > 0 && (
+          <div className="plan-commands">
+            <strong>Errors ({session.errors.length})</strong>
+            {session.errors.slice(0, 8).map((entry, position) => (
+              <div key={position} className="command-row">
+                <code>
+                  {entry.where}: {entry.message}
+                </code>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderPlan() {
+    if (!session) {
+      return null
+    }
+
+    const plan = session.plan
+
+    if (!plan || plan.subQuestions.length === 0) {
+      return (
+        <div className="plan-view">
+          <p className="muted padded">
+            {running
+              ? 'The research plan is being prepared…'
+              : 'No plan was recorded for this session.'}
+          </p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="plan-view">
+        <p className="muted padded">
+          Planned via {plan.via || 'unknown method'} · {plan.subQuestions.length} sub-question(s)
+        </p>
+        <div className="plan-commands">
+          <strong>Sub-questions</strong>
+          {plan.subQuestions.map((entry) => (
+            <div key={entry.id} className="command-row finding-row">
+              <div className="finding-body">
+                <span>
+                  <strong>{entry.id}</strong> · {entry.text}
+                </span>
+                <span className="muted">
+                  Status: {entry.status}
+                  {entry.queries.length > 0 ? ` · Queries: ${entry.queries.join(' | ')}` : ''}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {plan.searchTerms.length > 0 && (
+          <div className="plan-commands">
+            <strong>Search terms</strong>
+            <div className="command-row">
+              <code>{plan.searchTerms.join(', ')}</code>
+            </div>
+          </div>
+        )}
+
+        {plan.evidenceNeeds.length > 0 && (
+          <div className="plan-commands">
+            <strong>Evidence needed</strong>
+            {plan.evidenceNeeds.map((need, position) => (
+              <div key={position} className="command-row">
+                <code>{need}</code>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {plan.ambiguityNotes.length > 0 && (
+          <div className="plan-commands">
+            <strong>Ambiguity notes</strong>
+            {plan.ambiguityNotes.map((note, position) => (
+              <div key={position} className="command-row">
+                <code>{note}</code>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderSourceDetail(index: number) {
+    if (!session) {
+      return null
+    }
+
+    const source = session.sources[index - 1]
+
+    if (!source) {
+      return null
+    }
+
+    const excerpt = (source.abstract || source.excerpt || '').trim()
+    const linked = findingsBySource.get(index) || []
+    const questions = new Map((session.plan?.subQuestions || []).map((entry) => [entry.id, entry.text]))
+
+    return (
+      <div className="command-row finding-row" data-testid={`source-detail-${index}`}>
+        <div className="finding-body">
+          <span>
+            <strong>[{index}] {source.title}</strong>
+          </span>
+          <span className="muted">
+            {[source.provider, source.sourceType, source.accessStatus].filter(Boolean).join(' · ')}
+            {source.publishedAt ? ` · ${source.publishedAt.slice(0, 10)}` : ''}
+            {hostOf(source.url) ? ` · ${hostOf(source.url)}` : ''}
+          </span>
+          {source.authors.length > 0 && (
+            <span className="muted">By {source.authors.join(', ')}</span>
+          )}
+          {source.venue && <span className="muted">{source.venue}</span>}
+          {excerpt ? (
+            <span>{excerpt.slice(0, 900)}</span>
+          ) : (
+            <span className="muted">No abstract or excerpt — counted but not read.</span>
+          )}
+          {source.quality && (
+            <span className="muted">
+              Quality: {source.quality.summary}
+              {source.quality.signals.map((signal) => (
+                <span key={signal.label} title={signal.detail}>
+                  {' '}· [{signal.polarity}] {signal.label}
+                </span>
+              ))}
+            </span>
+          )}
+          {(source.supports || []).length > 0 && (
+            <span className="muted">
+              Supports: {(source.supports || []).map((id) => questions.get(id) || id).join(' | ')}
+            </span>
+          )}
+          {linked.length > 0 && (
+            <span className="muted">
+              Findings: {linked.map((entry) => `#${entry.position}`).join(', ')}
+              {' '}(see Findings tab)
+            </span>
+          )}
+          <span className="source-actions">
+            {isOpenableUrl(source.url) && (
+              <button
+                className="secondary-button"
+                onClick={() => void openSource(source.url)}
+                title="Open in your browser"
+              >
+                Open
+              </button>
+            )}
+            <button
+              className="secondary-button"
+              onClick={() => void copyText(source.url, `src-${index}`)}
+            >
+              {copied === `src-${index}` ? 'Copied' : 'Copy URL'}
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() => setSelectedSource(null)}
+            >
+              Close
+            </button>
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  function renderSources() {
+    if (!session) {
+      return null
+    }
+
+    if (session.sources.length === 0) {
+      return (
+        <div className="plan-view">
+          <p className="muted padded">
+            {running
+              ? 'Discovering sources… they appear here as searches complete.'
+              : 'No sources were retrieved for this session.'}
+          </p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="plan-view">
+        <div className="composer-footer padded">
+          <input
+            aria-label="Filter sources"
+            placeholder="Filter by title, venue, author, domain…"
+            value={sourceQuery}
+            onChange={(event) => setSourceQuery(event.target.value)}
+          />
+          <span>
+            <select
+              aria-label="Filter by source type"
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value)}
+            >
+              <option value="all">All types</option>
+              {sourceTypes.map((kind) => (
+                <option key={kind} value={kind}>{kind}</option>
+              ))}
+            </select>{' '}
+            <select
+              aria-label="Filter by access"
+              value={accessFilter}
+              onChange={(event) => setAccessFilter(event.target.value)}
+            >
+              <option value="all">Any access</option>
+              <option value="open">Open</option>
+              <option value="unknown">Unknown</option>
+              <option value="unreadable">Unreadable</option>
+              <option value="blocked">Blocked</option>
+            </select>
+          </span>
+        </div>
+
+        {selectedSource !== null && renderSourceDetail(selectedSource)}
+
+        <div className="plan-commands">
+          <strong>
+            Sources ({filteredSources.length}
+            {filteredSources.length !== session.sources.length ? ` of ${session.sources.length}` : ''})
+          </strong>
+          {filteredSources.length === 0 ? (
+            <p className="muted">No sources match these filters.</p>
+          ) : (
+            filteredSources.map(({ source, index }) => (
+              <div key={source.id || `${source.url}-${index}`} className="command-row">
+                <code>
+                  [{index}] {source.title} [{source.sourceType}] ({source.accessStatus})
+                  {source.publishedAt ? ` · ${source.publishedAt.slice(0, 10)}` : ''}
+                </code>
+                <span className="source-actions">
+                  <button
+                    className="secondary-button"
+                    onClick={() => setSelectedSource(selectedSource === index ? null : index)}
+                  >
+                    {selectedSource === index ? 'Hide' : 'Inspect'}
+                  </button>
+                  {isOpenableUrl(source.url) && (
+                    <button
+                      className="secondary-button"
+                      onClick={() => void openSource(source.url)}
+                      title="Open in your browser"
+                    >
+                      Open
+                    </button>
+                  )}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  function citationButtons(indexes: number[]) {
+    if (!session) {
+      return <span className="muted">No sources cited</span>
+    }
+
+    const valid = indexes.filter(
+      (entry) => Number.isInteger(entry) && entry >= 1 && entry <= session.sources.length
+    )
+    const missing = indexes.length - valid.length
+
+    return (
+      <span>
+        {valid.map((entry) => (
+          <button
+            key={entry}
+            type="button"
+            className="md-cite"
+            onClick={() => openCitation(entry)}
+            title={session.sources[entry - 1]?.title || `Source ${entry}`}
+            aria-label={`Open source ${entry}`}
+          >
+            [{entry}]
+          </button>
+        ))}
+        {valid.length === 0 && <span className="muted">No sources cited</span>}
+        {missing > 0 && (
+          <span className="muted"> · {missing} reference(s) unavailable</span>
+        )}
+      </span>
+    )
+  }
+
+  function renderEvidence() {
+    if (!session) {
+      return null
+    }
+
+    const claims = session.claims || []
+    const conflicts = session.conflicts || []
+    const titles = new Map(session.sources.map((source, position) => [source.id, position + 1]))
+
+    return (
+      <div className="plan-view">
+        <p className="muted padded">
+          Claims are sentences lifted from retrieved sources; statuses compare
+          shared terminology across independent sources — never model-verified facts.
+        </p>
+
+        <div className="plan-commands">
+          <strong>Claims ({claims.length})</strong>
+          {claims.length === 0 ? (
+            <p className="muted">
+              {running
+                ? 'Claims appear here once evidence extraction completes.'
+                : (session.depth || 'standard') === 'quick'
+                  ? 'Quick mode skips claim verification. Re-run with Standard or Deep for checked claims.'
+                  : 'No claims were extracted from this session.'}
+            </p>
+          ) : (
+            claims.map((claim) => (
+              <div key={claim.id} className="command-row finding-row">
+                <div className="finding-body">
+                  <span>{claim.text}</span>
+                  <span className="muted">
+                    {claim.status || 'unverified'}
+                    {claim.explanation ? ` · ${claim.explanation}` : ''}
+                    {claim.conflictNote ? ` ${claim.conflictNote}` : ''}
+                  </span>
+                  <span>
+                    {citationButtons(
+                      [claim.sourceId, ...(claim.supportingSourceIds || [])]
+                        .map((id) => titles.get(id || '') || 0)
+                        .filter((entry) => entry > 0)
+                    )}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="plan-commands">
+          <strong>Conflicts ({conflicts.length})</strong>
+          {conflicts.length === 0 ? (
+            <p className="muted">
+              No conflicts flagged. Absence of flags is not agreement.
+            </p>
+          ) : (
+            conflicts.map((conflict) => (
+              <div key={conflict.id} className="command-row finding-row">
+                <div className="finding-body">
+                  <span>{conflict.description}</span>
+                  <span className="muted">Topic: {conflict.topic}</span>
+                  <span>
+                    {citationButtons(
+                      (conflict.sourceIds || [])
+                        .map((id) => titles.get(id) || 0)
+                        .filter((entry) => entry > 0)
+                    )}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {session.evidence.length > 0 && (
+          <div className="plan-commands">
+            <strong>Read excerpts ({session.evidence.length})</strong>
+            {session.evidence.slice(0, 12).map((entry, position) => (
+              <div key={position} className="command-row finding-row">
+                <div className="finding-body">
+                  <span className="muted">{entry.sourceUrl}</span>
+                  <span>{entry.excerpt.slice(0, 400)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderFindings() {
+    if (!session) {
+      return null
+    }
+
+    return (
+      <div className="plan-view">
+        <div className="composer-footer padded">
+          <span className="muted">
+            {session.findings.length} finding(s)
+            {session.conflicts && session.conflicts.length > 0
+              ? ` · ${session.conflicts.length} conflict(s) flagged — verify before building on these.`
+              : ''}
+          </span>
+          <span>
+            <button
+              className="secondary-button"
+              onClick={() => void copyHandoff(session.id, 'chat')}
+              disabled={session.findings.length === 0}
+              title="Copy findings with citations for AI Chat"
+            >
+              {copied === 'handoff-chat' ? 'Copied' : 'Copy chat handoff'}
+            </button>{' '}
+            <button
+              className="secondary-button"
+              onClick={() => void copyHandoff(session.id, 'agent-brief')}
+              disabled={session.findings.length === 0}
+              title="Copy findings plus implementation tasks for the coding agent"
+            >
+              {copied === 'handoff-agent-brief' ? 'Copied' : 'Copy agent brief'}
+            </button>
+          </span>
+        </div>
+
+        <div className="plan-commands">
+          {session.findings.length === 0 ? (
+            <p className="muted">
+              {running
+                ? 'Findings appear here once synthesis completes.'
+                : 'No findings were recorded for this session.'}
+            </p>
+          ) : (
+            session.findings.map((finding, position) => (
+              <div key={position} className="command-row finding-row">
+                <div className="finding-body">
+                  <span>
+                    <strong>#{position + 1}</strong> {finding.claim}
+                  </span>
+                  <span className="muted">
+                    Confidence: {finding.confidence}
+                    {finding.note ? ` · ${finding.note}` : ''}
+                  </span>
+                  <span>
+                    {citationButtons(finding.sourceIndexes)}{' '}
+                    <button
+                      className="secondary-button"
+                      onClick={() => void copyText(
+                        `${finding.claim} [${finding.sourceIndexes.join(', ')}]`,
+                        `finding-${position}`
+                      )}
+                    >
+                      {copied === `finding-${position}` ? 'Copied' : 'Copy'}
+                    </button>
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {session.implementationTasks.length > 0 && (
+          <div className="plan-commands">
+            <strong>
+              Implementation tasks ({session.implementationTasks.length})
+            </strong>
+            {session.implementationTasks.map((task, position) => (
+              <div key={position} className="command-row">
+                <code>
+                  {position + 1}. {task}
+                </code>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderReport() {
+    if (!session) {
+      return null
+    }
+
+    if (session.brief.version === 0) {
+      return (
+        <div className="plan-view">
+          <p className="muted padded">
+            {running
+              ? 'The report is being written…'
+              : 'No report yet. Run research to completion first.'}
+          </p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="plan-view">
+        <div className="composer-footer padded">
+          <span className="muted">
+            Report v{session.brief.version} ({session.brief.via})
+            {session.brief.generatedAt ? ` · ${session.brief.generatedAt.slice(0, 10)}` : ''}
+          </span>
+          <span>
+            <button
+              className="secondary-button"
+              disabled={exporting}
+              onClick={() => void exportReport(session.id, 'markdown')}
+            >
+              {exporting ? 'Exporting…' : 'Markdown'}
+            </button>{' '}
+            <button
+              className="secondary-button"
+              disabled={exporting}
+              onClick={() => void exportReport(session.id, 'html')}
+            >
+              {exporting ? 'Exporting…' : 'HTML'}
+            </button>
+          </span>
+        </div>
+        <div className="composer-footer padded">
+          <select
+            value={exportTemplate}
+            onChange={(event) => setExportTemplate(event.target.value)}
+            aria-label="Brief export template"
+            disabled={exporting}
+          >
+            <option value="report">Report template</option>
+            <option value="technical">Technical template</option>
+          </select>
+          <button
+            className="secondary-button"
+            disabled={exporting}
+            onClick={() => void exportBrief(session.id)}
+            title="Export this report with its cited sources to a .docx file"
+          >
+            {exporting ? 'Exporting…' : 'Export .docx'}
+          </button>
+        </div>
+        <div className="brief-body">
+          <MarkdownLite
+            text={session.brief.markdown.slice(0, 24000)}
+            onCitation={openCitation}
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <section className="agent-panel">
+    <section className="agent-panel research-workspace">
       <div className="ai-heading">
         <div>
-          <strong>Research</strong>
-          <div className="muted">Real paper + web search · cited briefs</div>
+          <strong>Deep Research</strong>
+          <div className="muted">Multi-source investigation · verified claims · cited reports</div>
         </div>
         {session && (
           <span className="muted">
-            {session.status.toUpperCase()} · {session.sources.length} source(s)
+            {session.status.toUpperCase()} · {session.sources.length} source(s) · {(session.depth || 'standard').toUpperCase()}
           </span>
         )}
       </div>
@@ -336,15 +1167,62 @@ export function ResearchPanel(props: ResearchPanelProps) {
               disabled={starting || running}
             />
             <div className="composer-footer">
-              <span className="muted">{objective.length}/2000</span>
-              <button
-                type="submit"
-                disabled={starting || running || !objective.trim()}
-              >
-                {starting ? 'Starting…' : running ? 'Research running…' : 'Start research'}
-              </button>
+              <span className="research-options">
+                <select
+                  aria-label="Research depth"
+                  value={depth}
+                  onChange={(event) => setDepth(event.target.value as KryomResearchDepth)}
+                  disabled={starting || running}
+                  title="Quick: few sources, fast. Standard: verified claims. Deep: broad discovery plus refinement."
+                >
+                  <option value="quick">Quick</option>
+                  <option value="standard">Standard</option>
+                  <option value="deep">Deep</option>
+                </select>{' '}
+                <select
+                  aria-label="Research model"
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                  disabled={starting || running || models.length === 0}
+                  title="Model for planning and synthesis. Default when unset."
+                >
+                  <option value="">Default model</option>
+                  {models.map((entry) => (
+                    <option key={entry.modelId} value={entry.modelId}>
+                      {entry.displayName}
+                    </option>
+                  ))}
+                </select>
+              </span>
+              <span>
+                <span className="muted">{objective.length}/2000</span>{' '}
+                <button
+                  type="submit"
+                  disabled={starting || running || !objective.trim()}
+                >
+                  {starting ? 'Starting…' : running ? 'Research running…' : 'Start research'}
+                </button>
+              </span>
             </div>
           </form>
+
+          {!session && !starting && (
+            <div className="plan-commands">
+              <strong>Try an example</strong>
+              {EXAMPLE_PROMPTS.map((example) => (
+                <div key={example} className="command-row">
+                  <code>{example}</code>
+                  <button
+                    className="secondary-button"
+                    onClick={() => setObjective(example)}
+                    disabled={starting || running}
+                  >
+                    Use
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {error && (
             <div className="ai-error" role="alert">
@@ -356,51 +1234,108 @@ export function ResearchPanel(props: ResearchPanelProps) {
             </div>
           )}
 
-          {sessions.length > 0 && (
-            <details className="sessions-disclosure">
-              <summary>
-                Recent sessions ({sessions.length > 6 ? '6+' : sessions.length})
-              </summary>
-              <div className="plan-commands">
-                {sessions.slice(0, 6).map((entry) => (
+          <div className="plan-commands">
+            <form
+              className="composer-footer"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void searchSessions()
+              }}
+            >
+              <input
+                aria-label="Search sessions"
+                placeholder="Search saved research…"
+                value={sessionQuery}
+                onChange={(event) => setSessionQuery(event.target.value)}
+              />
+              <button type="submit" className="secondary-button">
+                Search
+              </button>
+            </form>
+            {sessions.length > 0 && (
+              <>
+                <strong>Sessions ({sessions.length})</strong>
+                {sessions.slice(0, 8).map((entry) => (
                   <div key={entry.id} className="command-row">
                     <code>
                       {entry.status} · {entry.sources} src ·{' '}
-                      {entry.objective.slice(0, 80)}
+                      {(entry.name && entry.name.trim() ? entry.name : entry.objective).slice(0, 80)}
                     </code>
-                    <button
-                      className="secondary-button"
-                      onClick={() => void select(entry.id)}
-                      disabled={working || session?.id === entry.id}
-                    >
-                      {session?.id === entry.id ? 'Current' : 'Open'}
-                    </button>
+                    <span className="source-actions">
+                      <button
+                        className="secondary-button"
+                        onClick={() => void select(entry.id)}
+                        disabled={working || session?.id === entry.id}
+                      >
+                        {session?.id === entry.id ? 'Current' : 'Open'}
+                      </button>
+                      <button
+                        className="secondary-button"
+                        onClick={() => void removeSession(entry.id)}
+                        disabled={working}
+                        title="Delete this session"
+                        aria-label={`Delete session ${entry.id}`}
+                      >
+                        Delete
+                      </button>
+                    </span>
                   </div>
                 ))}
-              </div>
-            </details>
-          )}
+              </>
+            )}
+          </div>
 
           {session && (
             <div className="plan-view">
-              <p className="muted padded">
-                {session.objective} · {session.statusDetail}
-              </p>
-
               <div className="composer-footer padded">
-                <span className="muted">
-                  {running
-                    ? 'Running — progress below reflects completed work only.'
-                    : `Ended: ${session.status}.`}
-                </span>
+                {renaming ? (
+                  <span>
+                    <input
+                      aria-label="Session name"
+                      value={draftName}
+                      maxLength={120}
+                      onChange={(event) => setDraftName(event.target.value)}
+                      placeholder="Session name"
+                    />{' '}
+                    <button
+                      className="secondary-button"
+                      onClick={() => void rename()}
+                      disabled={working || !draftName.trim()}
+                    >
+                      Save
+                    </button>{' '}
+                    <button
+                      className="secondary-button"
+                      onClick={() => setRenaming(false)}
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <span className="muted">
+                    {sessionTitle(session)} · {session.statusDetail}
+                  </span>
+                )}
                 <span>
+                  {!renaming && (
+                    <button
+                      className="secondary-button"
+                      onClick={() => {
+                        setDraftName(session.name || '')
+                        setRenaming(true)
+                      }}
+                      disabled={working}
+                    >
+                      Rename
+                    </button>
+                  )}{' '}
                   {running && (
                     <button
                       className="secondary-button"
                       onClick={() => void cancel()}
                       disabled={working}
                     >
-                      {working ? 'Cancelling…' : 'Cancel'}
+                      {working ? 'Cancelling…' : 'Stop'}
                     </button>
                   )}
                   {resumable && (
@@ -415,223 +1350,37 @@ export function ResearchPanel(props: ResearchPanelProps) {
                 </span>
               </div>
 
-              <div className="plan-commands">
-                <strong>Progress</strong>
-                {session.steps.map((step) => (
-                  <div key={step.id} className="command-row">
-                    <code>
-                      [{stepIcon(step.status)}] {step.label}
-                      {step.detail ? ` — ${step.detail}` : ''}
-                      {step.error ? ` — ERROR: ${step.error}` : ''}
-                    </code>
-                  </div>
+              <div className="research-tabs" role="tablist" aria-label="Research views">
+                {TABS.map((entry) => (
+                  <button
+                    key={entry.id}
+                    role="tab"
+                    aria-selected={tab === entry.id}
+                    className={tab === entry.id ? 'research-tab active' : 'research-tab'}
+                    onClick={() => setTab(entry.id)}
+                  >
+                    {entry.label}
+                    {entry.id === 'sources' && session.sources.length > 0 ? ` (${session.sources.length})` : ''}
+                    {entry.id === 'evidence' && (session.claims || []).length > 0 ? ` (${session.claims?.length})` : ''}
+                    {entry.id === 'findings' && session.findings.length > 0 ? ` (${session.findings.length})` : ''}
+                  </button>
                 ))}
               </div>
 
-              {session.errors.length > 0 && (
-                <div className="plan-commands">
-                  <strong>Errors ({session.errors.length})</strong>
-                  {session.errors.slice(0, 8).map((entry, index) => (
-                    <div key={index} className="command-row">
-                      <code>
-                        {entry.where}: {entry.message}
-                      </code>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="plan-commands">
-                <strong>
-                  Sources ({session.sources.length})
-                </strong>
-                {session.sources.length === 0 ? (
-                  <p className="muted">No sources yet.</p>
-                ) : (
-                  session.sources.map((source, index) => (
-                    <div key={`${source.url}-${index}`} className="command-row">
-                      <code>
-                        [{index + 1}] {source.title} [{source.sourceType}] (
-                        {source.accessStatus}) — {source.url}
-                      </code>
-                      <span className="source-actions">
-                        {isOpenableUrl(source.url) && (
-                          <button
-                            className="secondary-button"
-                            onClick={() => void openSource(source.url)}
-                            title="Open in your browser"
-                          >
-                            Open
-                          </button>
-                        )}
-                        <button
-                          className="secondary-button"
-                          onClick={() => void copyText(source.url, index)}
-                        >
-                          {copied === index ? 'Copied' : 'Copy'}
-                        </button>
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div className="plan-commands">
-                <strong>Findings ({session.findings.length})</strong>
-                {session.findings.length === 0 ? (
-                  <p className="muted">
-                    {running
-                      ? 'Findings appear here once synthesis completes.'
-                      : 'No findings were recorded for this session.'}
-                  </p>
-                ) : (
-                  session.findings.map((finding, index) => {
-                    // Backend citations are 1-based: sources[n - 1].
-                    // Non-numeric or out-of-range entries render as
-                    // unavailable instead of resolving wrongly.
-                    const cited = finding.sourceIndexes
-                      .map((sourceIndex) => {
-                        const source =
-                          typeof sourceIndex === 'number' &&
-                          Number.isInteger(sourceIndex)
-                            ? session.sources[sourceIndex - 1]
-                            : undefined
-
-                        return source
-                          ? `[${sourceIndex}] ${source.title}`
-                          : null
-                      })
-                      .filter((entry): entry is string => entry !== null)
-                    const missing = finding.sourceIndexes.length - cited.length
-
-                    return (
-                      <div key={index} className="command-row finding-row">
-                        <div className="finding-body">
-                          <span>{finding.claim}</span>
-                          <span className="muted">
-                            Confidence: {finding.confidence}
-                            {finding.note ? ` · ${finding.note}` : ''}
-                          </span>
-                          <span className="muted">
-                            {cited.length > 0
-                              ? cited.join(' · ')
-                              : 'No sources cited'}
-                            {missing > 0
-                              ? ` · ${missing} reference(s) unavailable`
-                              : ''}
-                          </span>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-
-              {session.evidence.length > 0 && (
-                <div className="plan-commands">
-                  <strong>Evidence ({session.evidence.length})</strong>
-                  {session.evidence.slice(0, 12).map((entry, index) => (
-                    <div key={index} className="command-row finding-row">
-                      <div className="finding-body">
-                        <span className="muted">{entry.sourceUrl}</span>
-                        <span>{entry.excerpt.slice(0, 400)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {session.implementationTasks.length > 0 && (
-                <div className="plan-commands">
-                  <strong>
-                    Implementation tasks ({session.implementationTasks.length})
-                  </strong>
-                  {session.implementationTasks.map((task, index) => (
-                    <div key={index} className="command-row">
-                      <code>
-                        {index + 1}. {task}
-                      </code>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {session.verification.length > 0 && (
-                <div className="plan-commands">
-                  <strong>Verification ({session.verification.length})</strong>
-                  {session.verification.map((check, index) => (
-                    <div key={index} className="command-row">
-                      <code>
-                        {index + 1}. {check}
-                      </code>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {session.decisions.length > 0 && (
-                <div className="plan-commands">
-                  <strong>Decisions ({session.decisions.length})</strong>
-                  {session.decisions.map((decision, index) => (
-                    <div key={index} className="command-row">
-                      <code>{decision.text}</code>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {session.brief.version > 0 && (
-                <div className="plan-commands">
-                  <strong>
-                    Research Brief v{session.brief.version} ({session.brief.via})
-                  </strong>
-                  <div className="composer-footer">
-                    <span className="muted">
-                      {session.brief.generatedAt
-                        ? `Generated ${session.brief.generatedAt.slice(0, 10)}`
-                        : ''}
-                    </span>
-                    <button
-                      className="secondary-button"
-                      onClick={() => setShowBrief((open) => !open)}
-                    >
-                      {showBrief ? 'Hide brief' : 'Show brief'}
-                    </button>
-                  </div>
-                  <div className="composer-footer">
-                    <select
-                      value={exportTemplate}
-                      onChange={(event) => setExportTemplate(event.target.value)}
-                      aria-label="Brief export template"
-                      disabled={exporting}
-                    >
-                      <option value="report">Report template</option>
-                      <option value="technical">Technical template</option>
-                    </select>
-                    <button
-                      className="secondary-button"
-                      disabled={exporting}
-                      onClick={() => void exportBrief(session.id)}
-                      title="Export this brief with its cited sources to a .docx file"
-                    >
-                      {exporting ? 'Exporting…' : 'Export .docx'}
-                    </button>
-                  </div>
-                  {showBrief && (
-                    <div className="brief-body">
-                      <MarkdownLite
-                        text={session.brief.markdown.slice(0, 12000)}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
+              {tab === 'overview' && renderOverview()}
+              {tab === 'plan' && renderPlan()}
+              {tab === 'sources' && renderSources()}
+              {tab === 'evidence' && renderEvidence()}
+              {tab === 'findings' && renderFindings()}
+              {tab === 'report' && renderReport()}
 
               <div className="composer-footer padded">
                 <span className="muted">
                   {session.brief.version > 0
-                    ? 'Brief ready for chat and implementation.'
-                    : 'Brief appears here once synthesis completes.'}
+                    ? 'Report ready for chat and implementation.'
+                    : running
+                      ? 'Running — progress above reflects completed work only.'
+                      : `Ended: ${session.status}.`}
                 </span>
                 <span>
                   <button
@@ -646,8 +1395,8 @@ export function ResearchPanel(props: ResearchPanelProps) {
                     disabled={session.brief.version === 0}
                     title={
                       session.brief.version === 0
-                        ? 'Available once the brief is ready'
-                        : 'Plan implementation from this brief'
+                        ? 'Available once the report is ready'
+                        : 'Plan implementation from this report'
                     }
                   >
                     Implement from Research

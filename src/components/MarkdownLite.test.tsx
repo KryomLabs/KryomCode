@@ -95,4 +95,19 @@ describe('MarkdownLite', () => {
     expect(container.querySelector('script')).toBeNull()
     expect(container.textContent).toContain('<img src=x onerror=alert(1)>')
   })
+
+  it('renders citations as buttons only when wired', () => {
+    const onCitation = vi.fn()
+    const { rerender } = render(
+      <MarkdownLite text={'Claim text [1] and more [2].'} onCitation={onCitation} />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open source 1' }))
+    expect(onCitation).toHaveBeenCalledWith(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Open source 2' }))
+    expect(onCitation).toHaveBeenCalledWith(2)
+
+    rerender(<MarkdownLite text={'Claim text [1] and more [2].'} />)
+    expect(screen.queryByRole('button', { name: 'Open source 1' })).toBeNull()
+  })
 })

@@ -359,6 +359,21 @@ contextBridge.exposeInMainWorld('kryom', {
   selectResearch: (payload) =>
     ipcRenderer.invoke('research:select', payload),
 
+  renameResearch: (payload) =>
+    ipcRenderer.invoke('research:rename', payload),
+
+  deleteResearch: (payload) =>
+    ipcRenderer.invoke('research:delete', payload),
+
+  searchResearch: (payload) =>
+    ipcRenderer.invoke('research:search', payload),
+
+  exportResearch: (payload) =>
+    ipcRenderer.invoke('research:export', payload),
+
+  handoffResearch: (payload) =>
+    ipcRenderer.invoke('research:handoff', payload),
+
   listMemories: () =>
     ipcRenderer.invoke('memory:list'),
 

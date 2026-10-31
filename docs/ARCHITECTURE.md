@@ -69,6 +69,7 @@ before calling a service.
 | `agent:orch-start/advance/approve/retry/cancel/get/list` | Orchestrated runs: approved-plan start, wave advance, per-task approval, budgeted retry, cancel, status |
 | `settings:get/update` | Validated preference store |
 | `research:start/status/active/list/get/brief/cancel/resume/select` | Background research runs, persisted sessions, cited briefs |
+| `research:rename/delete/search/export/handoff` | Deep-research session management, Markdown/HTML report export, labeled research-to-chat/agent handoffs |
 | `app:get-version/get-ai-status/open-external` | Version info, key presence, validated browser opening |
 | `ui:get/set/context` | UI state store; renderer capability/dirty-count pushes |
 | `memory:list/get/create/update/delete/delete-all/export` | Per-project memory records with provenance + staleness; bulk delete; JSON export via save dialog |

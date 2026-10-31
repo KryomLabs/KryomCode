@@ -23,7 +23,7 @@ kryomcode/
 │   │   ├── diagnostics.ipc.cjs  # diagnostics:run + quality/get/list
 │   │   ├── project-intelligence.ipc.cjs  # intelligence:summary/context + index-status/refresh/freshness + symbols/symbol/references/search/impact/architecture
 │   │   ├── settings.ipc.cjs     # settings:get/update
-│   │   ├── research.ipc.cjs     # research:start/status/active/list/get/brief/cancel/resume/select
+│   │   ├── research.ipc.cjs     # research:start/status/active/list/get/brief/cancel/resume/select/rename/delete/search/export/handoff
 │   │   ├── documents.ipc.cjs    # documents:export-brief/export-text/import
 │   │   ├── app.ipc.cjs          # app:get-version/get-ai-status/open-external, ui:get/set/context
 │   │   ├── memory.ipc.cjs       # memory:list/get/create/update/delete/delete-all/export
@@ -53,7 +53,7 @@ kryomcode/
 │   │   ├── orchestration/       # orchestrator.service: approved-plan runs, owned-file merges (+test)
 │   │   ├── quality/             # quality.service: computed quality reports (+test)
 │   │   ├── settings/            # settings.service (+test), secrets.service (MODEL_API_KEY allowlist)
-│   │   ├── research/            # research.service, session-store, brief.service, search-providers, url-fetch.service (+tests)
+│   │   ├── research/            # research.service, session-store, brief.service, search-providers, url-fetch.service, depth-profiles, planner, evidence, credibility (+tests)
 │   │   ├── documents/           # document.service: .docx export/import (+test)
 │   │   ├── ui/                  # ui-state.service: auto-save, recents (+test)
 │   │   ├── crash/               # crash-recovery: pure recovery policy (+test)
@@ -131,7 +131,7 @@ kryomcode/
 | `ProfilePanel.tsx` | None directly (props from `App.tsx`) |
 | `ProviderSettings.tsx` | `listProviders`, `getProviderSelection`, `configureProvider`, `listProviderModels`, `testProvider`, `getProviderKeyStatus`, `setProviderKey`, `removeProviderKey`, `getAIStatus` |
 | `QuickOpen.tsx` | None directly (works over the `App.tsx`-owned tree) |
-| `ResearchPanel.tsx` | `listResearch`, `getResearchStatus`, `startResearch`, `cancelResearch`, `resumeResearch`, `selectResearch`, `exportBriefDocx`, `openExternal` |
+| `ResearchPanel.tsx` | Deep Research workspace (Overview/Plan/Sources/Evidence/Findings/Report tabs): `listResearch`, `searchResearch`, `getResearchStatus`, `getActiveResearch`, `startResearch`, `cancelResearch`, `resumeResearch`, `selectResearch`, `renameResearch`, `deleteResearch`, `exportResearch`, `handoffResearch`, `exportBriefDocx`, `saveAs`, `openExternal`, `listProviderModels` |
 | `ResizeHandle.tsx` | None (pure layout) |
 | `SearchPanel.tsx` | `searchFiles` |
 | `SettingsModal.tsx` | `updateSettings` (embeds `ProviderSettings`) |
