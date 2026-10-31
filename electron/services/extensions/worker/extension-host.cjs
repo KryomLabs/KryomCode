@@ -257,12 +257,12 @@ class ExtensionHost {
         resolve({ kind: 'result', ok: false, error: this.deathReason })
       }, timeoutMs)
 
-      // Node timers keep the loop alive; a pure timeout handle must
-      // never hold the main process open by itself.
-      if (typeof timer.unref === 'function') {
-        timer.unref()
-      }
-
+      // The timer stays referenced on purpose: it is the settlement
+      // guarantee for this request. An unref'd timer never fires once
+      // the loop would otherwise drain (no live transport handles),
+      // stranding the promise forever instead of timing out. The hold
+      // is bounded (the timer always fires or is cleared on settle),
+      // so it cannot wedge the process open.
       this.pending.set(seq, { timer, settle: resolve })
 
       try {

@@ -51,9 +51,10 @@ function useTestKey() {
 async function openWorkspace(prefix = 'kryom-repair-') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix))
 
-  await setWorkspaceRoot(root)
-
-  return root
+  // Return the canonical root the workspace actually runs under: the
+  // raw temp path can carry symlinked ancestors (/var on macOS) that
+  // never string-match service-returned canonical paths.
+  return setWorkspaceRoot(root)
 }
 
 async function makePlan(task = 'Fix the build.') {

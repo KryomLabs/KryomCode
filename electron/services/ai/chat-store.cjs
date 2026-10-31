@@ -74,7 +74,19 @@ async function saveChat(messages, { root } = {}) {
   }
 
   const activeId = await getActiveSessionId(target)
-  const previous = await readSessionFile(target, activeId)
+
+  // The previous title is advisory: when the existing file cannot be
+  // read safely (a planted symlink the read path correctly refuses,
+  // or any other IO failure), there is no title to preserve and the
+  // write below replaces the hostile entry via link-safe rename. The
+  // write path re-validates everything, so nothing is masked.
+  let previous = null
+
+  try {
+    previous = await readSessionFile(target, activeId)
+  } catch {
+    previous = null
+  }
   const clean = sanitizeMessages(messages)
 
   const stored = await writeSessionFile(target, activeId, {

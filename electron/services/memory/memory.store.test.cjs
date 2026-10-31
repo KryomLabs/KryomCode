@@ -56,9 +56,10 @@ const GIT_AVAILABLE = hasGit()
 async function openWorkspace(prefix = 'kryom-memory-') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix))
 
-  await setWorkspaceRoot(root)
-
-  return root
+  // Return the canonical root the workspace actually runs under: the
+  // raw temp path can carry symlinked ancestors (/var on macOS) that
+  // never string-match the resolved root in identity checks.
+  return setWorkspaceRoot(root)
 }
 
 async function writeSourceFile(root, name, content) {
