@@ -208,7 +208,10 @@ async function waitFor(check, timeoutMs = 10000) {
 describe('ipc integration', () => {
   before(async () => {
     userDataDir = await makeTempDir('kryom-ipc-userdata-')
-    sharedRoot = await makeTempDir('kryom-ipc-workspace-')
+    // Canonical from birth: the raw temp path can carry symlinked
+    // ancestors (/var on macOS) that never string-match the resolved
+    // paths services return for this workspace.
+    sharedRoot = await fs.realpath(await makeTempDir('kryom-ipc-workspace-'))
     await fs.writeFile(
       path.join(sharedRoot, 'hello.txt'),
       'hello ipc\n'
