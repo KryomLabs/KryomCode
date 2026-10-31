@@ -3,7 +3,7 @@
 // by the backend .cjs suite). Dialog flows run through the real
 // DialogProvider.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { DialogProvider } from './dialogs'
 import { ChatSessions } from './ChatSessions'
 
@@ -126,6 +126,11 @@ function renderSessions() {
 }
 
 afterEach(() => {
+  // Unmount first while the bridge double is still installed: the
+  // restore/save effects settle against live mocks, and only then
+  // are the globals torn down. Deleting first races still-mounted
+  // effects and throws bridge-unavailable flakes.
+  cleanup()
   Reflect.deleteProperty(window, 'kryom')
   vi.restoreAllMocks()
 })
@@ -192,9 +197,13 @@ describe('ChatSessions', () => {
       target: { value: 'Auth deep dive' },
     })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }))
-    expect(bridge.renameChatSession).toHaveBeenCalledWith({
-      id: 's2',
-      title: 'Auth deep dive',
+    // The dialog resolves asynchronously, so the bridge call lands
+    // a microtask after the click, not synchronously with it.
+    await waitFor(() => {
+      expect(bridge.renameChatSession).toHaveBeenCalledWith({
+        id: 's2',
+        title: 'Auth deep dive',
+      })
     })
     expect(await screen.findByRole('tab', { name: 'Auth deep dive' })).not.toBeNull()
   })
@@ -218,7 +227,11 @@ describe('ChatSessions', () => {
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText(/permanently deleted/)).not.toBeNull()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
-    expect(bridge.deleteChatSession).toHaveBeenCalledWith({ id: 's2' })
+    // The confirm dialog resolves asynchronously; the delete lands
+    // a microtask after the click, not synchronously with it.
+    await waitFor(() => {
+      expect(bridge.deleteChatSession).toHaveBeenCalledWith({ id: 's2' })
+    })
     await waitFor(() => {
       expect(screen.queryByRole('tab', { name: 'Debug auth' })).toBeNull()
     })

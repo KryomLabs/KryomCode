@@ -75,7 +75,7 @@ describe('HomeHero', () => {
     fireEvent.change(screen.getByLabelText('Chat prompt'), {
       target: { value: '   ' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Send' })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(onSubmit).not.toHaveBeenCalled()
   })
 })

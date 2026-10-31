@@ -122,9 +122,18 @@ export function AiChat(props: AiChatProps) {
 
   useEffect(() => {
     if (stickRef.current) {
-      messagesRef.current?.scrollTo({
-        top: messagesRef.current.scrollHeight,
-      })
+      const element = messagesRef.current
+
+      if (element) {
+        // scrollTo is universal in Chromium (the shipped runtime)
+        // but absent from minimal DOMs such as jsdom; assign
+        // scrollTop there so the stick-to-bottom intent still holds.
+        if (typeof element.scrollTo === 'function') {
+          element.scrollTo({ top: element.scrollHeight })
+        } else {
+          element.scrollTop = element.scrollHeight
+        }
+      }
     }
   }, [messages, loading])
 

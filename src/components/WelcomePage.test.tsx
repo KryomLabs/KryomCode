@@ -3,7 +3,7 @@
 // which call the desktop bridge. The bridge is a mock installed via
 // defineProperty (no casts); everything else is the production path.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { DialogProvider } from './dialogs'
 import { WelcomePage, type DiscoveryMode } from './WelcomePage'
 
@@ -83,6 +83,11 @@ function baseProps(mode: DiscoveryMode) {
 }
 
 afterEach(() => {
+  // Unmount first while the bridge double is still installed: the
+  // restore/save effects settle against live mocks, and only then
+  // are the globals torn down. Deleting first races still-mounted
+  // effects and throws bridge-unavailable flakes.
+  cleanup()
   Reflect.deleteProperty(window, 'kryom')
   vi.restoreAllMocks()
 })

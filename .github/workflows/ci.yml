@@ -100,7 +100,9 @@ jobs:
 
       # Full layout gate is Windows-only: check-release-contents.cjs
       # asserts the win-unpacked layout (KryomCode.exe). Other platforms
-      # assert the deterministic app.asar output path instead.
+      # assert the app.asar output path instead. The macOS dir target is
+      # arch-dependent (release/mac on x64, release/mac-arm64 on the
+      # arm64 macos-latest runners), so both are accepted.
       - name: Verify release contents (Windows)
         if: runner.os == 'Windows'
         run: npm run check:release
@@ -108,7 +110,16 @@ jobs:
       - name: Verify app bundle (macOS)
         if: runner.os == 'macOS'
         shell: bash
-        run: test -f 'release/mac/KryomCode.app/Contents/Resources/app.asar'
+        run: |
+          if test -f 'release/mac/KryomCode.app/Contents/Resources/app.asar'; then
+            echo 'macOS bundle ok: release/mac.'
+          elif test -f 'release/mac-arm64/KryomCode.app/Contents/Resources/app.asar'; then
+            echo 'macOS bundle ok: release/mac-arm64.'
+          else
+            echo 'macOS bundle missing under release/mac*/KryomCode.app.'
+            ls release || true
+            exit 1
+          fi
 
       - name: Verify unpacked app (Linux)
         if: runner.os == 'Linux'

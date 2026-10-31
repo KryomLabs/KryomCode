@@ -2,24 +2,28 @@
 // stylesheets consume must be defined, in both themes, and the
 // files must stay brace-balanced. Regression cover for the
 // tokenization pass that left 20+ --kc-* tokens referenced but
-// undefined (transparent inputs, invisible hovers). Bundles the real
-// CSS sources via ?raw; no CSSOM needed.
+// undefined (transparent inputs, invisible hovers). Reads the real
+// CSS sources from disk (the harness resolves `?raw` CSS imports to
+// empty strings, so bundler imports cannot be trusted here); no
+// CSSOM needed.
 import { describe, expect, it } from 'vitest'
-import appSource from './app.css?raw'
-import heroSource from './hero.css?raw'
-import metaSource from './meta-ai.css?raw'
-import themeSource from './theme.css?raw'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
 
 function load(name: 'app' | 'hero' | 'meta' | 'theme'): string {
-  if (name === 'app') {
-    return appSource
-  }
+  const file =
+    name === 'app'
+      ? 'app.css'
+      : name === 'hero'
+        ? 'hero.css'
+        : name === 'meta'
+          ? 'meta-ai.css'
+          : 'theme.css'
 
-  if (name === 'hero') {
-    return heroSource
-  }
-
-  return name === 'meta' ? metaSource : themeSource
+  return readFileSync(join(HERE, file), 'utf8')
 }
 
 function stripComments(css: string): string {

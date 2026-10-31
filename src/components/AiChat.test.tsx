@@ -2,7 +2,7 @@
 // and excerpt injection into the request context. Uncontrolled
 // (local state) plus the controlled props ChatSessions uses.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { AiChat } from './AiChat'
 
 function mockBridge() {
@@ -57,6 +57,11 @@ function renderChat() {
 }
 
 afterEach(() => {
+  // Unmount first while the bridge double is still installed: the
+  // restore/save effects settle against live mocks, and only then
+  // are the globals torn down. Deleting first races still-mounted
+  // effects and throws bridge-unavailable flakes.
+  cleanup()
   Reflect.deleteProperty(window, 'kryom')
   vi.restoreAllMocks()
 })
